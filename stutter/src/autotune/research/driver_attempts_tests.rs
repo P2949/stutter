@@ -17,6 +17,7 @@ struct Host {
     current: u32,
     unsafe_until_tick: u32,
     ticks: u32,
+    health: bool,
     /// Every factor set the driver enabled before a study, shared so a test can read it back.
     seen_factors:
         std::sync::Arc<std::sync::Mutex<Vec<Vec<crate::autotune::research::ResearchFactor>>>>,
@@ -31,11 +32,15 @@ impl Host {
             unsafe_until_tick: 0,
             ticks: 0,
             seen_factors: Default::default(),
+            health: false,
         }
     }
 }
 
 impl AttemptHost for Host {
+    fn health_blocked(&mut self) -> bool {
+        self.health
+    }
     fn set_enabled_factors(&mut self, factors: &[crate::autotune::research::ResearchFactor]) {
         self.seen_factors.lock().unwrap().push(factors.to_vec());
     }
@@ -380,5 +385,296 @@ fn inputs_for(study: &ChildStudy) -> StudyInputs {
             crate::autotune::research::child_study::Stage::Confirm
         )
         .then(|| crate::autotune::research::pilot_rule::freeze(&[70.0, 73.0, 67.0]).unwrap()),
+    }
+}
+
+#[test]
+fn the_controllers_fence_runs_before_each_launch_and_every_driver_step_is_observable() {
+    let (_root, mut runner, study, _) = attempts(Host::finishing());
+    let mut fenced = 0;
+    let mut steps = Vec::new();
+    for _ in 0..200 {
+        let done = runner
+            .poll_fenced(&study, 100, &mut || {
+                fenced += 1;
+                Ok(())
+            })
+            .unwrap();
+        steps.extend(runner.take_step());
+        // A step is taken once: asking again yields nothing until the next tick.
+        assert!(runner.take_step().is_none());
+        if done.is_some() {
+            break;
+        }
+    }
+    // One launch per attempt, and the fence ran exactly before each.
+    assert_eq!(fenced, study.min_attempts);
+    assert!(steps.iter().any(|s| matches!(s, Step::Running(_))));
+    assert!(steps.iter().any(|s| matches!(s, Step::Sealed(_))));
+    assert_eq!(steps.last(), Some(&Step::Done));
+}
+
+#[test]
+fn a_fence_that_refuses_stops_the_launch_and_the_error_surfaces() {
+    let (_root, mut runner, study, _) = attempts(Host::finishing());
+    let refused = runner.poll_fenced(&study, 100, &mut || anyhow::bail!("lease not launching"));
+    // The first tick would arm a launch: the refusing fence makes the tick fail, never launch.
+    assert!(refused.is_err() || runner.take_step().is_none());
+}
+
+mod funnel {
+    use super::*;
+    use crate::autotune::research::{
+        child_study::StudyResult,
+        funnel_driver::FunnelDriver,
+        study_executor::{ProfileFailure, ProfileHook},
+    };
+
+    /// No graphics settings are touched: the funnel's profile boundary is exercised elsewhere.
+    struct NoProfiles;
+    impl ProfileHook for NoProfiles {
+        fn apply(
+            &mut self,
+            _: crate::autotune::research::child_study::Profile,
+        ) -> Result<bool, ProfileFailure> {
+            Ok(false)
+        }
+        fn recover(&mut self) -> Result<(), &'static str> {
+            Ok(())
+        }
+        fn restore(&mut self) -> Result<(), &'static str> {
+            Ok(())
+        }
+    }
+
+    fn no_blocker(_: &ChildStudy) -> Option<&'static str> {
+        None
+    }
+
+    fn funnel(
+        host: Host,
+        clock_offset: u64,
+    ) -> (tempfile::TempDir, FunnelDriver, ResearchIntentV1) {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let campaign = File::open(root.path()).unwrap();
+        let parent = parent();
+        let mut now = parent.issued_unix_seconds + clock_offset;
+        let attempts = DriverStudyAttempts::new(
+            campaign.try_clone().unwrap(),
+            parent.clone(),
+            Box::new(host),
+            Box::new(move || {
+                now += 1;
+                now
+            }),
+            Box::new(|| Ok(())),
+            Box::new(|_| std::path::PathBuf::from("/nonexistent")),
+            Box::new(|study| Ok(inputs_for(study))),
+        );
+        let driver = FunnelDriver::new(
+            &campaign,
+            &parent,
+            Box::new(NoProfiles),
+            attempts,
+            no_blocker,
+            Default::default(),
+        )
+        .unwrap();
+        (root, driver, parent)
+    }
+
+    #[test]
+    fn the_funnel_is_driven_one_tick_at_a_time_through_the_lease_visible_driver_steps() {
+        let (_root, mut driver, _) = funnel(Host::finishing(), 1);
+        let mut fenced = 0;
+        let mut steps = Vec::new();
+        for _ in 0..400 {
+            let step = driver
+                .tick(&mut || {
+                    fenced += 1;
+                    Ok(())
+                })
+                .unwrap();
+            let done = step == Step::Done;
+            steps.push(step);
+            if done {
+                break;
+            }
+        }
+        assert_eq!(
+            steps.last(),
+            Some(&Step::Done),
+            "the funnel ends only when every study is decided"
+        );
+        // The lease-visible steps of the inner driver come through, once per attempt.
+        assert!(steps.iter().any(|s| matches!(s, Step::Running(_))));
+        assert!(steps.iter().any(|s| matches!(s, Step::Sealed(_))));
+        // A study's own completion is never the campaign's: only one Done, and it is the last.
+        assert_eq!(steps.iter().filter(|s| **s == Step::Done).count(), 1);
+        // The fake host seals no native results, so the screens cannot qualify and everything that
+        // depends on them is blocked: every study is decided, none qualified.
+        let all = driver.dispositions();
+        assert!(all.iter().all(|d| d.result.is_some()));
+        assert!(all.iter().all(|d| d.result != Some(StudyResult::Qualified)));
+        // Launches happened only for the two screens (2 attempts each).
+        assert_eq!(fenced, 4);
+    }
+
+    #[test]
+    fn a_health_stop_halts_the_funnel_before_any_launch() {
+        let mut host = Host::finishing();
+        host.health = true;
+        let (_root, mut driver, _) = funnel(host, 1);
+        let step = driver.tick(&mut || Ok(())).unwrap();
+        assert_eq!(step, Step::Halted("BlockedGpuStability"));
+        assert!(driver.dispositions().iter().all(|d| d.result.is_none()));
+    }
+
+    #[test]
+    fn a_cancel_settles_and_ends_the_funnel_without_deciding_what_it_prevented() {
+        let (_root, mut driver, _) = funnel(Host::finishing(), 1);
+        assert!(matches!(
+            driver.tick(&mut || Ok(())).unwrap(),
+            Step::Waiting | Step::Running(_)
+        ));
+        driver.cancel();
+        assert_eq!(driver.tick(&mut || Ok(())).unwrap(), Step::Cancelled);
+        assert!(driver.dispositions().iter().all(|d| d.result.is_none()));
+        // Shutdown after a cancel has nothing left to settle.
+        assert_eq!(driver.shutdown(), Ok(()));
+    }
+
+    #[test]
+    fn a_campaign_deadline_inside_a_study_ends_the_campaign_not_just_the_study() {
+        let parent = parent();
+        let late = parent.deadline_unix_seconds - parent.issued_unix_seconds + 5;
+        let (_root, mut driver, _) = funnel(Host::finishing(), late);
+        let mut ended = None;
+        for _ in 0..50 {
+            let step = driver.tick(&mut || Ok(())).unwrap();
+            if matches!(
+                step,
+                Step::Expired | Step::ActiveBudgetExhausted | Step::Done
+            ) {
+                ended = Some(step);
+                break;
+            }
+        }
+        assert!(
+            matches!(ended, Some(Step::Expired | Step::ActiveBudgetExhausted)),
+            "{ended:?}"
+        );
+    }
+
+    #[test]
+    fn a_refusing_fence_stops_the_launch_and_halts_the_funnel_with_the_study_recorded_failed() {
+        let host = Host::finishing();
+        let (_root, mut driver, _) = funnel(host, 1);
+        let mut step = Step::Waiting;
+        for _ in 0..5 {
+            step = driver
+                .tick(&mut || anyhow::bail!("lease is not launching"))
+                .unwrap();
+            if step != Step::Waiting {
+                break;
+            }
+        }
+        // The runner records the failed executor and halts; nothing else may run.
+        assert_eq!(step, Step::Halted("ExecutorError"));
+        let first = &driver.dispositions()[0];
+        assert_eq!(first.result, Some(StudyResult::Failed));
+        assert_eq!(first.reason, "ExecutorError");
+        assert!(
+            driver.dispositions()[1..]
+                .iter()
+                .all(|d| d.result.is_none())
+        );
+    }
+}
+
+mod production_selection {
+    use super::*;
+    use crate::autotune::research::{
+        arm_selection::screen_fps,
+        child_study::{Stage, plan},
+        funnel_driver::{FunnelDriver, production_inputs},
+    };
+
+    #[test]
+    fn the_production_selector_reads_a_screens_sealed_evidence_and_refuses_a_missing_one() {
+        let (root, mut runner, study, parent) = attempts(Host::finishing());
+        run_to_end(&mut runner, &study);
+        let campaign = File::open(root.path()).unwrap();
+        let uid = crate::syscall::geteuid();
+        // The fake host sealed no native results: the screen's evidence directory reads fine and
+        // measures nothing, which is not a pair.
+        assert!(screen_fps(&campaign, uid, &study).unwrap().is_empty());
+        let mut select = production_inputs(
+            File::open(root.path()).unwrap(),
+            parent.clone(),
+            Default::default(),
+        );
+        let plan = plan(&parent).unwrap();
+        let screen = plan
+            .iter()
+            .find(|s| matches!(s.stage, Stage::Screen))
+            .unwrap();
+        assert_eq!(select(screen).unwrap().arms.len(), parent.tools.len());
+        let pilot = plan
+            .iter()
+            .find(|s| matches!(s.stage, Stage::Pilot))
+            .unwrap();
+        assert!(select(pilot).is_err(), "no measured control and candidate");
+        // A screen that never ran has no evidence directory at all.
+        let empty = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(empty.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(screen_fps(&File::open(empty.path()).unwrap(), uid, screen).is_err());
+    }
+
+    #[test]
+    fn the_funnels_host_is_reachable_for_the_controllers_observations() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let campaign = File::open(root.path()).unwrap();
+        let parent = parent();
+        let mut host = Host::finishing();
+        host.health = true;
+        let attempts = DriverStudyAttempts::new(
+            campaign.try_clone().unwrap(),
+            parent.clone(),
+            Box::new(host),
+            Box::new(|| 1),
+            Box::new(|| Ok(())),
+            Box::new(|_| std::path::PathBuf::from("/nonexistent")),
+            Box::new(|study| Ok(inputs_for(study))),
+        );
+        struct Nothing;
+        impl crate::autotune::research::study_executor::ProfileHook for Nothing {
+            fn apply(
+                &mut self,
+                _: crate::autotune::research::child_study::Profile,
+            ) -> Result<bool, crate::autotune::research::study_executor::ProfileFailure>
+            {
+                Ok(false)
+            }
+            fn recover(&mut self) -> Result<(), &'static str> {
+                Ok(())
+            }
+            fn restore(&mut self) -> Result<(), &'static str> {
+                Ok(())
+            }
+        }
+        let mut driver = FunnelDriver::new(
+            &campaign,
+            &parent,
+            Box::new(Nothing),
+            attempts,
+            |_| None,
+            Default::default(),
+        )
+        .unwrap();
+        assert!(driver.host_mut().health_blocked());
+        driver.host_mut().observe_user_input_idle(None);
     }
 }

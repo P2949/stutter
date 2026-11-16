@@ -42,6 +42,18 @@ pub trait ProfileHook {
     fn restore(&mut self) -> Result<(), &'static str>;
 }
 
+impl ProfileHook for Box<dyn ProfileHook + Send> {
+    fn apply(&mut self, profile: Profile) -> Result<bool, ProfileFailure> {
+        (**self).apply(profile)
+    }
+    fn recover(&mut self) -> Result<(), &'static str> {
+        (**self).recover()
+    }
+    fn restore(&mut self) -> Result<(), &'static str> {
+        (**self).restore()
+    }
+}
+
 /// What the attempts of one study produced.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AttemptsOutcome {
@@ -74,6 +86,19 @@ pub trait StudyAttempts {
     fn has_progress(&mut self, study: &ChildStudy) -> bool;
     /// Advance the study. `Ok(None)` means it is still running.
     fn poll(&mut self, study: &ChildStudy, budget: u32) -> anyhow::Result<Option<AttemptsOutcome>>;
+    /// As `poll`, passing the controller's launch fence to the driver.
+    fn poll_fenced(
+        &mut self,
+        study: &ChildStudy,
+        budget: u32,
+        _fence: &mut dyn FnMut() -> anyhow::Result<()>,
+    ) -> anyhow::Result<Option<AttemptsOutcome>> {
+        self.poll(study, budget)
+    }
+    /// The driver step of the last poll, taken once.
+    fn take_step(&mut self) -> Option<super::driver::Step> {
+        None
+    }
     /// Cancel the running attempt and independently settle it. `Ok` only when no game or worker
     /// owner remains (the settlement witness agrees); anything unproven is an `Err`.
     fn abort(&mut self) -> Result<(), &'static str>;
@@ -215,6 +240,19 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         study: &ChildStudy,
         remaining_attempts: u32,
     ) -> anyhow::Result<Option<StudyRun>> {
+        self.poll_fenced(study, remaining_attempts, &mut || Ok(()))
+    }
+
+    fn take_step(&mut self) -> Option<super::driver::Step> {
+        self.attempts.take_step()
+    }
+
+    fn poll_fenced(
+        &mut self,
+        study: &ChildStudy,
+        remaining_attempts: u32,
+        fence: &mut dyn FnMut() -> anyhow::Result<()>,
+    ) -> anyhow::Result<Option<StudyRun>> {
         if matches!(self.state, State::Idle) {
             // A study whose journal already holds progress was interrupted (a restart). Its
             // attempts must never be replayed, and settings are not touched until whatever it left
@@ -263,7 +301,7 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         let State::Running { applied } = self.state else {
             return Ok(None);
         };
-        let outcome = match self.attempts.poll(study, remaining_attempts) {
+        let outcome = match self.attempts.poll_fenced(study, remaining_attempts, fence) {
             Ok(None) => return Ok(None),
             Ok(Some(outcome)) => Ok(outcome),
             Err(error) => {

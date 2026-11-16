@@ -45,6 +45,8 @@ pub struct DriverStudyAttempts {
     /// the screen's results for a confirmation, feature or action study.
     select_arms: SelectArms,
     running: Option<(String, Driver)>,
+    /// The driver step of the last poll, for the controller to advance the lease from.
+    last_step: Option<Step>,
 }
 
 fn dir_name(study: &ChildStudy) -> &str {
@@ -82,7 +84,13 @@ impl DriverStudyAttempts {
             results_for,
             select_arms,
             running: None,
+            last_step: None,
         }
+    }
+
+    /// The shared attempt host, for the controller to feed its desktop observations.
+    pub fn host_mut(&mut self) -> &mut (dyn AttemptHost + Send) {
+        self.host.as_mut()
     }
 
     fn begin(&mut self, study: &ChildStudy) -> anyhow::Result<()> {
@@ -195,20 +203,37 @@ impl StudyAttempts for DriverStudyAttempts {
         self.host.abort().map_err(|_| "SettlementUnproven")
     }
 
+    fn take_step(&mut self) -> Option<Step> {
+        self.last_step.take()
+    }
+
     fn poll(
         &mut self,
         study: &ChildStudy,
+        remaining_attempts: u32,
+    ) -> anyhow::Result<Option<AttemptsOutcome>> {
+        self.poll_fenced(study, remaining_attempts, &mut || Ok(()))
+    }
+
+    fn poll_fenced(
+        &mut self,
+        study: &ChildStudy,
         _remaining_attempts: u32,
+        fence: &mut dyn FnMut() -> anyhow::Result<()>,
     ) -> anyhow::Result<Option<AttemptsOutcome>> {
         if self.running.is_none() {
             self.begin(study)?;
         }
         let now = (self.clock)();
-        let fence = &mut self.launch_fence;
+        let own_fence = &mut self.launch_fence;
         let step = match self.running.as_mut() {
-            Some((_, driver)) => driver.tick_with_launch_fence(self.host.as_mut(), now, fence)?,
+            Some((_, driver)) => driver.tick_with_launch_fence(self.host.as_mut(), now, || {
+                own_fence()?;
+                fence()
+            })?,
             None => return Ok(None),
         };
+        self.last_step = Some(step.clone());
         let halted = matches!(step, Step::Halted(_));
         match step {
             Step::Waiting | Step::Running(_) | Step::Sealed(_) => Ok(None),

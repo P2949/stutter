@@ -38,6 +38,22 @@ pub trait StudyExecutor {
         study: &ChildStudy,
         remaining_attempts: u32,
     ) -> anyhow::Result<Option<StudyRun>>;
+    /// As `poll`, with the controller's launch fence: called before a launch is armed, so the
+    /// campaign lease can durably record its launching phase first. Executors that never launch a
+    /// game ignore it.
+    fn poll_fenced(
+        &mut self,
+        study: &ChildStudy,
+        remaining_attempts: u32,
+        _fence: &mut dyn FnMut() -> anyhow::Result<()>,
+    ) -> anyhow::Result<Option<StudyRun>> {
+        self.poll(study, remaining_attempts)
+    }
+    /// The journalled driver's step from the last poll, taken once, so the controller can advance
+    /// the lease phases exactly as it does for a whole campaign.
+    fn take_step(&mut self) -> Option<super::driver::Step> {
+        None
+    }
     /// Stop the running study (health stop, cancellation, deadline or shutdown): settle its
     /// attempt and prove no owner remains, then restore whatever it changed. `Err` means that is
     /// unproven, which ends the campaign.
@@ -107,6 +123,17 @@ impl StageRunner {
         blocker: &dyn Fn(&ChildStudy) -> Option<&'static str>,
         health_blocked: &mut dyn FnMut() -> bool,
     ) -> anyhow::Result<RunnerStep> {
+        self.step_fenced(executor, blocker, health_blocked, &mut || Ok(()))
+    }
+
+    /// As `step`, passing the controller's launch fence to the executor.
+    pub fn step_fenced(
+        &mut self,
+        executor: &mut dyn StudyExecutor,
+        blocker: &dyn Fn(&ChildStudy) -> Option<&'static str>,
+        health_blocked: &mut dyn FnMut() -> bool,
+        fence: &mut dyn FnMut() -> anyhow::Result<()>,
+    ) -> anyhow::Result<RunnerStep> {
         if health_blocked() {
             // A health stop is not permission to leave a profile applied or a game unsettled: the
             // running study is settled and its settings restored first, and that proof is what the
@@ -125,7 +152,7 @@ impl StageRunner {
                 None => return Ok(RunnerStep::Done),
             },
         };
-        let run = match executor.poll(&study, remaining) {
+        let run = match executor.poll_fenced(&study, remaining, fence) {
             Ok(Some(run)) => run,
             Ok(None) => {
                 self.in_flight = Some(study);

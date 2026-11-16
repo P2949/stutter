@@ -86,7 +86,7 @@ pub(crate) trait ClaimSettlementVerifier: Send {
     ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>>;
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
     Waiting,
     Running(u32),

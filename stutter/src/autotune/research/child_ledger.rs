@@ -298,6 +298,16 @@ fn open_ledger(
     ChildLedger::open(dir, uid, super::child_study::plan(intent)?)
 }
 
+/// Open (creating it if needed) the campaign's child-study ledger over its frozen funnel plan.
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
+pub fn open_for_campaign(
+    campaign: &File,
+    uid: u32,
+    intent: &super::ResearchIntentV1,
+) -> anyhow::Result<ChildLedger> {
+    open_ledger(campaign, uid, intent, true)
+}
+
 /// At campaign end: every planned child study that the flat schedule did not execute is decided
 /// and recorded (restart-safe; already-recorded decisions are kept).
 pub fn settle_unexecuted(

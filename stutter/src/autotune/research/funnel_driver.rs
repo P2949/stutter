@@ -1,0 +1,168 @@
+//! The child-study funnel presented as a campaign driver. The resident controller drives one thing
+//! per campaign and advances its lease from that thing's `Step`; this adapter lets the funnel be
+//! that thing without changing any lease logic. Each tick polls the stage runner once and returns
+//! the inner journalled driver's step (so the lease walks `Launching -> Sealing -> Analysing ->
+//! NextArm -> AwaitSafeWindow` per attempt exactly as for a flat campaign), a campaign-level
+//! termination (`Expired`, `ActiveBudgetExhausted`, `Cancelled`, `Halted`) when one occurs, and
+//! `Done` only when every planned study has a recorded decision.
+
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
+
+use super::{
+    ResearchIntentV1,
+    arm_selection::{screen_fps, screen_of, select_pair},
+    child_ledger::{Disposition, open_for_campaign},
+    child_runner::{RunnerStep, StageRunner},
+    child_study::{ChildStudy, Stage, StudyArms},
+    driver::{AttemptHost, Step},
+    driver_attempts::{DriverStudyAttempts, SelectArms, StudyInputs},
+    pilot_rule::FrozenConfirmationRule,
+    study_executor::{HostStudyExecutor, ProfileHook},
+};
+
+/// The rules qualified pilots froze, by pilot study digest: written from the ledger by the funnel,
+/// read when a confirmation's inputs are chosen.
+pub type RuleRegistry = Arc<Mutex<BTreeMap<String, FrozenConfirmationRule>>>;
+
+/// The arms and rule of one child study, from its screen's measured FPS and the pilot's rule. A
+/// screen runs across every authorized tool; every other stage across the control and the best
+/// candidate; a confirmation also needs the rule its pilot froze.
+pub fn inputs_for_study(
+    parent: &ResearchIntentV1,
+    study: &ChildStudy,
+    fps: &BTreeMap<super::ProtonSource, Vec<f64>>,
+    rule: Option<FrozenConfirmationRule>,
+) -> anyhow::Result<StudyInputs> {
+    Ok(match study.arms() {
+        StudyArms::All => StudyInputs {
+            arms: parent.tools.iter().map(|tool| tool.source).collect(),
+            rule: None,
+        },
+        StudyArms::Pair => StudyInputs {
+            arms: select_pair(parent, fps)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("the screen did not measure a control and a candidate")
+                })?
+                .to_vec(),
+            rule: match study.stage {
+                Stage::Confirm => {
+                    Some(rule.ok_or_else(|| anyhow::anyhow!("the pilot froze no rule"))?)
+                }
+                _ => None,
+            },
+        },
+    })
+}
+
+/// The production selector over a campaign's sealed screen evidence and the rule registry.
+pub fn production_inputs(
+    campaign: std::fs::File,
+    parent: ResearchIntentV1,
+    rules: RuleRegistry,
+) -> SelectArms {
+    Box::new(move |study| {
+        let fps = match study.arms() {
+            StudyArms::All => BTreeMap::new(),
+            StudyArms::Pair => screen_fps(&campaign, parent.uid, &screen_of(&parent, study)?)?,
+        };
+        let rule = study
+            .depends_on
+            .iter()
+            .find_map(|digest| rules.lock().ok()?.get(digest).cloned());
+        inputs_for_study(&parent, study, &fps, rule)
+    })
+}
+
+pub struct FunnelDriver {
+    runner: StageRunner,
+    executor: HostStudyExecutor<Box<dyn ProfileHook + Send>, DriverStudyAttempts>,
+    /// Studies this build cannot run are decided with their blocker, never run or dropped.
+    blocker: fn(&ChildStudy) -> Option<&'static str>,
+    cancelled: bool,
+    rules: RuleRegistry,
+}
+
+impl FunnelDriver {
+    pub fn new(
+        campaign: &std::fs::File,
+        intent: &ResearchIntentV1,
+        profiles: Box<dyn ProfileHook + Send>,
+        attempts: DriverStudyAttempts,
+        blocker: fn(&ChildStudy) -> Option<&'static str>,
+        rules: RuleRegistry,
+    ) -> anyhow::Result<Self> {
+        let ledger = open_for_campaign(campaign, intent.uid, intent)?;
+        Ok(Self {
+            runner: StageRunner::new(ledger, intent.max_attempts),
+            executor: HostStudyExecutor::new(profiles, attempts),
+            blocker,
+            cancelled: false,
+            rules,
+        })
+    }
+
+    /// The shared attempt host, for the controller to feed its desktop observations.
+    pub fn host_mut(&mut self) -> &mut (dyn AttemptHost + Send) {
+        self.executor.attempts.host_mut()
+    }
+
+    pub fn dispositions(&self) -> Vec<Disposition> {
+        self.runner.ledger().dispositions()
+    }
+
+    /// Request cancellation: the next tick settles the running attempt, restores the profile and
+    /// ends the funnel without deciding what it prevented.
+    pub fn cancel(&mut self) {
+        self.cancelled = true;
+    }
+
+    /// Stop now (controller shutdown): settle, restore and prove it. `Err` is unproven.
+    pub fn shutdown(&mut self) -> Result<(), &'static str> {
+        use super::child_runner::StudyExecutor;
+        self.executor.abort()
+    }
+
+    /// One controller tick.
+    pub fn tick(&mut self, fence: &mut dyn FnMut() -> anyhow::Result<()>) -> anyhow::Result<Step> {
+        use super::child_runner::StudyExecutor;
+        if self.cancelled {
+            return Ok(match self.executor.abort() {
+                Ok(()) => Step::Cancelled,
+                Err(reason) => Step::Halted(reason),
+            });
+        }
+        // Publish every rule the ledger holds, so a confirmation's inputs can find its pilot's.
+        if let Ok(mut registry) = self.rules.lock() {
+            for study in self.runner.ledger().dispositions() {
+                if let Some(rule) = self.runner.ledger().rule_of(&study.study_sha256) {
+                    registry.insert(study.study_sha256, rule.clone());
+                }
+            }
+        }
+        let blocked = self.executor.attempts.host_mut().health_blocked();
+        let step =
+            self.runner
+                .step_fenced(&mut self.executor, &self.blocker, &mut || blocked, fence)?;
+        let inner = self.executor.take_step();
+        Ok(match step {
+            RunnerStep::Halted(code) => Step::Halted(code),
+            RunnerStep::Done => Step::Done,
+            // While a study runs, and on the tick that finishes one, the inner driver's step moves
+            // the lease. A campaign-level ending from inside a study ends the campaign; the
+            // study's own completion (`Done`) is not the campaign's.
+            RunnerStep::Pending | RunnerStep::Ran { .. } => match inner {
+                Some(
+                    ended @ (Step::Expired
+                    | Step::ActiveBudgetExhausted
+                    | Step::Cancelled
+                    | Step::Halted(_)),
+                ) => ended,
+                Some(Step::Done) | None => Step::Waiting,
+                Some(ongoing) => ongoing,
+            },
+        })
+    }
+}

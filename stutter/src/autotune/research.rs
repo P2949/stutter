@@ -6,15 +6,9 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod action_bridge;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod action_child;
 #[cfg_attr(
     not(test),
@@ -32,16 +26,12 @@ pub(crate) mod action_study;
     )
 )]
 pub(crate) mod analysis;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
+pub(crate) mod arm_selection;
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod child_intent;
 pub(crate) mod child_ledger;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod child_runner;
 #[cfg_attr(
     not(test),
@@ -71,10 +61,7 @@ pub(crate) mod dispatch_context;
 pub(crate) mod dispatch_select;
 pub(crate) mod dispatcher;
 pub(crate) mod driver;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod driver_attempts;
 pub(crate) mod entitlement;
 #[cfg_attr(
@@ -85,6 +72,8 @@ pub(crate) mod entitlement;
     )
 )]
 pub(crate) mod features;
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
+pub(crate) mod funnel_driver;
 #[cfg_attr(
     not(test),
     expect(
@@ -151,10 +140,7 @@ pub(crate) mod native_source;
 pub(crate) mod oracle;
 pub(crate) mod owned_cleanup;
 pub(crate) mod owned_domain;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod pilot_rule;
 #[cfg_attr(
     not(test),
@@ -164,21 +150,12 @@ pub(crate) mod pilot_rule;
     )
 )]
 mod prefix;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod prefix_identity;
 pub(crate) mod production_host;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod profile_applier;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod profile_hook;
 mod protocol;
 #[path = "research/proton/mod.rs"]
@@ -238,10 +215,7 @@ mod steam_inventory;
     )
 )]
 pub(crate) mod steam_port;
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "staged: wired at live qualification")
-)]
+#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod study_executor;
 #[cfg_attr(
     not(test),
