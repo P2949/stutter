@@ -1,61 +1,56 @@
-# Research child-study funnel: controller integration
+# Research child-study funnel: status and remaining integration
 
-Status: the pieces below exist and are unit-tested but **not connected** to the resident
-controller. This document lists what connecting them requires so that no existing safety gate is
-weakened. Nothing here is validated against a live game.
+Status at this revision: the funnel is **connected to the resident controller, default off**, and
+unit/controller-tested with fake hosts. Nothing here has run against a live game.
 
-## Existing pieces (all under `stutter/src/autotune/research/`)
+## Built and connected (all under `stutter/src/autotune/`)
 
 | Piece | Role |
 | --- | --- |
-| `child_study.rs` | frozen funnel plan, dependency gate, budget fit |
-| `child_ledger.rs` | hash-chained, restart-safe decisions and spent attempts |
-| `child_runner.rs` | polled stage runner (`Pending` / `Ran` / `Halted` / `Done`) |
-| `child_intent.rs` | per-study intent (`child_study_sha256`, own attempt budget) |
-| `study_executor.rs` | apply profile, run attempts, always restore, map outcome |
-| `profile_applier.rs`, `profile_hook.rs` | atomic, read-back, byte-exact restore of `UserSettings.json` |
-| `driver_attempts.rs` | one child study through the journalled `Driver`, one tick per poll |
-| `prefix_identity.rs` | cold/warm class and Proton-stamp comparability |
-| `action_child.rs`, `action_bridge.rs` | scoped authorization and sequencing for the action stage |
-| `verdict.rs` | separate verification statuses; final gate never inferred |
+| `research/child_study.rs` | frozen funnel: screen, pilot, confirmation, action, feature; dependency gate, budget fit; per-stage arm requirement (all tools, or a pair) |
+| `research/child_ledger.rs` | hash-chained, restart-safe decisions, spent attempts, frozen pilot rules |
+| `research/child_runner.rs` | polled stage runner; health stop aborts (settle then restore) before halting |
+| `research/child_intent.rs` | per-study intent: arm subset, budget, study binding, frozen pilot rule (confirmation only) |
+| `research/pilot_rule.rs` | rule in basis points, digest-bound, thresholds must follow from the pilot's spread |
+| `research/study_executor.rs` | recover, settle, apply, run, settle, restore, judge; stage evidence required for feature/action |
+| `research/profile_applier.rs`, `profile_hook.rs` | atomic edit, readback, durable snapshot, crash recovery, all-or-nothing per arm |
+| `research/driver_attempts.rs` | one child through the journalled `Driver`, own journal/dispatch/evidence/intent/report |
+| `research/funnel_driver.rs` | presents the funnel as a campaign driver: ticks map to the `Step`s the lease already uses |
+| `research/arm_selection.rs` | control + best candidate from the screen's sealed FPS |
+| `research/child_verify.rs`, `raw_verify.rs`, `verdict.rs` | per-child reconstruction and raw replay; separate verification statuses |
+| `runtime/research_funnel.rs` + `research_control_drive.rs` | `research_child_funnel` switch (default false, needs live launch); tick, cancel, shutdown, report |
+| `runtime/research_recovery.rs` | restart: settle every child's interrupted attempt via the witnesses, then restore profiles |
+| `research/dispatch_select.rs`, `steam_port.rs` | the dispatcher and port find a child's attempt under `studies/<digest>/dispatch` |
 
-## What the controller needs before the funnel can replace the flat schedule
+## Not connectable without a design decision: the Stutter action child (CP-LONG)
 
-The coordinator (`runtime/research_control_drive.rs`) assumes exactly one `Driver`. Each of these
-paths must be given an explicit child-funnel behaviour, with a test, before the mode is enabled:
+`runtime.research_campaign_active` (set in `runtime/session.rs`) blanket-suppresses the autonomous
+loop while research owns the action slot. `research/action_child.rs` and `action_bridge.rs` model the
+authorization and the apply/readback/decide/restore sequence, but the *normal* controller applies
+actions through `LiveExperimentManager` and `RuntimeLiveExperimentActionExecutor`
+(`live_experiment/executor.rs`), with its own journalled, two-phase, token-bearing lifecycle. A
+second applier would create a parallel optimizer, which the plan forbids. The real bridge is a
+**per-candidate gate** in place of the boolean:
 
-1. **Selection.** A deliberate switch (daemon config, default off). The flat schedule stays the
-   default; no intent or deployed campaign changes behaviour.
-2. **Lease phases.** `drive_attempts` advances the lease from each `Step`. The child runner hides
-   `Waiting`/`Running`/`Sealed`; it must surface them (or take a callback) so the same
-   `Launching -> Sealing -> Analysing -> NextArm -> AwaitSafeWindow` path is walked per attempt.
-   The launch fence passed to `DriverStudyAttempts` must be the coordinator's own
-   `AwaitSafeWindow -> Launching` advance.
-3. **Cancel.** `request_driver_cancel` reaches only the flat driver. A running child driver must be
-   cancelled the same way, its attempt aborted and sealed, and the funnel ended without deciding
-   the remaining studies.
-4. **Shutdown.** `shutdown_driver` must settle an in-process child attempt, restore the applied
-   profile (proven), and refuse to exit cleanly when either is unproven.
-5. **Deadline and active budget.** `Step::Expired` and `ActiveBudgetExhausted` apply to the
-   campaign, not a study: the funnel must stop at the campaign boundary and record what it left.
-6. **Restart recovery.** `Driver::recover_interrupted` is wired for the flat journal only. A
-   restart with a child journal that holds an unsealed attempt must go through the same
-   independent witnesses (process tree, worker tokens, settlement) before anything is sealed, and
-   the interrupted study must be recorded `Failed("InterruptedStudy")` and halt the funnel. The
-   executor already refuses to start a study whose directory exists; recovery must run first.
-7. **Profile restoration after a crash.** If the controller dies while a profile is applied, the
-   next start must find the applied file (the snapshot is in memory today) and restore it. The
-   snapshot therefore has to be persisted durably before the profile is applied.
-8. **Report and verify.** `persist_report`/`load_and_verify`/`raw_replay` reconstruct from the
-   flat journal. Each child directory (`studies/<digest>/`) needs the same reconstruction, and
-   `verify` must fail closed when any child is unverifiable.
-9. **Health.** The GPU guard's `blocked()` must be read by the runner before every poll (it is a
-   parameter of `StageRunner::step`) and a halt must end the funnel campaign-wide.
-10. **Evidence budget and disk reserve** are per campaign: the sum over children, not per child.
+1. `session.rs` holds an `ActionChildScope` (built from the campaign intent's `actions`, the frozen
+   game process identity and the window) while a CP-LONG child is running.
+2. Before `RuntimeLiveExperimentActionExecutor::apply_candidate`, the gate is asked for a grant for
+   (candidate kind, target pid, start ticks, uid, now). A refusal blocks the apply exactly as the
+   boolean does today.
+3. The experiment manager reports `applied(readback_ok)`, `kept`, `reverted` and `restored` events
+   back to the scope (the experiment already journals each of these phases).
+4. `restored(true)` requires the worker's own kernel readback **and** zero outstanding tokens
+   (`UnixSocketPrivilegedActionService::outstanding_tokens`), as `action_bridge` already enforces.
+5. The study's `stage_evidence` becomes `Some(true)` only when the scope settled the action with a
+   proven restoration; benchmark FPS alone never qualifies it.
 
-## Not connectable without a live run
+This touches the normal autotuner's lifecycle and needs a review of its journal phases and of the
+diagnosis that selects the candidate. It cannot be proven without a live CP-LONG run.
 
-* The real `ActionWorker` over the controller and root worker (physical restore proof).
+## Still requires a live run or a human decision
+
+* Real restore proof of an applied action (worker readback plus token count).
 * Observed list indices for the CPU/GPU graphics profiles (`BlockedProfileMapping`).
 * Real-container Proton paths (`RuntimeBinding::Matched` has never been produced live).
 * Whether the game accepts and honours an edited `UserSettings.json`.
+* The GPU-stability incident acknowledgement (a human decision; see `research health-check`).
