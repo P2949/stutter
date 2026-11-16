@@ -384,4 +384,44 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn a_result_carries_the_binding_of_the_mapped_runtime_to_the_arms_own_installation() {
+        use super::super::loaded_runtime::{LoadedRuntime, RuntimeBinding};
+        let runtime = |root: &str| LoadedRuntime {
+            mapped_file_count: 3,
+            wine_loaded: true,
+            vkd3d_loaded: true,
+            dxvk_loaded: true,
+            proton_roots: vec![root.to_owned()],
+            runtime_paths_sha256: "a".repeat(64),
+        };
+        let binding_for = |receipt: Option<LoadedRuntime>| {
+            let mut result = completion();
+            result.loaded_runtime = receipt;
+            let mut host = host(vec![GameState::Result {
+                completion: Box::new(result),
+            }]);
+            launch(&mut host);
+            let Progress::Finished { evidence } = host.poll() else {
+                panic!("a verified result finishes the attempt")
+            };
+            evidence.native_completion.unwrap().runtime_binding
+        };
+        // The arm's installation is /tools/GE.
+        assert_eq!(
+            binding_for(Some(runtime("/tools/GE/files"))),
+            Some(RuntimeBinding::Matched)
+        );
+        assert_eq!(
+            binding_for(Some(runtime("/run/host/tools/GE/files"))),
+            Some(RuntimeBinding::Matched)
+        );
+        assert_eq!(
+            binding_for(Some(runtime("/tools/CachyOS/files"))),
+            Some(RuntimeBinding::Mismatched)
+        );
+        // Nothing captured proves nothing and records no binding.
+        assert_eq!(binding_for(None), None);
+    }
 }

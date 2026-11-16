@@ -129,6 +129,14 @@ pub(crate) mod owned_domain;
     not(test),
     expect(
         dead_code,
+        reason = "the resident child-study stage runner freezes the rule once pilots run"
+    )
+)]
+pub(crate) mod pilot_rule;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "P3 prefix proof is consumed only after the Steam dispatcher is qualified"
     )
 )]
