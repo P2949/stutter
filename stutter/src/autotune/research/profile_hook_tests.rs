@@ -143,3 +143,26 @@ fn a_restore_that_cannot_be_proven_is_reported() {
     .unwrap();
     assert_eq!(hook.restore(), Err("RestoreUnproven"));
 }
+
+#[test]
+fn a_hook_recovers_every_arm_that_a_crash_left_edited() {
+    let a = arms(2, &[]);
+    let original = bytes(&a);
+    let mut hook = FileProfileHook::new(a.files, index_free, idle);
+    assert_eq!(hook.apply(Profile::Cpu), Ok(true));
+    // The controller dies: a new process builds a new hook over the same files.
+    let study = std::fs::canonicalize(a.paths[0].ancestors().nth(2).unwrap()).unwrap();
+    let files = a
+        .paths
+        .iter()
+        .map(|path| {
+            StudySettingsFile::new(&study, path.clone(), crate::syscall::geteuid()).unwrap()
+        })
+        .collect();
+    let mut restarted = FileProfileHook::new(files, index_free, idle);
+    assert_ne!(bytes(&a_paths(&a.paths)), original);
+    assert_eq!(restarted.recover(), Ok(()));
+    assert_eq!(bytes(&a_paths(&a.paths)), original);
+    // With nothing to recover it is a no-op.
+    assert_eq!(restarted.recover(), Ok(()));
+}

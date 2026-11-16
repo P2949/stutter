@@ -6,7 +6,8 @@
 use super::{
     child_study::Profile,
     profile_applier::{
-        AppliedProfile, ProfileSpec, Refusal, StudySettingsFile, apply, cpu_profile, restore,
+        AppliedProfile, ProfileSpec, Refusal, StudySettingsFile, apply, cpu_profile, recover,
+        restore,
     },
     study_executor::{ProfileFailure, ProfileHook},
 };
@@ -77,6 +78,18 @@ impl ProfileHook for FileProfileHook {
             }
         }
         Ok(true)
+    }
+
+    fn recover(&mut self) -> Result<(), &'static str> {
+        let mut proven = true;
+        for file in &self.files {
+            proven &= recover(file).is_ok();
+        }
+        if proven {
+            Ok(())
+        } else {
+            Err("RecoveryUnproven")
+        }
     }
 
     fn restore(&mut self) -> Result<(), &'static str> {

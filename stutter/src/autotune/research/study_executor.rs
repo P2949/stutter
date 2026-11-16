@@ -24,6 +24,9 @@ pub trait ProfileHook {
     /// `Ok(true)` when a profile was applied (and must be restored), `Ok(false)` when the study
     /// needs none.
     fn apply(&mut self, profile: Profile) -> Result<bool, ProfileFailure>;
+    /// After a crash or restart: put back the settings of any application that was never proven
+    /// restored. Run before any study; an `Err` means a profile may still be applied.
+    fn recover(&mut self) -> Result<(), &'static str>;
     /// Put the original settings back and prove it. `Err` means the proof failed.
     fn restore(&mut self) -> Result<(), &'static str>;
 }
@@ -126,6 +129,15 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         remaining_attempts: u32,
     ) -> anyhow::Result<Option<StudyRun>> {
         if matches!(self.state, State::Idle) {
+            // Settings left edited by a crash are restored before anything else is decided.
+            if self.profiles.recover().is_err() {
+                return Ok(Some(run(
+                    StudyResult::Failed,
+                    study.min_attempts,
+                    "RecoveryUnproven",
+                    true,
+                )));
+            }
             // A study whose journal already holds progress was interrupted (a restart). Whether
             // its profile is applied is unknown and its attempts must never be replayed, so the
             // campaign stops rather than guess.

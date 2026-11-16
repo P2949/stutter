@@ -261,3 +261,75 @@ fn real_settings_plan() {
         Refusal::BlockedProfileMapping("/video/display/Resolution".into())
     );
 }
+
+fn snapshot_of(f: &Fixture) -> PathBuf {
+    f.path.with_file_name("UserSettings.json.stutter-original")
+}
+
+#[test]
+fn the_original_is_durable_before_the_first_edit_and_removed_only_after_a_proven_restore() {
+    let f = fixture();
+    let file = open(&f);
+    let applied = apply(&file, &ray_tracing_off(), false).unwrap();
+    assert_eq!(std::fs::read(snapshot_of(&f)).unwrap(), SETTINGS.as_bytes());
+    let mode = std::fs::metadata(snapshot_of(&f))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600, "the snapshot is private");
+    restore(&file, &applied).unwrap();
+    assert!(!snapshot_of(&f).exists());
+    // A refused edit leaves no snapshot behind either.
+    let _ = apply(&file, &cpu_profile(), false).unwrap_err();
+    assert!(!snapshot_of(&f).exists());
+}
+
+#[test]
+fn a_controller_that_died_while_a_profile_was_applied_is_recovered_from_the_snapshot() {
+    let f = fixture();
+    let file = open(&f);
+    let applied = apply(&file, &ray_tracing_off(), false).unwrap();
+    // The process dies: everything in memory is gone, only the files remain.
+    drop(applied);
+    assert_ne!(std::fs::read(&f.path).unwrap(), SETTINGS.as_bytes());
+    let fresh = open(&f);
+    assert_eq!(recover(&fresh), Ok(Recovery::Restored));
+    assert_eq!(std::fs::read(&f.path).unwrap(), SETTINGS.as_bytes());
+    assert!(!snapshot_of(&f).exists());
+    // Recovering again finds nothing to do.
+    assert_eq!(recover(&fresh), Ok(Recovery::Nothing));
+}
+
+#[test]
+fn a_crash_before_the_edit_or_after_the_restore_is_recovered_without_harm() {
+    // Died after the snapshot but before the edit: the settings are still the original.
+    let f = fixture();
+    let file = open(&f);
+    file.write_snapshot(SETTINGS.as_bytes()).unwrap();
+    assert_eq!(recover(&file), Ok(Recovery::AlreadyOriginal));
+    assert!(!snapshot_of(&f).exists());
+    assert_eq!(std::fs::read(&f.path).unwrap(), SETTINGS.as_bytes());
+    // Nothing applied at all: nothing to recover.
+    assert_eq!(recover(&file), Ok(Recovery::Nothing));
+}
+
+#[test]
+fn an_unrecovered_snapshot_blocks_a_new_application_and_an_unsafe_snapshot_is_refused() {
+    let f = fixture();
+    let file = open(&f);
+    let applied = apply(&file, &ray_tracing_off(), false).unwrap();
+    drop(applied);
+    assert_eq!(
+        apply(&file, &ray_tracing_off(), false).unwrap_err(),
+        Refusal::RecoveryPending
+    );
+    // The blocked attempt did not touch the (still edited) settings or the snapshot.
+    assert_eq!(std::fs::read(snapshot_of(&f)).unwrap(), SETTINGS.as_bytes());
+    assert_eq!(recover(&file), Ok(Recovery::Restored));
+    // A snapshot that is a symlink is never read or trusted.
+    let target = f.path.with_file_name("elsewhere");
+    std::fs::write(&target, SETTINGS).unwrap();
+    std::os::unix::fs::symlink(&target, snapshot_of(&f)).unwrap();
+    assert!(recover(&file).is_err());
+    assert_eq!(std::fs::read(&f.path).unwrap(), SETTINGS.as_bytes());
+}

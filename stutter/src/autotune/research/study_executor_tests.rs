@@ -30,9 +30,14 @@ struct Profiles {
     log: Log,
     apply: Result<bool, ProfileFailure>,
     restore: Result<(), &'static str>,
+    recover: Result<(), &'static str>,
 }
 
 impl ProfileHook for Profiles {
+    fn recover(&mut self) -> Result<(), &'static str> {
+        self.log.borrow_mut().push("recover");
+        self.recover
+    }
     fn apply(&mut self, _: Profile) -> Result<bool, ProfileFailure> {
         self.log.borrow_mut().push("apply");
         self.apply.clone()
@@ -103,6 +108,7 @@ fn executor(
                 log: log.clone(),
                 apply,
                 restore,
+                recover: Ok(()),
             },
             Attempts {
                 log: log.clone(),
@@ -123,7 +129,7 @@ fn a_clean_study_applies_runs_restores_and_is_qualified() {
     assert_eq!(outcome.result, StudyResult::Qualified);
     assert_eq!(outcome.attempts_used, study.min_attempts);
     assert!(!outcome.halt);
-    assert_eq!(*log.borrow(), ["apply", "run", "restore"]);
+    assert_eq!(*log.borrow(), ["recover", "apply", "run", "restore"]);
 }
 
 #[test]
@@ -139,7 +145,11 @@ fn a_profile_that_cannot_be_applied_runs_nothing() {
         (outcome.result, outcome.reason, outcome.attempts_used),
         (StudyResult::Blocked, "BlockedProfileMapping", 0)
     );
-    assert_eq!(*log.borrow(), ["apply"], "no attempt, nothing to restore");
+    assert_eq!(
+        *log.borrow(),
+        ["recover", "apply"],
+        "no attempt, nothing to restore"
+    );
     let (mut failed, _) = executor(
         Err(ProfileFailure::Failed("ReadbackMismatch")),
         Ok(()),
@@ -157,7 +167,7 @@ fn the_profile_is_restored_after_every_outcome_and_an_unproven_restore_halts_the
     // The attempts error out: the profile is still restored, and the error surfaces.
     let (mut errored, log) = executor(Ok(true), Ok(()), Err("steam went away"));
     assert!(run_to_end(&mut errored, &study).is_err());
-    assert_eq!(*log.borrow(), ["apply", "run", "restore"]);
+    assert_eq!(*log.borrow(), ["recover", "apply", "run", "restore"]);
     // A restore that cannot be proven ends the funnel, whatever the attempts did.
     let (mut unproven, _) = executor(Ok(true), Err("mismatch"), Ok(good(&study)));
     let outcome = run_to_end(&mut unproven, &study).unwrap();
@@ -174,7 +184,7 @@ fn the_profile_is_restored_after_every_outcome_and_an_unproven_restore_halts_the
         run_to_end(&mut none, &study).unwrap().result,
         StudyResult::Qualified
     );
-    assert_eq!(*log.borrow(), ["apply", "run"]);
+    assert_eq!(*log.borrow(), ["recover", "apply", "run"]);
 }
 
 #[test]
@@ -282,12 +292,12 @@ fn a_running_study_keeps_its_profile_applied_until_it_ends_and_then_restores_onc
     }
     assert_eq!(
         *log.borrow(),
-        ["apply"],
+        ["recover", "apply"],
         "applied once, still running, not restored"
     );
     let done = exec.poll(&study, 100).unwrap().unwrap();
     assert_eq!(done.result, StudyResult::Qualified);
-    assert_eq!(*log.borrow(), ["apply", "run", "restore"]);
+    assert_eq!(*log.borrow(), ["recover", "apply", "run", "restore"]);
 }
 
 #[test]
@@ -300,8 +310,26 @@ fn a_study_found_mid_run_after_a_restart_is_failed_and_halts_never_replayed() {
         (outcome.result, outcome.reason, outcome.halt),
         (StudyResult::Failed, "InterruptedStudy", true)
     );
-    assert!(
-        log.borrow().is_empty(),
-        "no profile applied and no attempt run"
+    assert_eq!(
+        *log.borrow(),
+        ["recover"],
+        "settings recovered first; no profile applied and no attempt run"
+    );
+}
+
+#[test]
+fn settings_that_a_crash_left_edited_must_be_recovered_before_any_study_or_the_campaign_halts() {
+    let study = cpu_screen();
+    let (mut exec, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
+    exec.profiles.recover = Err("RecoveryUnproven");
+    let outcome = exec.poll(&study, 100).unwrap().unwrap();
+    assert_eq!(
+        (outcome.result, outcome.reason, outcome.halt),
+        (StudyResult::Failed, "RecoveryUnproven", true)
+    );
+    assert_eq!(
+        *log.borrow(),
+        ["recover"],
+        "nothing applied or run over unproven settings"
     );
 }

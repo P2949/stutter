@@ -94,6 +94,8 @@ pub enum Refusal {
     ReadbackMismatch,
     /// The file no longer holds what was applied, or the restoration did not reproduce the bytes.
     RestoreMismatch,
+    /// A snapshot of an earlier, unrestored application exists: recover it first.
+    RecoveryPending,
     Io,
 }
 
@@ -252,6 +254,81 @@ impl StudySettingsFile {
     }
 }
 
+impl StudySettingsFile {
+    /// The durable copy of the original bytes, written before any edit and removed only after a
+    /// proven restore. Its existence means the settings may still be edited.
+    fn snapshot_path(&self) -> PathBuf {
+        let mut name = self
+            .path
+            .file_name()
+            .map(|n| n.to_os_string())
+            .unwrap_or_default();
+        name.push(".stutter-original");
+        self.path.with_file_name(name)
+    }
+
+    /// Durably record the original bytes (private, new, fsynced with its directory).
+    fn write_snapshot(&self, original: &[u8]) -> Result<(), Refusal> {
+        let path = self.snapshot_path();
+        let result = (|| {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)?;
+            file.write_all(original)?;
+            file.sync_all()?;
+            std::fs::File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()
+        })();
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err(Refusal::RecoveryPending)
+            }
+            Err(_) => {
+                let _ = std::fs::remove_file(&path);
+                Err(Refusal::Io)
+            }
+        }
+    }
+
+    fn remove_snapshot(&self) -> Result<(), Refusal> {
+        let path = self.snapshot_path();
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            // Already removed by an earlier, proven restore: removing it again is a success.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(Refusal::Io),
+        }
+        std::fs::File::open(path.parent().unwrap_or(Path::new(".")))
+            .and_then(|dir| dir.sync_all())
+            .map_err(|_| Refusal::Io)
+    }
+
+    fn read_snapshot(&self) -> Result<Option<Vec<u8>>, Refusal> {
+        use std::io::Read;
+        let path = self.snapshot_path();
+        let file = match std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_) => return Err(Refusal::Io),
+        };
+        let meta = file.metadata().map_err(|_| Refusal::Io)?;
+        if !meta.is_file() || meta.nlink() != 1 || meta.len() > MAX_SETTINGS_BYTES {
+            return Err(Refusal::UnsafeFile);
+        }
+        let mut bytes = Vec::new();
+        file.take(MAX_SETTINGS_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| Refusal::Io)?;
+        Ok(Some(bytes))
+    }
+}
+
 /// Proof that a profile was applied: what to restore and what the applied file must still be.
 #[derive(Debug)]
 pub struct AppliedProfile {
@@ -278,12 +355,17 @@ pub fn apply(
     }
     let original = file.read()?;
     let (bytes, planned) = edited(&original, spec)?;
-    file.replace(&bytes)?;
-    let verified = file
-        .read()
-        .map(|now| readback_matches(&original, &now, &planned) && now == bytes);
+    // The original is durable before the first edit: a crash from here on is recoverable.
+    file.write_snapshot(&original)?;
+    let replaced = file.replace(&bytes);
+    let verified = replaced.and_then(|()| {
+        file.read()
+            .map(|now| readback_matches(&original, &now, &planned) && now == bytes)
+    });
     if !matches!(verified, Ok(true)) {
-        let _ = file.replace(&original);
+        if file.replace(&original).is_ok() && file.read().is_ok_and(|now| now == original) {
+            let _ = file.remove_snapshot();
+        }
         return Err(Refusal::ReadbackMismatch);
     }
     Ok(AppliedProfile {
@@ -305,10 +387,42 @@ pub fn restore(file: &StudySettingsFile, applied: &AppliedProfile) -> Result<(),
         file.replace(&applied.original)?;
     }
     if file.read()? == applied.original {
-        Ok(())
+        file.remove_snapshot()
     } else {
         Err(Refusal::RestoreMismatch)
     }
+}
+
+/// What `recover` found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Recovery {
+    /// No snapshot: nothing was applied (or it was restored and proven).
+    Nothing,
+    /// A snapshot existed and the settings were already the original bytes.
+    AlreadyOriginal,
+    /// A snapshot existed; the settings were not the original and have been put back.
+    Restored,
+}
+
+/// After a crash or restart: if a durable snapshot exists the settings may still be edited, so put
+/// the original bytes back, prove it, and only then remove the snapshot. Run before any study.
+pub fn recover(file: &StudySettingsFile) -> Result<Recovery, Refusal> {
+    let Some(original) = file.read_snapshot()? else {
+        return Ok(Recovery::Nothing);
+    };
+    let was_original = file.read()? == original;
+    if !was_original {
+        file.replace(&original)?;
+    }
+    if file.read()? != original {
+        return Err(Refusal::RestoreMismatch);
+    }
+    file.remove_snapshot()?;
+    Ok(if was_original {
+        Recovery::AlreadyOriginal
+    } else {
+        Recovery::Restored
+    })
 }
 
 #[cfg(test)]
