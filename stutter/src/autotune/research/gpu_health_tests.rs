@@ -398,3 +398,18 @@ fn an_incident_that_is_a_symlink_foreign_writable_or_oversized_is_never_acknowle
         std::fs::write(dir.join(LEGACY_BLOCKED_FILE), vec![b' '; 70_000]).unwrap();
     });
 }
+
+#[test]
+fn verification_reads_the_incident_state_without_a_journal() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(!state_blocked(dir.path()));
+    let ans = answer(1);
+    assert!(!guard(dir.path(), &ans).quiet_for_admission());
+    assert!(state_blocked(dir.path()));
+    acknowledge(dir.path(), &incidents(dir.path())[0]);
+    assert!(!state_blocked(dir.path()));
+    assert!(
+        state_blocked(&dir.path().join("missing")),
+        "an unreadable state is blocked"
+    );
+}

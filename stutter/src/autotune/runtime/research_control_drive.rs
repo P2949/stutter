@@ -457,7 +457,14 @@ impl ResearchCoordinator {
     }
 
     /// Replay the sealed native result files of the campaign in `dir` under each arm's own prefix.
-    fn raw_replay(&self, dir: &File, uid: u32) -> serde_json::Value {
+    fn raw_replay(
+        &self,
+        dir: &File,
+        uid: u32,
+    ) -> (
+        serde_json::Value,
+        Option<crate::autotune::research::raw_verify::RawVerification>,
+    ) {
         use std::os::fd::AsFd;
 
         use crate::autotune::research::{
@@ -486,11 +493,17 @@ impl ResearchCoordinator {
             })
         };
         match replay() {
-            Ok(outcome) => serde_json::json!({
-                "status": if outcome.passed() { "replayed" } else { "failed" },
-                "detail": outcome,
-            }),
-            Err(error) => serde_json::json!({ "status": "error", "reason": format!("{error:#}") }),
+            Ok(outcome) => (
+                serde_json::json!({
+                    "status": if outcome.passed() { "replayed" } else { "failed" },
+                    "detail": outcome,
+                }),
+                Some(outcome),
+            ),
+            Err(error) => (
+                serde_json::json!({ "status": "error", "reason": format!("{error:#}") }),
+                None,
+            ),
         }
     }
 
@@ -507,23 +520,57 @@ impl ResearchCoordinator {
         };
         match crate::autotune::research::report_store::load_and_verify(&dir, uid) {
             Ok(report) if verify => {
-                // The raw native files the sealed records name are reopened and re-hashed too. The
-                // verdict stays blocked either way (provenance gates are not all proven), but the
-                // replay result is reported, never assumed.
-                let raw = self.raw_replay(&dir, uid);
-                let studies =
+                // The raw native files the sealed records name are reopened and re-hashed too. Each
+                // verification status stands on its own evidence (see `verdict`); the response
+                // stays `IncompleteProvenance` until the final gate is genuinely qualified.
+                let (raw, raw_outcome) = self.raw_replay(&dir, uid);
+                let intent =
                     crate::autotune::research::report_store::read_private(&dir, "intent.json", uid)
                         .ok()
-                        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-                        .and_then(|intent: crate::autotune::research::ResearchIntentV1| {
-                            crate::autotune::research::child_ledger::read_dispositions(
-                                &dir, uid, &intent,
+                        .and_then(|bytes| {
+                            serde_json::from_slice::<crate::autotune::research::ResearchIntentV1>(
+                                &bytes,
                             )
                             .ok()
                         });
+                let studies = intent.as_ref().and_then(|intent| {
+                    crate::autotune::research::child_ledger::read_dispositions(&dir, uid, intent)
+                        .ok()
+                });
+                let evidence: Vec<_> = {
+                    use std::os::fd::AsFd;
+                    crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence")
+                        .ok()
+                        .map(File::from)
+                        .and_then(|evidence_dir| {
+                            crate::autotune::research::report_store::read_evidence(
+                                &evidence_dir,
+                                uid,
+                            )
+                            .ok()
+                        })
+                        .map(|items| items.into_values().collect())
+                        .unwrap_or_default()
+                };
+                let health_blocked = self.study_dir.as_deref().is_none_or(|study| {
+                    crate::autotune::research::gpu_health::state_blocked(study)
+                });
+                let verdict = crate::autotune::research::verdict::judge(
+                    &crate::autotune::research::verdict::VerdictInputs {
+                        reconstruction_passed: true,
+                        raw: raw_outcome.as_ref(),
+                        evidence: &evidence,
+                        child_studies: studies.as_deref().unwrap_or(&[]),
+                        // No physical restoration verifier exists yet; never inferred.
+                        restoration_verified: false,
+                        health_blocked,
+                    },
+                );
                 serde_json::json!({
-                    "status": "blocked", "code": "IncompleteProvenance",
+                    "status": if verdict.final_gate_qualified { "ok" } else { "blocked" },
+                    "code": if verdict.final_gate_qualified { "Qualified" } else { "IncompleteProvenance" },
                     "reconstruction": "passed",
+                    "verdict": verdict,
                     "raw_native_files": raw,
                     "child_studies": studies,
                     "intent_sha256": report.intent_sha256,

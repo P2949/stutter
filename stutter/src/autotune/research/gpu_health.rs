@@ -586,6 +586,18 @@ impl GpuGuard {
     }
 }
 
+/// Whether an unacknowledged GPU incident (or an unreadable state directory) is on record in
+/// `state_dir`. Read-only; used by verification, which has no journal probe of its own.
+pub fn state_blocked(state_dir: &Path) -> bool {
+    struct NoProbe;
+    impl GpuResetProbe for NoProbe {
+        fn resets_since(&mut self, _: u64) -> anyhow::Result<ResetScan> {
+            anyhow::bail!("verification does not query the journal")
+        }
+    }
+    GpuGuard::new(Box::new(NoProbe), state_dir.to_path_buf()).blocked()
+}
+
 #[cfg(test)]
 #[path = "gpu_health_tests.rs"]
 mod tests;

@@ -258,6 +258,7 @@ pub(crate) mod user_manager;
 )]
 pub(crate) mod user_manager_port;
 mod vdf;
+pub(crate) mod verdict;
 pub use journal::{AttemptOutcome, AttemptRecord, AttemptSlot, ResearchJournal};
 pub use lease::{CampaignBlockReason, CampaignFacts, CampaignLease};
 pub(crate) use protocol::read_frame as read_control_frame;
