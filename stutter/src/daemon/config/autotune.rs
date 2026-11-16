@@ -81,6 +81,10 @@ pub struct DaemonAutotuneConfig {
     /// the physical launch path is qualified.
     #[serde(default)]
     pub research_live_launch: bool,
+    /// Run campaigns as the child-study funnel (screen, pilot, confirmation, feature, action)
+    /// instead of the flat schedule. Off unless explicitly enabled, and it needs live launch too.
+    #[serde(default)]
+    pub research_child_funnel: bool,
     #[serde(default)]
     pub external_mutation_policy: ExternalMutationPolicy,
     #[serde(default)]
@@ -118,6 +122,7 @@ impl Default for DaemonAutotuneConfig {
             research_steamapps_dir: None,
             research_proton_manifest: None,
             research_live_launch: false,
+            research_child_funnel: false,
             external_mutation_policy: ExternalMutationPolicy::default(),
             high_risk_dry_run: false,
             workload_policy: DaemonWorkloadPolicyConfig::default(),

@@ -299,7 +299,6 @@ fn open_ledger(
 }
 
 /// Open (creating it if needed) the campaign's child-study ledger over its frozen funnel plan.
-#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub fn open_for_campaign(
     campaign: &File,
     uid: u32,

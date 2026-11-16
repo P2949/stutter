@@ -194,3 +194,30 @@ fn a_restoration_that_failed_is_kept_and_succeeds_when_retried_after_the_cause_i
             .exists()
     );
 }
+
+#[test]
+fn unavailable_settings_fail_a_profile_study_and_never_apply_to_nothing() {
+    let mut hook = UnavailableProfiles("SettingsFileUnavailable");
+    assert_eq!(
+        hook.apply(Profile::Cpu),
+        Err(ProfileFailure::Failed("SettingsFileUnavailable"))
+    );
+    assert_eq!(
+        hook.apply(Profile::Gpu),
+        Err(ProfileFailure::Failed("SettingsFileUnavailable"))
+    );
+    assert_eq!(hook.apply(Profile::Long), Ok(false));
+    assert!(hook.recover().is_ok() && hook.restore().is_ok());
+}
+
+#[test]
+fn the_game_is_recognised_by_its_executable_in_a_command_line() {
+    assert!(names_the_game(
+        b"S:\\steamapps\\common\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe\0-benchmark\0"
+    ));
+    assert!(names_the_game(b"wine\0CYBERPUNK2077.EXE\0"));
+    assert!(!names_the_game(b"/usr/bin/firefox\0--new-window\0"));
+    assert!(!names_the_game(b""));
+    // The scan itself runs against the real /proc without panicking.
+    let _ = cyberpunk_running();
+}

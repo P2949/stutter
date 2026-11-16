@@ -8,6 +8,7 @@ use crate::{
     autotune::research::{
         ResearchIntentV1, ResearchJournal, ResearchPhase,
         driver::{AttemptHost, Driver, LaunchUnresolved, Step, build_schedule},
+        funnel_driver::FunnelDriver,
         settlement::ProductionSettlementVerifier,
     },
     daemon::privilege::UnixSocketPrivilegedActionService,
@@ -22,7 +23,29 @@ pub(super) struct DriverState {
     driver: Driver,
     host: Box<dyn AttemptHost + Send>,
     campaign: File,
+    /// The child-study funnel, when the campaign runs in that mode. The flat `driver` is then an idle
+    /// shell (never ticked) that only finalizes the campaign's own report, and `host` is a stub: the
+    /// real host lives inside the funnel.
+    funnel: Option<FunnelDriver>,
 }
+
+impl DriverState {
+    /// Stop whatever the campaign owns (the flat host, or the funnel's shared host).
+    fn abort_host(&mut self) -> anyhow::Result<()> {
+        match self.funnel.as_mut() {
+            Some(funnel) => funnel.host_mut().abort(),
+            None => self.host.abort(),
+        }
+    }
+}
+
+/// Builds the child-study funnel from the frozen intent, the campaign directory and the host. It
+/// exists only when the funnel mode is explicitly enabled; without it every campaign runs the flat
+/// schedule exactly as before.
+pub(in crate::autotune::runtime) type FunnelBuilder = Box<
+    dyn Fn(&ResearchIntentV1, &File, Box<dyn AttemptHost + Send>) -> anyhow::Result<FunnelDriver>
+        + Send,
+>;
 
 fn create_dir(parent: &File, name: &str) -> anyhow::Result<File> {
     use std::os::fd::AsFd;
@@ -41,6 +64,15 @@ impl ResearchCoordinator {
 
     pub(in crate::autotune::runtime) fn set_host_factory(&mut self, factory: Option<HostFactory>) {
         self.host_factory = factory;
+    }
+
+    /// Enable (or disable) the child-study funnel mode. Disabled is the default and keeps the flat
+    /// schedule.
+    pub(in crate::autotune::runtime) fn set_funnel_builder(
+        &mut self,
+        builder: Option<FunnelBuilder>,
+    ) {
+        self.funnel_builder = builder;
     }
 
     /// Create the campaign's private journal and dispatch directories and its driver. A no-op
@@ -81,10 +113,21 @@ impl ResearchCoordinator {
                 })),
             )));
         }
+        let (host, funnel) = match self.funnel_builder.as_ref() {
+            Some(builder) => {
+                let funnel = builder(intent, &campaign, host)?;
+                (
+                    Box::new(UnqualifiedSteamHost) as Box<dyn AttemptHost + Send>,
+                    Some(funnel),
+                )
+            }
+            None => (host, None),
+        };
         self.driver = Some(DriverState {
             driver,
             host,
             campaign,
+            funnel,
         });
         Ok(())
     }
@@ -126,21 +169,32 @@ impl ResearchCoordinator {
         let Some(state) = self.driver.as_mut() else {
             return;
         };
-        state.host.observe_desktop_idle(idle_at);
-        state.host.observe_user_input_idle(input_idle_at);
         let active = &mut self.active;
-        let step = match state
-            .driver
-            .tick_with_launch_fence(state.host.as_mut(), now, || {
-                let active = active
-                    .as_mut()
-                    .ok_or_else(|| anyhow::anyhow!("campaign lease unavailable"))?;
-                anyhow::ensure!(
-                    active.lease.phase() == ResearchPhase::AwaitSafeWindow,
-                    "campaign is not ready to launch"
-                );
-                active.lease.advance(ResearchPhase::Launching, now)
-            }) {
+        // The lease must durably record its launching phase before any launch is armed.
+        let mut fence = || {
+            let active = active
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("campaign lease unavailable"))?;
+            anyhow::ensure!(
+                active.lease.phase() == ResearchPhase::AwaitSafeWindow,
+                "campaign is not ready to launch"
+            );
+            active.lease.advance(ResearchPhase::Launching, now)
+        };
+        // The child-study funnel, when this campaign runs in that mode, is ticked instead of the
+        // flat driver and reports the same `Step`s, so every lease transition below is shared.
+        let ticked = if let Some(funnel) = state.funnel.as_mut() {
+            funnel.host_mut().observe_desktop_idle(idle_at);
+            funnel.host_mut().observe_user_input_idle(input_idle_at);
+            funnel.tick_at(now, &mut fence)
+        } else {
+            state.host.observe_desktop_idle(idle_at);
+            state.host.observe_user_input_idle(input_idle_at);
+            state
+                .driver
+                .tick_with_launch_fence(state.host.as_mut(), now, fence)
+        };
+        let step = match ticked {
             Ok(step) => step,
             Err(error) => {
                 log::error!("research driver failed: {error:#}");
@@ -148,7 +202,7 @@ impl ResearchCoordinator {
                     // A sent request may still start: a no-op abort would prove nothing and
                     // generic abort semantics must not run. Ownership is retained as is.
                     self.launch_unresolved = true;
-                } else if let Err(settlement) = state.host.abort() {
+                } else if let Err(settlement) = state.abort_host() {
                     log::error!("research process settlement is unverified: {settlement:#}");
                 }
                 // A failed tick may have left a started marker or torn evidence even if the host
@@ -230,7 +284,7 @@ impl ResearchCoordinator {
             self.settle_terminal(ResearchPhase::Blocked, code);
         } else if !ok {
             if let Some(state) = self.driver.as_mut()
-                && let Err(error) = state.host.abort()
+                && let Err(error) = state.abort_host()
             {
                 log::error!("research process settlement is unverified: {error:#}");
             }
@@ -242,7 +296,10 @@ impl ResearchCoordinator {
     pub(super) fn request_driver_cancel(&mut self) -> bool {
         match self.driver.as_mut() {
             Some(state) => {
-                state.driver.cancel();
+                match state.funnel.as_mut() {
+                    Some(funnel) => funnel.cancel(),
+                    None => state.driver.cancel(),
+                }
                 true
             }
             None => false,
@@ -261,17 +318,24 @@ impl ResearchCoordinator {
             );
         }
         if self.storage_blocker == Some("UnsafeToResume") {
-            state.host.abort()?;
+            state.abort_host()?;
             anyhow::bail!("research attempt requires independent recovery");
         }
-        state.driver.cancel();
-        match state
-            .driver
-            .tick_with_launch_fence(state.host.as_mut(), now, || {
-                anyhow::bail!("shutdown must not start an attempt")
-            })? {
-            Step::Sealed(_) | Step::Cancelled | Step::Halted(_) => {}
-            _ => anyhow::bail!("research shutdown did not settle the attempt"),
+        if let Some(funnel) = state.funnel.as_mut() {
+            // Settle the running attempt, then restore and prove the profile; unproven is a refusal.
+            funnel
+                .shutdown()
+                .map_err(|reason| anyhow::anyhow!("research funnel shutdown unproven: {reason}"))?;
+        } else {
+            state.driver.cancel();
+            match state
+                .driver
+                .tick_with_launch_fence(state.host.as_mut(), now, || {
+                    anyhow::bail!("shutdown must not start an attempt")
+                })? {
+                Step::Sealed(_) | Step::Cancelled | Step::Halted(_) => {}
+                _ => anyhow::bail!("research shutdown did not settle the attempt"),
+            }
         }
         let code = if self.persist_report() {
             "ControllerShutdown"
@@ -428,7 +492,7 @@ impl ResearchCoordinator {
         // The child studies this build cannot execute are decided and recorded, not left implicit.
         // A ledger that cannot be written means the campaign's accounting is incomplete, so the
         // report is not treated as persisted.
-        if result.is_ok() {
+        if result.is_ok() && state.funnel.is_none() {
             let intent = state.driver.intent();
             if let Err(error) = crate::autotune::research::child_ledger::settle_unexecuted(
                 &state.campaign,

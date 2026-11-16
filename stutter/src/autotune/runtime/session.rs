@@ -63,6 +63,11 @@ pub async fn run_autotune_controller_session(
         coordinator.set_recovery_factory(super::research_control::select_recovery_factory(
             &runtime.config().daemon_config.autotune,
         ));
+        // The child-study funnel mode: absent unless explicitly enabled, so the flat schedule is the
+        // default.
+        coordinator.set_funnel_builder(super::research_control::select_funnel_builder(
+            &runtime.config().daemon_config.autotune,
+        ));
         coordinator.set_settlement_socket(
             runtime
                 .config()

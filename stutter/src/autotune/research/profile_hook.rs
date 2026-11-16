@@ -114,6 +114,49 @@ impl ProfileHook for FileProfileHook {
     }
 }
 
+/// The profile hook when the arms' settings files cannot be opened safely (a cold prefix has none
+/// yet, or one is unsafe): a study that needs a graphics profile fails with the reason, never
+/// "applies" to nothing, and a study that needs none runs.
+pub struct UnavailableProfiles(pub &'static str);
+
+impl ProfileHook for UnavailableProfiles {
+    fn apply(&mut self, profile: Profile) -> Result<bool, ProfileFailure> {
+        match profile {
+            Profile::Long => Ok(false),
+            Profile::Cpu | Profile::Gpu => Err(ProfileFailure::Failed(self.0)),
+        }
+    }
+    fn recover(&mut self) -> Result<(), &'static str> {
+        Ok(())
+    }
+    fn restore(&mut self) -> Result<(), &'static str> {
+        Ok(())
+    }
+}
+
+/// Whether a command line (NUL-separated arguments) is the Cyberpunk executable.
+fn names_the_game(cmdline: &[u8]) -> bool {
+    String::from_utf8_lossy(cmdline)
+        .to_ascii_lowercase()
+        .contains("cyberpunk2077.exe")
+}
+
+/// Whether any process of this machine is running the game. A process whose command line cannot be
+/// read is not this user's game; an unlistable /proc is treated as the game running (the safe
+/// answer for a settings edit).
+pub fn cyberpunk_running() -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return true;
+    };
+    entries.flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.bytes().all(|b| b.is_ascii_digit()))
+            && std::fs::read(entry.path().join("cmdline")).is_ok_and(|bytes| names_the_game(&bytes))
+    })
+}
+
 #[cfg(test)]
 #[path = "profile_hook_tests.rs"]
 mod tests;

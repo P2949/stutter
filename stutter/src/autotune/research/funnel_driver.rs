@@ -125,6 +125,16 @@ impl FunnelDriver {
         self.executor.abort()
     }
 
+    /// One controller tick at the controller's own time, which also governs the child driver.
+    pub fn tick_at(
+        &mut self,
+        now: u64,
+        fence: &mut dyn FnMut() -> anyhow::Result<()>,
+    ) -> anyhow::Result<Step> {
+        self.executor.attempts.set_now(now);
+        self.tick(fence)
+    }
+
     /// One controller tick.
     pub fn tick(&mut self, fence: &mut dyn FnMut() -> anyhow::Result<()>) -> anyhow::Result<Step> {
         use super::child_runner::StudyExecutor;

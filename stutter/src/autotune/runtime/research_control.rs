@@ -25,6 +25,8 @@ use super::research_recovery::{RecoveredCampaign, RecoveryJob};
 mod commands;
 #[path = "research_control_drive.rs"]
 mod drive;
+#[path = "research_funnel.rs"]
+mod funnel;
 #[cfg(feature = "wayland-probe")]
 #[path = "research_control_idle.rs"]
 mod idle;
@@ -32,7 +34,8 @@ mod idle;
 mod status;
 #[path = "research_control_study.rs"]
 mod study;
-pub(super) use drive::{HostFactory, select_host_factory, select_recovery_factory};
+pub(super) use drive::{FunnelBuilder, HostFactory, select_host_factory, select_recovery_factory};
+pub(in crate::autotune::runtime) use funnel::select_funnel_builder;
 
 use crate::autotune::research::{
     AuthenticatedRequest, CampaignBlockReason, CampaignFacts, CampaignLease, ResearchPhase,
@@ -79,6 +82,8 @@ pub(super) struct ResearchCoordinator {
     terminal_probe_attempted: bool,
     mutable_action_present: bool,
     host_factory: Option<HostFactory>,
+    /// Present only when the child-study funnel mode is enabled; absent runs the flat schedule.
+    funnel_builder: Option<FunnelBuilder>,
     recovery_factory: Option<super::research_recovery::RecoveryFactory>,
     settlement_socket: Option<PathBuf>,
     driver: Option<drive::DriverState>,
@@ -125,6 +130,7 @@ impl ResearchCoordinator {
             terminal_probe_attempted: false,
             mutable_action_present,
             host_factory: None,
+            funnel_builder: None,
             recovery_factory: None,
             settlement_socket: None,
             driver: None,

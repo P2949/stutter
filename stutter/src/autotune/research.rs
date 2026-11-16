@@ -26,7 +26,6 @@ pub(crate) mod action_study;
     )
 )]
 pub(crate) mod analysis;
-#[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod arm_selection;
 #[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod child_intent;

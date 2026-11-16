@@ -294,3 +294,19 @@ fn a_config_without_research_keys_leaves_research_inert() {
     assert!(daemon_config.autotune.research_socket_dir.is_none());
     assert!(!daemon_config.autotune.research_live_launch);
 }
+
+#[test]
+fn the_child_study_funnel_is_off_unless_the_config_turns_it_on() {
+    let mut daemon_config = daemon_config_from_user_config(None, None, ActionSource::Cli).unwrap();
+    assert!(
+        !daemon_config.autotune.research_child_funnel,
+        "off by default"
+    );
+    // A config that never mentions it leaves it off.
+    let silent = parse_user_config_toml("[autotune]\nresearch_live_launch = true\n").unwrap();
+    apply_daemon_user_config_overrides(&mut daemon_config, Some(&silent));
+    assert!(!daemon_config.autotune.research_child_funnel);
+    let on = parse_user_config_toml("[autotune]\nresearch_child_funnel = true\n").unwrap();
+    apply_daemon_user_config_overrides(&mut daemon_config, Some(&on));
+    assert!(daemon_config.autotune.research_child_funnel);
+}

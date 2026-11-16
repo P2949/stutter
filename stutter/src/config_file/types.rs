@@ -99,6 +99,7 @@ pub struct AutotuneConfigFile {
     pub research_steamapps_dir: Option<PathBuf>,
     pub research_proton_manifest: Option<PathBuf>,
     pub research_live_launch: Option<bool>,
+    pub research_child_funnel: Option<bool>,
     pub unsafe_in_process_privileged_worker: Option<bool>,
     pub manage_privileged_worker: Option<bool>,
     pub worker_only_mutation: Option<bool>,

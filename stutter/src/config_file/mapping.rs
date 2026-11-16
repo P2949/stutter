@@ -325,4 +325,7 @@ fn apply_research_overrides(
     if let Some(live) = file.research_live_launch {
         target.research_live_launch = live;
     }
+    if let Some(funnel) = file.research_child_funnel {
+        target.research_child_funnel = funnel;
+    }
 }

@@ -47,6 +47,8 @@ pub struct DriverStudyAttempts {
     running: Option<(String, Driver)>,
     /// The driver step of the last poll, for the controller to advance the lease from.
     last_step: Option<Step>,
+    /// The controller's own `now` for the next tick, overriding the clock (one tick only).
+    override_now: Option<u64>,
 }
 
 fn dir_name(study: &ChildStudy) -> &str {
@@ -85,7 +87,13 @@ impl DriverStudyAttempts {
             select_arms,
             running: None,
             last_step: None,
+            override_now: None,
         }
+    }
+
+    /// The controller's time for the next tick: the campaign clock is the controller's, not ours.
+    pub fn set_now(&mut self, now: u64) {
+        self.override_now = Some(now);
     }
 
     /// The shared attempt host, for the controller to feed its desktop observations.
@@ -224,7 +232,7 @@ impl StudyAttempts for DriverStudyAttempts {
         if self.running.is_none() {
             self.begin(study)?;
         }
-        let now = (self.clock)();
+        let now = self.override_now.take().unwrap_or_else(|| (self.clock)());
         let own_fence = &mut self.launch_fence;
         let step = match self.running.as_mut() {
             Some((_, driver)) => driver.tick_with_launch_fence(self.host.as_mut(), now, || {
