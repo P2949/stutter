@@ -123,7 +123,7 @@ pub fn own_stamp(tool_dir: &Path) -> Option<String> {
 /// The comparability policy over the arms a study runs, each as (its compat directory, its Proton
 /// installation): every prefix cold, or every prefix warm and stamped by its own build. The reason
 /// is a stable code; nothing is changed or created.
-pub fn check(arms: &[(PathBuf, PathBuf)]) -> Result<(), &'static str> {
+pub fn check(arms: &[(PathBuf, PathBuf)]) -> Result<PrefixClass, &'static str> {
     let stamps: Vec<String> = arms
         .iter()
         .map(|(_, tool)| own_stamp(tool).ok_or("PrefixOwnStampUnknown"))
@@ -133,14 +133,23 @@ pub fn check(arms: &[(PathBuf, PathBuf)]) -> Result<(), &'static str> {
         .zip(&stamps)
         .map(|((compat, _), stamp)| (observe(compat), stamp.as_str()))
         .collect();
-    comparable(&observed)
-        .map(|_| ())
-        .map_err(|refusal| match refusal {
-            Incomparable::Indeterminate(_) => "PrefixIndeterminate",
-            Incomparable::MixedColdAndWarm => "PrefixMixedColdAndWarm",
-            Incomparable::UnstampedWarm(_) => "PrefixUnstamped",
-            Incomparable::ForeignStamp(_) => "PrefixForeignStamp",
-        })
+    comparable(&observed).map_err(|refusal| match refusal {
+        Incomparable::Indeterminate(_) => "PrefixIndeterminate",
+        Incomparable::MixedColdAndWarm => "PrefixMixedColdAndWarm",
+        Incomparable::UnstampedWarm(_) => "PrefixUnstamped",
+        Incomparable::ForeignStamp(_) => "PrefixForeignStamp",
+    })
+}
+
+impl PrefixClass {
+    /// The label recorded beside a study so its cohort is visible in the bundle.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cold => "cold",
+            Self::Warm => "warm",
+            Self::Indeterminate => "indeterminate",
+        }
+    }
 }
 
 #[cfg(test)]

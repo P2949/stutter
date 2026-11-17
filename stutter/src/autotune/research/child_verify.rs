@@ -36,6 +36,9 @@ pub struct ChildVerification {
     /// The action receipts an action child recorded beside its study (absent for other studies).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_receipts: Option<serde_json::Value>,
+    /// The cache cohort (cold or warm prefixes) the study ran in, when the host observed it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix_cohort: Option<serde_json::Value>,
     /// What the resident runtime recorded of the game in each attempt (absent when none was kept).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry_receipts: Option<serde_json::Value>,
@@ -268,6 +271,7 @@ pub fn verify_children(
             Err(anyhow::anyhow!("unexpected entry in the studies directory"))
         };
         let receipts = action_receipts(&studies, &name, uid);
+        let cohort = study_file(&studies, &name, uid, "prefix-cohort.json");
         let telemetry = study_file(&studies, &name, uid, "telemetry-receipts.json");
         let completed = completed_attempts(&studies, &name, uid);
         children.push(match result {
@@ -279,6 +283,7 @@ pub fn verify_children(
                 problem: None,
                 report: Some(report),
                 action_receipts: receipts,
+                prefix_cohort: cohort,
                 telemetry_receipts: telemetry,
                 completed_attempts: completed,
             },
@@ -290,6 +295,7 @@ pub fn verify_children(
                 problem: Some(format!("{error:#}")),
                 report: None,
                 action_receipts: None,
+                prefix_cohort: None,
                 telemetry_receipts: None,
                 completed_attempts: Vec::new(),
             },

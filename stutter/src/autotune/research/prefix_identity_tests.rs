@@ -148,13 +148,13 @@ mod enforcement {
         };
         // Both cold: comparable (the first run creates each).
         let (cold_a, cold_b) = (arm(0, None, false), arm(0, None, false));
-        assert_eq!(check(&pair(&cold_a, &cold_b)), Ok(()));
+        assert_eq!(check(&pair(&cold_a, &cold_b)), Ok(PrefixClass::Cold));
         // Both warm and stamped by their own build: comparable.
         let (warm_a, warm_b) = (
             arm(3, Some("11.0-100"), true),
             arm(3, Some("CachyOS-11.0-100"), true),
         );
-        assert_eq!(check(&pair(&warm_a, &warm_b)), Ok(()));
+        assert_eq!(check(&pair(&warm_a, &warm_b)), Ok(PrefixClass::Warm));
         // One cold beside one warm is a different experiment.
         assert_eq!(
             check(&pair(&cold_a, &warm_b)),

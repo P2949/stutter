@@ -64,8 +64,14 @@ impl AttemptHost for Host {
     fn attempt_treatment(&mut self) -> Option<crate::autotune::research::Treatment> {
         self.treatment
     }
-    fn check_prefixes(&mut self, _: &[ProtonSource]) -> Result<(), &'static str> {
-        self.prefix_refusal.map_or(Ok(()), Err)
+    fn check_prefixes(
+        &mut self,
+        _: &[ProtonSource],
+    ) -> Result<Option<crate::autotune::research::prefix_identity::PrefixClass>, &'static str> {
+        self.prefix_refusal.map_or(
+            Ok(Some(super::super::prefix_identity::PrefixClass::Warm)),
+            Err,
+        )
     }
     fn set_enabled_factors(&mut self, factors: &[crate::autotune::research::ResearchFactor]) {
         self.seen_factors.lock().unwrap().push(factors.to_vec());
@@ -267,6 +273,22 @@ mod child_verification {
         // The fake host sealed no native results, so nothing can replay: not verified.
         assert!(!child.raw_files_verified);
         assert!(!result.all_verified());
+    }
+
+    #[test]
+    fn a_child_records_the_cache_cohort_its_arms_ran_in() {
+        let (root, parent, _) = finished();
+        let result = verify_children(
+            &campaign(&root),
+            crate::syscall::geteuid(),
+            &parent,
+            &lookup,
+        )
+        .unwrap();
+        assert_eq!(
+            result.children[0].prefix_cohort.as_ref().unwrap()["cohort"],
+            "warm"
+        );
     }
 
     #[test]

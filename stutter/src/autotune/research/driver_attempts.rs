@@ -315,7 +315,8 @@ impl DriverStudyAttempts {
         let inputs = (self.select_arms)(study)?;
         let intent = child_intent(&self.parent, study, &inputs.arms, inputs.rule.as_ref())?;
         // The arms must run over comparable prefixes before anything is created for the study.
-        self.host
+        let cohort = self
+            .host
             .check_prefixes(&inputs.arms)
             .map_err(|code| anyhow::anyhow!("the study's prefixes are not comparable: {code}"))?;
         let studies = match open_dir(&self.campaign, STUDIES_DIR) {
@@ -334,6 +335,16 @@ impl DriverStudyAttempts {
         // The child's own frozen intent, so a verifier can rebuild its schedule and report exactly as
         // it does for a whole campaign (`report_store::load_and_verify` on this directory).
         write_new(&study_dir, "intent.json", &serde_json::to_vec(&intent)?)?;
+        // The cache cohort the arms ran in (PLAN D6, section 6.1), recorded beside the study so a
+        // cold and a warm study are never mistaken for one another in the bundle.
+        if let Some(cohort) = cohort {
+            let record = serde_json::json!({ "schema": 1, "cohort": cohort.label() });
+            write_new(
+                &study_dir,
+                "prefix-cohort.json",
+                &serde_json::to_vec(&record)?,
+            )?;
+        }
         // The host enables exactly this study's factor (none for any other stage), so a later study
         // never inherits an earlier one's environment.
         let factors = match study.stage {

@@ -217,6 +217,7 @@ fn child_rows(response: &Value, with_report: bool) -> Vec<Value> {
                         "raw_files_verified": child.get("raw_files_verified"),
                         "problem": child.get("problem"),
                         "action_receipts": child.get("action_receipts"),
+                        "prefix_cohort": child.get("prefix_cohort"),
                     });
                     if with_report {
                         row["report"] = child.get("report").cloned().unwrap_or(Value::Null);

@@ -70,8 +70,11 @@ pub trait AttemptHost {
     }
     /// Whether the arms of a study run over comparable prefixes (all cold, or all warm and stamped by
     /// their own build); the study is refused otherwise. Observation only.
-    fn check_prefixes(&mut self, _arms: &[super::ProtonSource]) -> Result<(), &'static str> {
-        Ok(())
+    fn check_prefixes(
+        &mut self,
+        _arms: &[super::ProtonSource],
+    ) -> Result<Option<super::prefix_identity::PrefixClass>, &'static str> {
+        Ok(None)
     }
     /// The sighted game process of the current attempt, once attested; an action child arms its
     /// gate on exactly this process.
