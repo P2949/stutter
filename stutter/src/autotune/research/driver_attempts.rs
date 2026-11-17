@@ -399,7 +399,7 @@ impl DriverStudyAttempts {
                     .as_deref()
                     .and_then(|native| native.context.as_ref())
                     .map_or(ProfileConformance::Unproven, |context| {
-                        context.conformance(study.profile)
+                        context.conformance_in(study.profile, study.stage)
                     })
             })
             .collect();

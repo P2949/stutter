@@ -156,8 +156,9 @@ pub enum ProfileConformance {
 }
 
 impl NativeContext {
-    /// The CPU and GPU study profiles are raster-only: ray tracing off and frame generation off.
-    /// (Resolution and presets are not in the game's reported context, so they are not judged.)
+    /// The CPU and GPU study profiles are raster-only: ray tracing off, frame generation off and no
+    /// upscaler. (Resolution and presets are not in the game's reported context, so they are not
+    /// judged here.)
     #[cfg_attr(
         not(test),
         expect(
@@ -166,14 +167,46 @@ impl NativeContext {
         )
     )]
     pub fn conformance(&self, profile: super::child_study::Profile) -> ProfileConformance {
-        use super::child_study::Profile;
+        self.conformance_in(profile, super::child_study::Stage::Screen)
+    }
+
+    /// As `conformance`, for the stage that produced the result. A feature study is allowed to differ
+    /// in exactly its own factor and in nothing else: a frame-generation study may report frame
+    /// generation on, an upscaler study may report an upscaler on, and every other constrained field
+    /// must still hold, so an unrelated difference is never excused.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "called by the real attempt runner once child studies run live"
+        )
+    )]
+    pub fn conformance_in(
+        &self,
+        profile: super::child_study::Profile,
+        stage: super::child_study::Stage,
+    ) -> ProfileConformance {
+        use super::{
+            ResearchFactor,
+            child_study::{Profile, Stage},
+        };
         match profile {
             Profile::Long => ProfileConformance::NotSpecified,
             Profile::Cpu | Profile::Gpu => {
-                let (rt, fg) = (self.ray_tracing_enabled, self.frame_generation_type);
-                if rt == Some(true) || fg.is_some_and(|value| value != 0) {
+                let free_frame_generation =
+                    matches!(stage, Stage::Feature(ResearchFactor::FrameGeneration));
+                let free_upscaler = matches!(stage, Stage::Feature(ResearchFactor::Fsr4));
+                let ray_tracing = self.ray_tracing_enabled;
+                let off = |value: Option<i64>| value.is_some_and(|value| value != 0);
+                if ray_tracing == Some(true)
+                    || (!free_frame_generation && off(self.frame_generation_type))
+                    || (!free_upscaler && off(self.upscaling_type))
+                {
                     ProfileConformance::Violates
-                } else if rt == Some(false) && fg == Some(0) {
+                } else if ray_tracing == Some(false)
+                    && (free_frame_generation || self.frame_generation_type == Some(0))
+                    && (free_upscaler || self.upscaling_type == Some(0))
+                {
                     ProfileConformance::Conforms
                 } else {
                     ProfileConformance::Unproven
@@ -326,5 +359,75 @@ mod tests {
             ctx(Some(true), Some(0)).conformance(Profile::Long),
             ProfileConformance::NotSpecified
         );
+    }
+}
+
+#[cfg(test)]
+mod stage_tests {
+    use super::*;
+    use crate::autotune::research::{
+        ResearchFactor,
+        child_study::{Profile, Stage},
+    };
+
+    fn ctx(rt: bool, fg: i64, upscaler: i64) -> NativeContext {
+        NativeContext {
+            game_version: Some("2.5".into()),
+            preset_name: Some("P".into()),
+            gpu_name: Some("G".into()),
+            upscaling_type: Some(upscaler),
+            ray_tracing_enabled: Some(rt),
+            frame_generation_type: Some(fg),
+            frame_count: 10,
+        }
+    }
+
+    #[test]
+    fn an_upscaler_that_is_on_violates_the_no_upscaler_profiles() {
+        for profile in [Profile::Cpu, Profile::Gpu] {
+            assert_eq!(
+                ctx(false, 0, 2).conformance(profile),
+                ProfileConformance::Violates
+            );
+        }
+    }
+
+    #[test]
+    fn a_feature_study_may_differ_in_its_own_factor_and_in_nothing_else() {
+        let frame_generation = Stage::Feature(ResearchFactor::FrameGeneration);
+        let upscaler = Stage::Feature(ResearchFactor::Fsr4);
+        for profile in [Profile::Cpu, Profile::Gpu] {
+            // Frame generation on is the study's own difference...
+            assert_eq!(
+                ctx(false, 2, 0).conformance_in(profile, frame_generation),
+                ProfileConformance::Conforms
+            );
+            // ...but an upscaler on in that study is not, and neither is ray tracing.
+            assert_eq!(
+                ctx(false, 2, 1).conformance_in(profile, frame_generation),
+                ProfileConformance::Violates
+            );
+            assert_eq!(
+                ctx(true, 2, 0).conformance_in(profile, frame_generation),
+                ProfileConformance::Violates
+            );
+            // The upscaler study may report an upscaler; frame generation still has to be off.
+            assert_eq!(
+                ctx(false, 0, 1).conformance_in(profile, upscaler),
+                ProfileConformance::Conforms
+            );
+            assert_eq!(
+                ctx(false, 2, 1).conformance_in(profile, upscaler),
+                ProfileConformance::Violates
+            );
+            // Any other stage (an action study) allows neither difference.
+            assert_eq!(
+                ctx(false, 2, 0).conformance_in(
+                    profile,
+                    Stage::Action(crate::autotune::research::ResearchAction::CpuAffinityProfile)
+                ),
+                ProfileConformance::Violates
+            );
+        }
     }
 }

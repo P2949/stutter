@@ -67,14 +67,18 @@ pub fn ray_tracing_off() -> ProfileSpec {
 pub fn cpu_profile() -> ProfileSpec {
     let mut spec = ray_tracing_off();
     spec.name = "cpu_1080p_raster";
-    spec.edits.push(ProfileEdit {
-        group: "/video/display",
-        name: "Resolution",
-        to: Setting::Choice {
-            value: "1920x1080",
-            index: None,
-        },
-    });
+    let choice = |group, name, value| ProfileEdit {
+        group,
+        name,
+        to: Setting::Choice { value, index: None },
+    };
+    // PLAN CP-CPU: 1080p raster with no frame generation and no upscaler (the settings the arms
+    // ship with select an upscaler, which the native result's context would then flag).
+    spec.edits.extend([
+        choice("/video/display", "Resolution", "1920x1080"),
+        choice("/graphics/presets", "ResolutionScaling", "Off"),
+        choice("/graphics/presets", "FrameGeneration", "Off"),
+    ]);
     spec
 }
 
