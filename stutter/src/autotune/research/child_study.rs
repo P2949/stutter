@@ -29,6 +29,9 @@ pub enum Stage {
     Pilot,
     /// Frozen confirmation of the selected pair under the pilot's rule.
     Confirm,
+    /// Held-out validation: the confirmed pair re-measured on fresh, separately seeded runs under the
+    /// same frozen rule, so a winner is claimed only when an independent repetition agrees.
+    Holdout,
     /// Normal-controller action study (Supported actions only).
     Action(ResearchAction),
     /// One fork-local factor at a time.
@@ -68,14 +71,14 @@ impl ChildStudy {
         match self.stage {
             Stage::Feature(factor) => Some(super::TreatmentSpec::Factor(factor)),
             Stage::Action(action) => Some(super::TreatmentSpec::Action(action)),
-            Stage::Screen | Stage::Pilot | Stage::Confirm => None,
+            Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout => None,
         }
     }
 
     pub fn arms(&self) -> StudyArms {
         match self.stage {
             Stage::Screen => StudyArms::All,
-            Stage::Pilot | Stage::Confirm => StudyArms::Pair,
+            Stage::Pilot | Stage::Confirm | Stage::Holdout => StudyArms::Pair,
             Stage::Action(_) | Stage::Feature(_) => StudyArms::Single,
         }
     }
@@ -85,6 +88,7 @@ impl ChildStudy {
 /// Three runs for each of the two arms.
 const PILOT_ATTEMPTS: u32 = 6;
 const CONFIRM_ATTEMPTS: u32 = 8;
+const HOLDOUT_ATTEMPTS: u32 = 8;
 const FEATURE_ATTEMPTS: u32 = 8;
 const ACTION_ATTEMPTS: u32 = 2;
 
@@ -132,6 +136,17 @@ pub fn plan(intent: &ResearchIntentV1) -> anyhow::Result<Vec<ChildStudy>> {
             profile,
             Stage::Confirm,
             CONFIRM_ATTEMPTS,
+            deps,
+        )?);
+    }
+    // The held-out repetition of each profile's confirmation, before anything is built on it.
+    for profile in [Profile::Cpu, Profile::Gpu] {
+        let deps = dependency_digests(&studies, profile, Stage::Holdout);
+        studies.push(study(
+            &digest,
+            profile,
+            Stage::Holdout,
+            HOLDOUT_ATTEMPTS,
             deps,
         )?);
     }
@@ -193,6 +208,8 @@ fn requires(profile: Profile, stage: Stage) -> Vec<(Profile, Stage)> {
         Stage::Screen => Vec::new(),
         Stage::Pilot => vec![(profile, Stage::Screen)],
         Stage::Confirm => vec![(profile, Stage::Pilot)],
+        // The holdout runs under its pilot's rule and only after the confirmation it repeats qualified.
+        Stage::Holdout => vec![(profile, Stage::Pilot), (profile, Stage::Confirm)],
         Stage::Action(_) | Stage::Feature(_) => {
             vec![
                 (Profile::Cpu, Stage::Screen),
@@ -364,10 +381,10 @@ mod tests {
         intent.actions.clear();
         intent.factors.clear();
         let bare = plan(&intent).unwrap();
-        assert!(
-            bare.iter()
-                .all(|s| matches!(s.stage, Stage::Screen | Stage::Pilot | Stage::Confirm))
-        );
+        assert!(bare.iter().all(|s| matches!(
+            s.stage,
+            Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout
+        )));
     }
 
     #[test]
@@ -592,6 +609,12 @@ mod tests {
                 .map(|(_, _, what)| *what)
         };
         assert_eq!(status(Profile::Gpu, |s| *s == Stage::Confirm), Some("ran"));
+        // The held-out repetition of an unqualified confirmation never runs; the other profile's does.
+        assert_eq!(
+            status(Profile::Cpu, |s| *s == Stage::Holdout),
+            Some("blocked")
+        );
+        assert_eq!(status(Profile::Gpu, |s| *s == Stage::Holdout), Some("ran"));
         assert_eq!(
             status(Profile::Long, |s| matches!(s, Stage::Action(_))),
             Some("blocked")
@@ -614,7 +637,7 @@ mod tests {
                 // An unaffordable pilot is deferred, and everything that depends on it is blocked
                 // rather than run on the leftover budget.
                 Stage::Pilot => assert_eq!(*what, "deferred"),
-                Stage::Confirm | Stage::Action(_) | Stage::Feature(_) => {
+                Stage::Confirm | Stage::Holdout | Stage::Action(_) | Stage::Feature(_) => {
                     assert_eq!(*what, "blocked")
                 }
             }

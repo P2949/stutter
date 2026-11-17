@@ -73,3 +73,22 @@ two treatments in complete seeded blocks, the host applies the factor only to at
 action gate permits an action only during On attempts, and the report is one paired result carrying the
 treatment. See `docs/RESEARCH_TREATMENT_DESIGN.md`. Whether the real Steam host honours the factor and
 whether an action helps are still unproven without a live run.
+
+## Held-out validation
+
+Each profile's confirmation is followed by a `Holdout` study: the same selected pair and the same
+pilot-frozen rule, re-measured on fresh runs under a different study digest (so a different seeded
+schedule). It runs only after its confirmation qualified, and a campaign's `child_studies_qualified`
+needs every planned study (holdouts included) qualified, so no winner is claimed from a single
+confirmation. The verifier checks its rule and arm selection exactly as it does a confirmation's.
+
+## Long sessions and selection
+
+- Studies on the long profile need a `LongWorkUnit` (`research/long_session.rs`: an id, a 20-60
+  minute duration and a definition digest). None is installed, so they are recorded as
+  `BlockedNoComparableLongWorkUnit`; the native benchmark's FPS is never reported as a long session.
+- A treatment study measures the build the screen's verified results select for its factor
+  (`arm_selection::select_treatment_source`): a fork-local feature is never measured on Valve
+  Stable, and a factor no measured build can run is `BlockedNoEligibleSource`.
+- Before any study creates anything, its arms' prefixes must be all cold, or all warm and stamped by
+  their own build (`prefix_identity::check`).

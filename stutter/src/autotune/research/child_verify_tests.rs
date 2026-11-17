@@ -47,7 +47,8 @@ fn built(parent: &ResearchIntentV1, study: &ChildStudy) -> ResearchIntentV1 {
         StudyArms::Pair => vec![ProtonSource::ValveStable, ProtonSource::Ge],
         StudyArms::Single => vec![ProtonSource::ValveStable],
     };
-    let rule = matches!(study.stage, Stage::Confirm).then(|| freeze(&[70.0, 73.0, 67.0]).unwrap());
+    let rule = matches!(study.stage, Stage::Confirm | Stage::Holdout)
+        .then(|| freeze(&[70.0, 73.0, 67.0]).unwrap());
     child_intent(parent, study, &arms, rule.as_ref()).unwrap()
 }
 

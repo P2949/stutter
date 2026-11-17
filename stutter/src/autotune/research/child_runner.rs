@@ -107,7 +107,10 @@ impl StageRunner {
         &self,
         study: &ChildStudy,
     ) -> Option<super::pilot_rule::FrozenConfirmationRule> {
-        if !matches!(study.stage, super::child_study::Stage::Confirm) {
+        if !matches!(
+            study.stage,
+            super::child_study::Stage::Confirm | super::child_study::Stage::Holdout
+        ) {
             return None;
         }
         study

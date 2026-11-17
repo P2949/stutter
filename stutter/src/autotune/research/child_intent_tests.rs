@@ -11,7 +11,7 @@ fn build(
     study: &ChildStudy,
     arms: &[ProtonSource],
 ) -> anyhow::Result<ResearchIntentV1> {
-    let rule = matches!(study.stage, Stage::Confirm).then(rule);
+    let rule = matches!(study.stage, Stage::Confirm | Stage::Holdout).then(rule);
     child_intent(parent, study, arms, rule.as_ref())
 }
 use crate::autotune::research::{
@@ -268,4 +268,46 @@ fn only_a_confirmation_carries_a_rule_and_it_must_be_one_a_pilot_could_have_froz
     let mut smuggled = parent.clone();
     smuggled.confirmation_rule = Some(frozen);
     assert!(smuggled.validate().is_err());
+}
+
+mod holdout {
+    use super::*;
+
+    fn find(
+        plan: &[ChildStudy],
+        profile: crate::autotune::research::child_study::Profile,
+        stage: fn(&Stage) -> bool,
+    ) -> ChildStudy {
+        plan.iter()
+            .find(|s| s.profile == profile && stage(&s.stage))
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn a_holdout_is_a_fresh_separately_seeded_repetition_of_its_confirmation_under_the_same_rule() {
+        use crate::autotune::research::child_study::Profile;
+        let parent = parent();
+        let plan = plan(&parent).unwrap();
+        let confirm = find(&plan, Profile::Cpu, |s| matches!(s, Stage::Confirm));
+        let holdout = find(&plan, Profile::Cpu, |s| matches!(s, Stage::Holdout));
+        let pilot = find(&plan, Profile::Cpu, |s| matches!(s, Stage::Pilot));
+        // It follows the confirmation it repeats and descends from its pilot (whose rule it runs under).
+        assert!(holdout.depends_on.contains(&confirm.study_sha256));
+        assert!(holdout.depends_on.contains(&pilot.study_sha256));
+        assert_eq!(holdout.min_attempts, confirm.min_attempts);
+        assert_eq!(holdout.arms(), confirm.arms());
+        let as_confirm = build(&parent, &confirm, &pair()).unwrap();
+        let as_holdout = build(&parent, &holdout, &pair()).unwrap();
+        // The same pair and the same frozen rule, but a different digest and so a different seed.
+        assert_eq!(as_confirm.tools, as_holdout.tools);
+        assert_eq!(as_confirm.confirmation_rule, as_holdout.confirmation_rule);
+        assert_ne!(as_confirm.digest().unwrap(), as_holdout.digest().unwrap());
+        assert_ne!(
+            build_schedule(&as_confirm).unwrap()[0].study_sha256,
+            build_schedule(&as_holdout).unwrap()[0].study_sha256
+        );
+        // Without its pilot's rule it cannot be built, like a confirmation.
+        assert!(child_intent(&parent, &holdout, &pair(), None).is_err());
+    }
 }

@@ -64,15 +64,17 @@ pub fn child_intent(
             parent.actions.contains(&action),
             "the campaign did not authorize this action"
         ),
-        Stage::Screen | Stage::Pilot | Stage::Confirm => {}
+        Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout => {}
     }
     // A confirmation runs under the rule its pilot froze; no other study carries one.
     match (study.stage, rule) {
-        (Stage::Confirm, Some(rule)) => anyhow::ensure!(
+        (Stage::Confirm | Stage::Holdout, Some(rule)) => anyhow::ensure!(
             rule.is_consistent(),
             "the confirmation rule is not one a pilot could have frozen"
         ),
-        (Stage::Confirm, None) => anyhow::bail!("a confirmation needs its pilot's frozen rule"),
+        (Stage::Confirm | Stage::Holdout, None) => {
+            anyhow::bail!("a confirmation needs its pilot's frozen rule")
+        }
         (_, Some(_)) => anyhow::bail!("only a confirmation carries a frozen rule"),
         (_, None) => {}
     }

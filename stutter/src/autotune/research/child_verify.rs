@@ -96,8 +96,8 @@ pub(crate) fn derived_from(
             StudyArms::Single => child.tools.len() == 1,
         };
     let rule_ok = match (study.stage, &child.confirmation_rule) {
-        (Stage::Confirm, Some(rule)) => rule.is_consistent(),
-        (Stage::Confirm, None) => false,
+        (Stage::Confirm | Stage::Holdout, Some(rule)) => rule.is_consistent(),
+        (Stage::Confirm | Stage::Holdout, None) => false,
         (_, Some(_)) => false,
         (_, None) => true,
     };
@@ -265,7 +265,7 @@ fn study_checks(
     let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name)?);
     let child: ResearchIntentV1 = serde_json::from_slice(&read_private(&dir, "intent.json", uid)?)?;
     match decided.stage {
-        Stage::Confirm => {
+        Stage::Confirm | Stage::Holdout => {
             let planned = super::child_study::plan(parent)?
                 .into_iter()
                 .find(|study| study.study_sha256 == decided.study_sha256)

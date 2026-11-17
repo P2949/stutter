@@ -86,7 +86,7 @@ pub fn select_treatment_source(
             }
             best.map(|(source, _)| source)
         }
-        Stage::Screen | Stage::Pilot | Stage::Confirm => None,
+        Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout => None,
     }
 }
 

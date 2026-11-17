@@ -58,7 +58,7 @@ pub fn inputs_for_study(
                 })?
                 .to_vec(),
             rule: match study.stage {
-                Stage::Confirm => {
+                Stage::Confirm | Stage::Holdout => {
                     Some(rule.ok_or_else(|| anyhow::anyhow!("the pilot froze no rule"))?)
                 }
                 _ => None,

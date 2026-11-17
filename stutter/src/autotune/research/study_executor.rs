@@ -195,7 +195,7 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
         match study.stage {
             Stage::Feature(_) => Some("FeatureActivationUnproven"),
             Stage::Action(_) => Some("ActionEvidenceMissing"),
-            Stage::Screen | Stage::Pilot | Stage::Confirm => None,
+            Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout => None,
         }
     }
 
