@@ -114,6 +114,7 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         raw_verified: true,
         runtime_matched: true,
         stage_evidence: None,
+        activation: None,
         run_fps: (0..study.min_attempts)
             .map(|i| {
                 let arm = if i % 2 == 0 {
@@ -625,5 +626,35 @@ fn a_pilot_that_cannot_support_a_confirmation_is_unqualified_with_its_reason() {
     assert_eq!(
         (invalid.0, invalid.1),
         (StudyResult::Unqualified, "PilotInvalid")
+    );
+}
+
+#[test]
+fn an_observed_activation_is_not_a_functional_proof_and_the_reasons_differ() {
+    use crate::autotune::research::ResearchFactor;
+    let mut intent = base_intent();
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::ValveStable,
+        identity_sha256: "b".repeat(64),
+    });
+    intent.factors = vec![ResearchFactor::NtSync];
+    let plan = plan(&intent).unwrap();
+    let feature = plan
+        .iter()
+        .find(|s| matches!(s.stage, Stage::Feature(_)))
+        .unwrap();
+    let run_with = |activation: Option<bool>| {
+        let mut outcome = good(feature);
+        outcome.activation = activation;
+        let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
+        run_to_end(&mut exec, feature).unwrap()
+    };
+    assert_eq!(run_with(None).reason, "FeatureActivationUnproven");
+    assert_eq!(run_with(Some(false)).reason, "FeatureActivationUnproven");
+    // The treatment reached the game, but no receipt shows the feature works: still unqualified.
+    let reached = run_with(Some(true));
+    assert_eq!(
+        (reached.result, reached.reason),
+        (StudyResult::Unqualified, "FeatureFunctionalUnproven")
     );
 }

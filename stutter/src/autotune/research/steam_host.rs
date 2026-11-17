@@ -138,6 +138,10 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         self.treatments = treatments;
     }
 
+    fn attempt_index(&mut self) -> Option<u32> {
+        self.current
+    }
+
     fn attempt_treatment(&mut self) -> Option<super::Treatment> {
         let index = usize::try_from(self.current?).ok()?;
         self.treatments.as_ref()?.get(index).copied()

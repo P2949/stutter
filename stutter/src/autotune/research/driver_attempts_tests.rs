@@ -52,6 +52,9 @@ impl AttemptHost for Host {
     fn health_blocked(&mut self) -> bool {
         self.health
     }
+    fn attempt_index(&mut self) -> Option<u32> {
+        Some(self.current)
+    }
     fn attempt_treatment(&mut self) -> Option<crate::autotune::research::Treatment> {
         self.treatment
     }
@@ -335,9 +338,7 @@ mod child_verification {
 fn inputs_for(study: &ChildStudy) -> StudyInputs {
     StudyInputs {
         arms: match study.arms() {
-            crate::autotune::research::child_study::StudyArms::Single => {
-                vec![ProtonSource::ValveStable]
-            }
+            crate::autotune::research::child_study::StudyArms::Single => vec![ProtonSource::Ge],
             _ => vec![ProtonSource::Ge, ProtonSource::ValveStable],
         },
         rule: matches!(

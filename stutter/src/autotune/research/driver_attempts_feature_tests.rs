@@ -62,3 +62,105 @@ fn a_feature_study_enables_exactly_its_factor_and_the_next_study_starts_from_bas
     assert!(refusing.poll(&feature, 100).is_err());
     assert!(!root2.path().join("studies").exists());
 }
+
+mod activation {
+    use super::*;
+    use crate::autotune::research::Treatment::{Off, On};
+
+    fn runner() -> (tempfile::TempDir, DriverStudyAttempts, ChildStudy) {
+        let (root, runner, study, _) = attempts(Host::finishing());
+        (root, runner, study)
+    }
+
+    #[test]
+    fn every_completed_attempt_must_show_its_own_treatment_and_both_treatments_must_run() {
+        let (_root, mut runner, _study) = runner();
+        let mut with_factor = parent();
+        with_factor.factors = vec![crate::autotune::research::ResearchFactor::NtSync];
+        let feature = plan(&with_factor)
+            .unwrap()
+            .into_iter()
+            .find(|s| {
+                matches!(
+                    s.stage,
+                    crate::autotune::research::child_study::Stage::Feature(_)
+                )
+            })
+            .expect("a feature study");
+        // Not a feature study (or nothing observed): no claim either way.
+        assert_eq!(
+            runner.feature_activation(&plan(&parent()).unwrap()[0], 4),
+            None
+        );
+        runner.feature_observed.insert(0, (Off, true));
+        runner.feature_observed.insert(1, (On, true));
+        assert_eq!(runner.feature_activation(&feature, 2), Some(true));
+        // An attempt that did not show its treatment, a missing observation, or one treatment only.
+        runner.feature_observed.insert(1, (On, false));
+        assert_eq!(runner.feature_activation(&feature, 2), Some(false));
+        runner.feature_observed.insert(1, (On, true));
+        assert_eq!(
+            runner.feature_activation(&feature, 3),
+            Some(false),
+            "an attempt unobserved"
+        );
+        runner.feature_observed.remove(&0);
+        runner.feature_observed.insert(0, (On, true));
+        assert_eq!(
+            runner.feature_activation(&feature, 2),
+            Some(false),
+            "never off"
+        );
+    }
+}
+
+#[test]
+fn a_feature_study_records_per_attempt_whether_its_treatment_reached_the_game_process() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use crate::autotune::research::{ResearchFactor, Treatment, child_study::Stage};
+    let root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut parent = parent();
+    parent.factors = vec![ResearchFactor::NtSync];
+    let feature = plan(&parent)
+        .unwrap()
+        .into_iter()
+        .find(|s| matches!(s.stage, Stage::Feature(_)))
+        .unwrap();
+    let mut host = Host::finishing();
+    host.process = Some(crate::autotune::research::action_child::ChildTarget {
+        pid: stutter_core::ids::Pid::new(4242),
+        start_ticks: 99,
+        uid: crate::syscall::geteuid(),
+    });
+    host.treatment = Some(Treatment::On);
+    let mut now = parent.issued_unix_seconds + 1;
+    let mut runner = DriverStudyAttempts::new(
+        File::open(root.path()).unwrap(),
+        parent.clone(),
+        Box::new(host),
+        Box::new(move || {
+            now += 1;
+            now
+        }),
+        Box::new(|| Ok(())),
+        Box::new(|_| std::path::PathBuf::from("/nonexistent")),
+        Box::new(|study| Ok(inputs_for(study))),
+    )
+    // NTSync on is the absence of the disabling variable: this environment shows it reached.
+    .with_environ_reader(Box::new(|pid| {
+        assert_eq!(pid, 4242, "the sighted game process is the one read");
+        Some(b"HOME=/h\0".to_vec())
+    }));
+    let outcome = run_to_end(&mut runner, &feature);
+    assert!(!runner.feature_observed.is_empty());
+    assert!(
+        runner
+            .feature_observed
+            .values()
+            .all(|(treatment, reached)| *treatment == Treatment::On && *reached)
+    );
+    // Only the On treatment ever ran in this fixture, so activation is not shown for the study.
+    assert_eq!(outcome.activation, Some(false));
+}

@@ -75,6 +75,10 @@ pub struct AttemptsOutcome {
     /// that the factor was really active, or the action's outcome with proven restoration. `None`
     /// when nothing collects it.
     pub stage_evidence: Option<bool>,
+    /// A feature study only: every completed attempt's own treatment (factor on or off) was observed in
+    /// the game process's environment. This is activation of the control, not proof that the feature
+    /// works; `None` for any other study.
+    pub activation: Option<bool>,
 }
 
 /// Runs a study's attempts (the real one drives the journalled `Driver` over the Steam host, one
@@ -193,6 +197,11 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
             return None;
         }
         match study.stage {
+            // Activation (the treatment reached the game) and function (the feature works) are
+            // separate: the first can be observed, the second needs a functional receipt.
+            Stage::Feature(_) if outcome.activation == Some(true) => {
+                Some("FeatureFunctionalUnproven")
+            }
             Stage::Feature(_) => Some("FeatureActivationUnproven"),
             Stage::Action(_) => Some("ActionEvidenceMissing"),
             Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout => None,

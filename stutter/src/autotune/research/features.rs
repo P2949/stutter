@@ -108,6 +108,43 @@ pub fn arm_env(
     Ok(merged)
 }
 
+/// Whether a launched game process's environment (`/proc/<pid>/environ`, NUL-separated) shows this
+/// treatment really reached it: every variable the treatment sets is present with its value, and no
+/// variable only the other treatment sets is. This is activation of the environment control, not
+/// proof that the feature works. A factor with no environment difference between its treatments
+/// cannot be shown this way, and is never reported as reached.
+pub fn treatment_effective(
+    environ: &[u8],
+    source: ProtonSource,
+    factor: ResearchFactor,
+    on: bool,
+) -> bool {
+    let (Ok(wanted), Ok(other)) = (
+        factor_env(source, factor, on),
+        factor_env(source, factor, !on),
+    ) else {
+        return false;
+    };
+    if wanted == other {
+        return false;
+    }
+    let present: BTreeMap<String, String> = environ
+        .split(|byte| *byte == 0)
+        .filter_map(|entry| {
+            let text = String::from_utf8_lossy(entry);
+            let (key, value) = text.split_once('=')?;
+            Some((key.to_owned(), value.to_owned()))
+        })
+        .collect();
+    wanted
+        .iter()
+        .all(|(key, value)| present.get(key) == Some(value))
+        && other
+            .iter()
+            .filter(|(key, value)| wanted.get(*key) != Some(*value))
+            .all(|(key, value)| present.get(key) != Some(value))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FeatureEvidence {
     /// A runtime proof (DLL, backend or effective-path), not merely that the flag was set.
@@ -304,5 +341,93 @@ mod matrix_tests {
                 .filter(|(_, f, _)| *f == ResearchFactor::Hdr)
                 .all(|(_, _, c)| matches!(c, MatrixCell::Blocked(_)))
         );
+    }
+}
+
+#[cfg(test)]
+mod effective_tests {
+    use super::*;
+
+    fn environ(pairs: &[(&str, &str)]) -> Vec<u8> {
+        pairs
+            .iter()
+            .flat_map(|(key, value)| format!("{key}={value}\0").into_bytes())
+            .collect()
+    }
+
+    #[test]
+    fn a_treatment_is_reached_only_when_its_own_variables_show_and_the_others_do_not() {
+        use ProtonSource::Ge;
+        use ResearchFactor::{NtSync, WineWayland};
+        // Wayland on needs PROTON_ENABLE_WAYLAND=1 (and not the off value 0).
+        assert!(treatment_effective(
+            &environ(&[("PROTON_ENABLE_WAYLAND", "1")]),
+            Ge,
+            WineWayland,
+            true
+        ));
+        assert!(!treatment_effective(
+            &environ(&[("PROTON_ENABLE_WAYLAND", "0")]),
+            Ge,
+            WineWayland,
+            true
+        ));
+        assert!(!treatment_effective(&environ(&[]), Ge, WineWayland, true));
+        // Off sets the documented baseline value explicitly.
+        assert!(treatment_effective(
+            &environ(&[("PROTON_ENABLE_WAYLAND", "0")]),
+            Ge,
+            WineWayland,
+            false
+        ));
+        assert!(!treatment_effective(
+            &environ(&[("PROTON_ENABLE_WAYLAND", "1")]),
+            Ge,
+            WineWayland,
+            false
+        ));
+        // NTSync on is the absence of the disabling variable; off is its presence.
+        assert!(treatment_effective(
+            &environ(&[("HOME", "/h")]),
+            Ge,
+            NtSync,
+            true
+        ));
+        assert!(!treatment_effective(
+            &environ(&[("PROTON_NO_NTSYNC", "1")]),
+            Ge,
+            NtSync,
+            true
+        ));
+        assert!(treatment_effective(
+            &environ(&[("PROTON_NO_NTSYNC", "1")]),
+            Ge,
+            NtSync,
+            false
+        ));
+        assert!(!treatment_effective(
+            &environ(&[("HOME", "/h")]),
+            Ge,
+            NtSync,
+            false
+        ));
+    }
+
+    #[test]
+    fn a_build_without_a_control_or_a_factor_with_no_environment_difference_is_never_reached() {
+        use ProtonSource::ValveStable;
+        use ResearchFactor::{Gamescope, NtSync};
+        assert!(!treatment_effective(
+            &environ(&[("PROTON_NO_NTSYNC", "1")]),
+            ValveStable,
+            NtSync,
+            false
+        ));
+        assert!(!treatment_effective(
+            &environ(&[]),
+            ProtonSource::Ge,
+            Gamescope,
+            true
+        ));
     }
 }

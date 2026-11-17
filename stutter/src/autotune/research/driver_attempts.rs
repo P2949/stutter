@@ -57,6 +57,12 @@ pub struct DriverStudyAttempts {
     /// The running study is a within-source treatment study (the gate then permits an action only
     /// during attempts treated On).
     treatment_study: bool,
+    /// Reads a process's environment (`/proc/<pid>/environ`); replaceable so the evidence can be tested.
+    environ_of: Box<dyn Fn(u32) -> Option<Vec<u8>> + Send>,
+    /// The build a feature study measures, and for each attempt whether its factor's treatment was
+    /// observed in the game process's environment (index -> (treatment, reached)).
+    feature_source: Option<ProtonSource>,
+    feature_observed: BTreeMap<u32, (super::Treatment, bool)>,
 }
 
 fn dir_name(study: &ChildStudy) -> &str {
@@ -99,12 +105,22 @@ impl DriverStudyAttempts {
             gate: None,
             armed_for: None,
             treatment_study: false,
+            environ_of: Box::new(|pid| std::fs::read(format!("/proc/{pid}/environ")).ok()),
+            feature_source: None,
+            feature_observed: BTreeMap::new(),
         }
     }
 
     /// Share the action gate with the runtime: an Action study arms it on the game process it sights.
     pub fn with_action_gate(mut self, gate: SharedActionGate) -> Self {
         self.gate = Some(gate);
+        self
+    }
+
+    /// Replace how a game process's environment is read.
+    #[cfg(test)]
+    fn with_environ_reader(mut self, reader: Box<dyn Fn(u32) -> Option<Vec<u8>> + Send>) -> Self {
+        self.environ_of = reader;
         self
     }
 
@@ -116,6 +132,47 @@ impl DriverStudyAttempts {
     /// The shared attempt host, for the controller to feed its desktop observations.
     pub fn host_mut(&mut self) -> &mut (dyn AttemptHost + Send) {
         self.host.as_mut()
+    }
+
+    /// During a feature study, once per attempt: does the factor's treatment (on or off) show in the
+    /// sighted game process's own environment? Observation only; an unreadable process records nothing.
+    fn observe_feature(&mut self, study: &ChildStudy) {
+        let Stage::Feature(factor) = study.stage else {
+            return;
+        };
+        let (Some(source), Some(target)) = (self.feature_source, self.host.game_process()) else {
+            return;
+        };
+        let (Some(treatment), Some(index)) =
+            (self.host.attempt_treatment(), self.host.attempt_index())
+        else {
+            return;
+        };
+        if self.feature_observed.contains_key(&index) {
+            return;
+        }
+        let Some(environ) = (self.environ_of)(u32::from(target.pid)) else {
+            return;
+        };
+        let reached = super::features::treatment_effective(
+            &environ,
+            source,
+            factor,
+            treatment == super::Treatment::On,
+        );
+        self.feature_observed.insert(index, (treatment, reached));
+    }
+
+    /// Whether every completed attempt of a feature study showed its own treatment in the game
+    /// process's environment (and both treatments ran). `None` for any other study.
+    fn feature_activation(&self, study: &ChildStudy, completed: u32) -> Option<bool> {
+        matches!(study.stage, Stage::Feature(_)).then(|| {
+            let both = [super::Treatment::Off, super::Treatment::On]
+                .iter()
+                .all(|wanted| self.feature_observed.values().any(|(t, _)| t == wanted));
+            both && self.feature_observed.len() as u32 >= completed
+                && self.feature_observed.values().all(|(_, reached)| *reached)
+        })
     }
 
     /// An Action study arms the gate (once) on the game process the host has sighted and attested,
@@ -230,6 +287,8 @@ impl DriverStudyAttempts {
         self.host.set_enabled_factors(&factors);
         let treatments = super::treatment::treatments_of(&intent)?;
         self.treatment_study = treatments.is_some();
+        self.feature_source = inputs.arms.first().copied();
+        self.feature_observed.clear();
         self.host.set_treatments(treatments);
         let schedule = build_schedule(&intent)?;
         let len = schedule.len();
@@ -287,6 +346,7 @@ impl DriverStudyAttempts {
             // No runtime proof of a factor's activation, and no worker restoration evidence for an
             // action, is collected here yet: stage evidence is unproven.
             stage_evidence: self.stage_evidence(study),
+            activation: self.feature_activation(study, u32::try_from(report.attempts_completed)?),
             run_fps: evidence
                 .values()
                 .filter_map(|item| item.native_completion.as_deref())
@@ -350,6 +410,7 @@ impl StudyAttempts for DriverStudyAttempts {
         };
         self.last_step = Some(step.clone());
         self.arm_gate_for(study);
+        self.observe_feature(study);
         let halted = matches!(step, Step::Halted(_));
         match step {
             Step::Waiting | Step::Running(_) | Step::Sealed(_) => Ok(None),

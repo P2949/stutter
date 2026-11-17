@@ -60,6 +60,10 @@ pub trait AttemptHost {
     /// The treatment of every attempt of the running study, in schedule order (`None` for a study
     /// whose attempts are the Proton arms). A factor is applied only to attempts treated `On`.
     fn set_treatments(&mut self, _treatments: Option<Vec<super::Treatment>>) {}
+    /// The index of the attempt currently launched.
+    fn attempt_index(&mut self) -> Option<u32> {
+        None
+    }
     /// The treatment of the attempt currently launched, when the running study has treatments.
     fn attempt_treatment(&mut self) -> Option<super::Treatment> {
         None
