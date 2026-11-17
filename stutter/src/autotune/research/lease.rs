@@ -60,7 +60,7 @@ pub struct CampaignFacts {
 }
 
 impl CampaignFacts {
-    fn validate(&self, intent: &ResearchIntentV1) -> anyhow::Result<()> {
+    pub(super) fn validate(&self, intent: &ResearchIntentV1) -> anyhow::Result<()> {
         intent.validate()?;
         anyhow::ensure!(
             !self.validation_override_present && !self.mutable_action_present,

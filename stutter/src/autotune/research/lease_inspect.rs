@@ -37,9 +37,59 @@ pub struct LeaseInspection {
     pub final_phase: ResearchPhase,
     /// The campaign ended (completed, blocked or aborted) rather than stopping mid-way.
     pub terminal: bool,
+    /// What the header recorded of the campaign's admission over the control socket.
+    pub admission: Admission,
     /// Whether a live process holds the lease's own exclusive lock on its directory (the single-owner
     /// property), read from `/proc/locks` without taking any lock. `None` when that cannot be read.
     pub owner_live: Option<bool>,
+}
+
+/// What a lease header records of how the campaign was admitted. The control socket identifies the
+/// submitting peer (pid and start time) and the resident service collects the host facts itself, and
+/// the lease writes both into its sealed header. This re-checks that record: it shows the admission
+/// was recorded for an identified peer with consistent, intact facts inside the intent's validity
+/// window. It does not re-run the socket's credential check, which happened in the service at the time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Admission {
+    /// A submitting peer with a nonzero pid and start time was recorded.
+    pub peer_identified: bool,
+    /// The recorded host facts hash to the digest beside them and agree with the intent.
+    pub facts_consistent: bool,
+    /// The admission was made at or after the intent was issued and before its deadline.
+    pub admitted_in_window: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct AdmissionHeader {
+    facts: super::CampaignFacts,
+    facts_sha256: String,
+    peer_pid: u32,
+    peer_start_ticks: u64,
+    admitted_unix_seconds: u64,
+}
+
+impl Admission {
+    fn of(header: &serde_json::Value, intent: &ResearchIntentV1) -> Self {
+        let none = Self {
+            peer_identified: false,
+            facts_consistent: false,
+            admitted_in_window: false,
+        };
+        // A header without these fields (an older lease) records no admission, and says so.
+        let Ok(view) = serde_json::from_value::<AdmissionHeader>(header.clone()) else {
+            return none;
+        };
+        let digest = serde_json::to_vec(&view.facts)
+            .map(|bytes| stutter_core::hash::sha256_hex(&bytes))
+            .ok();
+        Self {
+            peer_identified: view.peer_pid != 0 && view.peer_start_ticks != 0,
+            facts_consistent: digest.as_deref() == Some(view.facts_sha256.as_str())
+                && view.facts.validate(intent).is_ok(),
+            admitted_in_window: view.admitted_unix_seconds >= intent.issued_unix_seconds
+                && view.admitted_unix_seconds < intent.deadline_unix_seconds,
+        }
+    }
 }
 
 /// Whether the text of `/proc/locks` shows a flock on the file with this device and inode. Each line
@@ -100,6 +150,7 @@ pub fn inspect(dir: &Path, uid: u32) -> anyhow::Result<LeaseInspection> {
         .to_owned();
     let intent: ResearchIntentV1 = serde_json::from_value(header["intent"].clone())?;
     let header_matches_intent = intent.digest()? == claimed;
+    let admission = Admission::of(&header, &intent);
 
     let mut previous = stutter_core::hash::sha256_hex(&header_bytes);
     let mut phase = ResearchPhase::Requested;
@@ -142,6 +193,7 @@ pub fn inspect(dir: &Path, uid: u32) -> anyhow::Result<LeaseInspection> {
         count += 1;
     }
     Ok(LeaseInspection {
+        admission,
         owner_live: flock_held(&meta),
         events: count,
         chain_valid,

@@ -238,3 +238,72 @@ fn an_anonymous_device_filesystem_is_matched_by_inode_and_a_real_device_is_not()
     assert!(!locks_show_flock(real, (0x8u64 << 8) | 3, 131));
     assert!(locks_show_flock(real, (0x8u64 << 8) | 2, 131));
 }
+
+#[test]
+fn a_real_lease_records_an_identified_peer_intact_facts_and_an_admission_inside_the_window() {
+    let (dir, uid) = settled();
+    let admission = inspect(dir.path(), uid).unwrap().admission;
+    assert_eq!(
+        admission,
+        Admission {
+            peer_identified: true,
+            facts_consistent: true,
+            admitted_in_window: true
+        }
+    );
+}
+
+#[test]
+fn each_part_of_the_recorded_admission_fails_on_its_own() {
+    let admission = |edit: &dyn Fn(String) -> String| {
+        let (dir, uid) = settled();
+        rewrite(&dir, "intent.json", edit);
+        inspect(dir.path(), uid).unwrap().admission
+    };
+    // No peer was identified (the submitter's pid or start time recorded as zero).
+    let unidentified = admission(&|text| text.replace("\"peer_pid\":123", "\"peer_pid\":0"));
+    assert_eq!(
+        unidentified,
+        Admission {
+            peer_identified: false,
+            facts_consistent: true,
+            admitted_in_window: true
+        }
+    );
+    let no_start =
+        admission(&|text| text.replace("\"peer_start_ticks\":456", "\"peer_start_ticks\":0"));
+    assert!(!no_start.peer_identified);
+    // The recorded facts were edited after their digest was taken.
+    let edited = admission(&|text| text.replacen("\"build_id\":", "\"build_id\":9", 1));
+    assert!(!edited.facts_consistent && edited.peer_identified);
+    // Admitted before the intent was issued, and at its deadline.
+    let early = admission(&|text| {
+        let at = text
+            .split("\"admitted_unix_seconds\":")
+            .nth(1)
+            .and_then(|rest| rest.split(|c: char| !c.is_ascii_digit()).next())
+            .unwrap()
+            .to_owned();
+        text.replace(
+            &format!("\"admitted_unix_seconds\":{at}"),
+            "\"admitted_unix_seconds\":1",
+        )
+    });
+    assert!(!early.admitted_in_window && early.facts_consistent);
+    // A header that records no admission at all (an older lease) says so rather than passing.
+    let bare = admission(&|text| {
+        let mut value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("peer_pid");
+        object.remove("facts");
+        serde_json::to_string(&value).unwrap()
+    });
+    assert_eq!(
+        bare,
+        Admission {
+            peer_identified: false,
+            facts_consistent: false,
+            admitted_in_window: false
+        }
+    );
+}

@@ -18,6 +18,13 @@ fn on(profile: Profile, stage: Stage, result: Option<StudyResult>) -> Dispositio
     }
 }
 
+const ADMITTED: crate::autotune::research::lease_inspect::Admission =
+    crate::autotune::research::lease_inspect::Admission {
+        peer_identified: true,
+        facts_consistent: true,
+        admitted_in_window: true,
+    };
+
 fn full(result: Option<StudyResult>) -> Vec<Disposition> {
     let mut studies = Vec::new();
     // The plan's comparison stages exist for both performance profiles.
@@ -236,6 +243,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
         terminal: true,
         for_this_campaign: true,
         owner_live: Some(false),
+        admission: ADMITTED,
     };
     assert_eq!(with(None).blockers, ["LeaseNotInspected"]);
     assert!(with(Some(good)).accepted);
@@ -259,6 +267,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
         with(Some(LeaseFacts {
             for_this_campaign: false,
             owner_live: Some(false),
+            admission: ADMITTED,
             ..good
         }))
         .blockers,
@@ -271,6 +280,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
         terminal: false,
         for_this_campaign: false,
         owner_live: Some(false),
+        admission: ADMITTED,
     }));
     assert_eq!(broken.blockers.len(), 5);
 }
@@ -415,5 +425,52 @@ fn g6_is_accepted_only_from_a_physical_matrix_receipt_and_otherwise_says_why() {
     assert_eq!(
         g6(Err("NoFaultMatrixReceipt")),
         (false, vec!["NoFaultMatrixReceipt"])
+    );
+}
+
+#[test]
+fn g1_names_each_part_of_the_admission_it_cannot_show() {
+    use crate::autotune::research::lease_inspect::Admission;
+    let studies = full(Some(StudyResult::Qualified));
+    let g1 = |admission: Admission| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: false,
+            telemetry: Some((8, 8)),
+            replication: Some(true),
+            fault_matrix: Err("NoFaultMatrixReceipt"),
+            deployment_attested: true,
+            lease: Some(LeaseFacts {
+                chain_valid: true,
+                transitions_valid: true,
+                header_matches_intent: true,
+                terminal: true,
+                for_this_campaign: true,
+                owner_live: Some(false),
+                admission,
+            }),
+            host: None,
+        });
+        of(&verdicts, "G1").blockers.clone()
+    };
+    assert!(g1(ADMITTED).is_empty());
+    assert_eq!(
+        g1(Admission {
+            peer_identified: false,
+            ..ADMITTED
+        }),
+        ["LeaseAdmissionPeerUnidentified"]
+    );
+    assert_eq!(
+        g1(Admission {
+            facts_consistent: false,
+            admitted_in_window: false,
+            ..ADMITTED
+        }),
+        ["LeaseFactsInconsistent", "LeaseAdmittedOutsideIntentWindow"]
     );
 }

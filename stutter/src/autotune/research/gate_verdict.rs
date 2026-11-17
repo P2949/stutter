@@ -49,6 +49,8 @@ pub struct LeaseFacts {
     pub for_this_campaign: bool,
     /// A live process holds the lease's exclusive lock (`None`: the lock table could not be read).
     pub owner_live: Option<bool>,
+    /// What the header recorded of the admission (an identified peer, intact facts, inside the window).
+    pub admission: super::lease_inspect::Admission,
 }
 
 /// What the gates are computed from.
@@ -175,6 +177,15 @@ fn lease_blockers(lease: Option<LeaseFacts>) -> Vec<&'static str> {
     }
     if !lease.for_this_campaign {
         blockers.push("LeaseForAnotherCampaign");
+    }
+    if !lease.admission.peer_identified {
+        blockers.push("LeaseAdmissionPeerUnidentified");
+    }
+    if !lease.admission.facts_consistent {
+        blockers.push("LeaseFactsInconsistent");
+    }
+    if !lease.admission.admitted_in_window {
+        blockers.push("LeaseAdmittedOutsideIntentWindow");
     }
     match lease.owner_live {
         Some(false) => {}

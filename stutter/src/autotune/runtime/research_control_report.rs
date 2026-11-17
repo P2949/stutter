@@ -72,6 +72,7 @@ impl ResearchCoordinator {
             terminal: inspection.terminal,
             for_this_campaign: inspection.intent_sha256 == intent_sha256,
             owner_live: inspection.owner_live,
+            admission: inspection.admission,
         })
     }
 

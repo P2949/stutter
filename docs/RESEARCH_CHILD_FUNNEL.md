@@ -229,3 +229,14 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   (btrfs) the table lists the filesystem's own device, so those are matched by inode. That the lease
   ends only through `Restoring` is already enforced by the transition check. Authenticated IPC is
   tested elsewhere and is still not attested by the inspection.
+- **G1 admission.** The lease header records the submitting peer (pid and start time), the host facts
+  the resident service collected, their digest and the admission time. The inspection re-checks that
+  record: `LeaseAdmissionPeerUnidentified`, `LeaseFactsInconsistent` (digest or agreement with the
+  intent) and `LeaseAdmittedOutsideIntentWindow`; a header with no admission record fails all three.
+  This shows the admission was recorded for an identified peer with intact facts; it does not re-run
+  the socket's credential check, which happened in the service at the time. The real 2026-11-15
+  lease passes all three.
+- **Oracle on the real engine.** `diagnosis/tests/oracle_bridge.rs` runs the diagnosis engine on its own
+  fixtures and scores the output through `oracle_cases::from_controller`: a scheduler delay is
+  runnable delay, a GPU-bound diagnosis is reported only if the engine attributed it, and a quiet run
+  is a correct abstention. This is a fixture exercise and never stands for the physical cases.
