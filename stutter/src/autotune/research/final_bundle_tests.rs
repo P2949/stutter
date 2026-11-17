@@ -305,3 +305,19 @@ fn a_restored_action_is_not_a_demonstrated_benefit() {
     // A refused comparison (too few pairs) has no verdict and demonstrates nothing.
     assert_eq!(action(Value::Null, 1)["benefit_demonstrated"], false);
 }
+
+#[test]
+fn the_capability_matrix_distinguishes_the_feature_dispositions_and_proves_none() {
+    let files: std::collections::BTreeMap<_, _> =
+        build(&json!({}), &response()).into_iter().collect();
+    let matrix: Value = serde_json::from_slice(&files["capability-matrix.json"]).unwrap();
+    let rows = matrix["feature_dispositions"].as_array().unwrap();
+    assert_eq!(rows.len(), 60);
+    let kinds: std::collections::BTreeSet<_> = rows
+        .iter()
+        .filter_map(|row| row["disposition"].as_str())
+        .collect();
+    assert!(kinds.contains("NotApplicable") && kinds.contains("Unavailable"));
+    assert!(kinds.contains("ControlAvailableNotFunctionallyProven"));
+    assert!(!kinds.contains("FunctionallyProven"));
+}

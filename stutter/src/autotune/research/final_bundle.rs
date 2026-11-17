@@ -61,6 +61,22 @@ fn status_of(group: &[&Value]) -> &'static str {
 /// files), embedded from the repository so the matrix cannot drift from the ledger it cites.
 const COVERAGE: &str = include_str!("../../../../docs/integration-coverage.json");
 
+/// Each (source, factor) cell with what can honestly be said of it: not applicable, unavailable, not
+/// observable, or a control that exists but is not functionally proven. Never "proven": no factor has
+/// a functional receipt.
+fn feature_dispositions() -> Vec<Value> {
+    super::features::feature_dispositions()
+        .into_iter()
+        .map(|(source, factor, disposition)| {
+            json!({
+                "source": format!("{source:?}"),
+                "factor": format!("{factor:?}"),
+                "disposition": disposition,
+            })
+        })
+        .collect()
+}
+
 fn integration_matrix() -> Value {
     let Ok(coverage) = serde_json::from_str::<Value>(COVERAGE) else {
         return json!({ "status": "CoverageLedgerUnreadable" });
@@ -270,6 +286,7 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
             "capability-matrix.json",
             pretty(&json!({
                 "integration_coverage": integration_matrix(),
+                "feature_dispositions": feature_dispositions(),
                 "child_studies": response.get("child_studies"),
             })),
         ),

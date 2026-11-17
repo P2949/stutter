@@ -219,6 +219,48 @@ pub fn feature_matrix() -> Vec<(ProtonSource, ResearchFactor, MatrixCell)> {
     cells
 }
 
+/// What can honestly be said of a (source, factor) cell today. Nothing here is `FunctionallyProven`: that
+/// needs a factor-specific functional receipt (a measured effect of the feature itself, not an
+/// environment variable reaching the game), and none exists for any factor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum FeatureDisposition {
+    /// The factor does not apply to this build or is not a Proton environment factor at all.
+    NotApplicable,
+    /// The build documents no (or conflicting) environment control for it: it cannot be switched.
+    Unavailable,
+    /// Whether it took effect depends on output, compositor and driver that must qualify first.
+    NotObservable,
+    /// An environment control exists and its reaching the game can be observed, but no functional
+    /// receipt shows the feature works.
+    ControlAvailableNotFunctionallyProven,
+    /// A functional receipt shows the feature worked (unreachable until such receipts exist).
+    FunctionallyProven,
+}
+
+/// Every (source, factor) cell with its disposition, for reports.
+pub fn feature_dispositions() -> Vec<(ProtonSource, ResearchFactor, FeatureDisposition)> {
+    feature_matrix()
+        .into_iter()
+        .map(|(source, factor, cell)| {
+            let disposition = match cell {
+                MatrixCell::Planned { .. } => {
+                    FeatureDisposition::ControlAvailableNotFunctionallyProven
+                }
+                MatrixCell::Blocked(
+                    FactorBlock::NotApplicableToSource | FactorBlock::NotAProtonEnvironmentFactor,
+                ) => FeatureDisposition::NotApplicable,
+                MatrixCell::Blocked(
+                    FactorBlock::NoEnvironmentControl | FactorBlock::ConflictingEnvironment,
+                ) => FeatureDisposition::Unavailable,
+                MatrixCell::Blocked(FactorBlock::NeedsQualifiedOutput) => {
+                    FeatureDisposition::NotObservable
+                }
+            };
+            (source, factor, disposition)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,5 +471,46 @@ mod effective_tests {
             Gamescope,
             true
         ));
+    }
+}
+
+#[cfg(test)]
+mod disposition_tests {
+    use super::*;
+
+    fn of(source: ProtonSource, factor: ResearchFactor) -> FeatureDisposition {
+        feature_dispositions()
+            .into_iter()
+            .find(|(s, f, _)| *s == source && *f == factor)
+            .map(|(_, _, disposition)| disposition)
+            .unwrap()
+    }
+
+    #[test]
+    fn every_cell_has_a_disposition_and_none_is_functionally_proven() {
+        let all = feature_dispositions();
+        assert_eq!(all.len(), 60);
+        assert!(
+            all.iter()
+                .all(|(_, _, d)| *d != FeatureDisposition::FunctionallyProven),
+            "no factor has a functional receipt"
+        );
+    }
+
+    #[test]
+    fn unavailable_not_applicable_and_unproven_are_different_things() {
+        use ProtonSource::{CachyOs, Em, Ge, ValveStable};
+        use ResearchFactor::{AntiLag2, Fsr4, Gamescope, NtSync};
+        // A control exists, so it can be switched and its reaching the game observed; it is not proven.
+        assert_eq!(
+            of(Ge, NtSync),
+            FeatureDisposition::ControlAvailableNotFunctionallyProven
+        );
+        // Documented but without an environment control: cannot be switched here.
+        assert_eq!(of(CachyOs, Fsr4), FeatureDisposition::Unavailable);
+        assert_eq!(of(Em, AntiLag2), FeatureDisposition::Unavailable);
+        // Not a Proton environment factor at all, or not for this build.
+        assert_eq!(of(Ge, Gamescope), FeatureDisposition::NotApplicable);
+        assert_eq!(of(ValveStable, NtSync), FeatureDisposition::NotApplicable);
     }
 }
