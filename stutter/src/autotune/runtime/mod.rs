@@ -91,6 +91,8 @@ pub struct AutotuneRuntime {
     research_campaign_active: bool,
     /// The per-candidate gate an action child arms; absent, research suppression is blanket.
     research_action_gate: Option<research_gate::SharedGate>,
+    /// What the resident controller sees of the game during research attempts (absent: nothing kept).
+    research_telemetry: Option<crate::autotune::research::telemetry_observer::SharedTelemetry>,
     controller: OnlineAutotuneController,
     latest_focus: Option<AutotuneObservationFocus>,
     target_state: RuntimeTargetState,

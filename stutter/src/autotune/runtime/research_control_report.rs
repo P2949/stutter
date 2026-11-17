@@ -138,6 +138,7 @@ impl ResearchCoordinator {
                         child_runtime_qualified: children
                             .as_ref()
                             .is_some_and(|c| c.runtime_qualified()),
+                        child_telemetry: children.as_ref().and_then(|c| c.telemetry_summary()),
                         // No physical restoration verifier exists yet; never inferred.
                         restoration_verified: false,
                         health_blocked,

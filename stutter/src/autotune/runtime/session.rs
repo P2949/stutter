@@ -253,6 +253,11 @@ pub async fn run_autotune_controller_session(
                 .as_ref()
                 .and_then(|coordinator| coordinator.action_gate()),
         );
+        runtime.set_research_telemetry(
+            research_coordinator
+                .as_ref()
+                .and_then(|coordinator| coordinator.telemetry()),
+        );
         runtime.on_event(event)?;
         event_loop_iterations = event_loop_iterations.saturating_add(1);
         if event_loop_iterations.is_multiple_of(30)

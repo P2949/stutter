@@ -170,6 +170,7 @@ fn real_campaign_bundle() {
         child_reports_verified: false,
         funnel: false,
         child_runtime_qualified: false,
+        child_telemetry: None,
         restoration_verified: false,
         health_blocked: false,
     });

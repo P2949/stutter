@@ -316,3 +316,68 @@ mod receipts_and_rules {
         assert!(study_checks(&none, &dispositions, &name, &studies, uid, &parent).is_err());
     }
 }
+
+mod telemetry {
+    use serde_json::json;
+
+    use super::*;
+
+    fn child(done: u64, receipts: Option<serde_json::Value>) -> ChildVerification {
+        ChildVerification {
+            study: "0123456789abcdef".into(),
+            reconstruction: true,
+            raw_files_verified: true,
+            runtime_matched: true,
+            problem: None,
+            report: Some(json!({ "attempts_completed": done })),
+            action_receipts: None,
+            telemetry_receipts: receipts,
+        }
+    }
+
+    fn eligible() -> serde_json::Value {
+        json!({ "frame_verdict": "Eligible", "source_bound_to_game": true })
+    }
+
+    #[test]
+    fn only_eligible_game_bound_receipts_count_against_the_completed_attempts() {
+        let verification = |children| ChildrenVerification {
+            children,
+            missing: Vec::new(),
+        };
+        // Nothing completed: no claim either way.
+        assert_eq!(verification(vec![child(0, None)]).telemetry_summary(), None);
+        // Completed attempts with no receipts count as not eligible, never as vacuously fine.
+        assert_eq!(
+            verification(vec![child(4, None)]).telemetry_summary(),
+            Some((0, 4))
+        );
+        let two = json!([eligible(), eligible()]);
+        assert_eq!(
+            verification(vec![child(2, Some(two))]).telemetry_summary(),
+            Some((2, 2))
+        );
+        // A receipt that is not eligible, or whose source was not the game, does not count.
+        let mixed = json!([
+            eligible(),
+            { "frame_verdict": "Lossy", "source_bound_to_game": true },
+            { "frame_verdict": "Eligible", "source_bound_to_game": false }
+        ]);
+        assert_eq!(
+            verification(vec![child(3, Some(mixed))]).telemetry_summary(),
+            Some((1, 3))
+        );
+        // More receipts than attempts cannot inflate the count past the attempts.
+        let many = json!([eligible(), eligible(), eligible()]);
+        assert_eq!(
+            verification(vec![child(2, Some(many))]).telemetry_summary(),
+            Some((2, 2))
+        );
+        // Children add up.
+        let one = json!([eligible()]);
+        assert_eq!(
+            verification(vec![child(1, Some(one)), child(3, None)]).telemetry_summary(),
+            Some((1, 4))
+        );
+    }
+}

@@ -28,6 +28,9 @@ pub struct GateInputs<'a> {
     pub child_reports_verified: bool,
     pub restoration_verified: bool,
     pub health_blocked: bool,
+    /// (attempts with an eligible, game-bound frame-source receipt, completed attempts); `None` when
+    /// no attempt completed.
+    pub telemetry: Option<(u32, u32)>,
 }
 
 /// `Some(true)` when there is at least one study of the kind and every one is qualified, `Some(false)`
@@ -110,6 +113,14 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
         g5.push("RestorationUnverified");
     }
 
+    // G3: what the resident controller itself saw. Every completed attempt needs a receipt showing a
+    // healthy, lossless frame source bound to the attested game with enough frames and a bounded clock.
+    let g3 = match inputs.telemetry {
+        None => vec!["NoTelemetryReceipts"],
+        Some((eligible, completed)) if eligible < completed => vec!["FrameSourceNotEligible"],
+        Some(_) => Vec::new(),
+    };
+
     // G7: effective feature activation per factor (a qualified feature study carries that proof).
     let g7 = study_blockers(studies, feature, "NoFeatureStudy", "FeatureNotQualified");
 
@@ -131,7 +142,7 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
         not_attested("G0", "HostBaselineNotAttestedByVerification"),
         not_attested("G1", "LeaseAndIpcReceiptsNotAttestedByVerification"),
         gate("G2", health(g2)),
-        not_attested("G3", "NoResidentTelemetryReceipt"),
+        gate("G3", health(g3)),
         gate("G4", health(g4)),
         gate("G5", health(g5)),
         not_attested("G6", "NoFaultMatrixReceipt"),

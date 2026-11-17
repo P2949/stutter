@@ -50,6 +50,38 @@ impl AutotuneRuntime {
             .unwrap_or(false)
     }
 
+    /// Install (or remove) the observer the funnel reads each attempt's telemetry receipt from.
+    pub fn set_research_telemetry(
+        &mut self,
+        telemetry: Option<crate::autotune::research::telemetry_observer::SharedTelemetry>,
+    ) {
+        self.research_telemetry = telemetry;
+    }
+
+    /// Report what the runtime just saw: a frame event, and the frame source's own status. Reading
+    /// only; nothing here changes what the controller does.
+    pub(super) fn observe_research_telemetry(&mut self, frame_event: bool) {
+        let Some(telemetry) = self.research_telemetry.as_ref() else {
+            return;
+        };
+        let snapshot = self.frame_source.as_ref().and_then(|source| {
+            source.lock().ok().map(|status| {
+                crate::autotune::research::telemetry_observer::SourceSnapshot::of(
+                    &status,
+                    std::time::Instant::now(),
+                )
+            })
+        });
+        if let Ok(mut observer) = telemetry.lock() {
+            if frame_event {
+                observer.count_frame();
+            }
+            if let Some(snapshot) = snapshot {
+                observer.observe_source(snapshot);
+            }
+        }
+    }
+
     /// Tell the gate what the experiment manager shows after an event.
     pub(super) fn observe_research_gate(&mut self) {
         let Some(gate) = self.research_action_gate.as_ref() else {

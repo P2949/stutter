@@ -44,6 +44,9 @@ pub struct VerdictInputs<'a> {
     pub funnel: bool,
     /// Every completed child attempt's mapped runtime matched its own arm (funnel campaigns).
     pub child_runtime_qualified: bool,
+    /// (attempts with an eligible, game-bound frame-source receipt, completed attempts) over the
+    /// children; `None` when no child completed an attempt.
+    pub child_telemetry: Option<(u32, u32)>,
     pub restoration_verified: bool,
     /// An unacknowledged GPU-health incident is on record.
     pub health_blocked: bool,
@@ -96,6 +99,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         child_reports_verified: inputs.child_reports_verified,
         restoration_verified: inputs.restoration_verified,
         health_blocked: inputs.health_blocked,
+        telemetry: inputs.child_telemetry,
     });
     Verdict {
         reconstruction_passed: inputs.reconstruction_passed,

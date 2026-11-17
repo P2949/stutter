@@ -174,6 +174,56 @@ mod research_action_gate {
     }
 
     #[test]
+    fn the_runtime_reports_its_frames_and_frame_source_into_the_telemetry_observer() {
+        use crate::{
+            autotune::research::{
+                action_child::ChildTarget,
+                telemetry_observer::{SharedTelemetry, TelemetryObserver},
+            },
+            telemetry::{
+                frame_source::{MeasurementStage, SourceClaim},
+                live_source::FrameSourceStatus,
+            },
+        };
+        let pid = std::process::id();
+        let identity = process_identity(pid).expect("a live process");
+        let mut runtime = runtime_for(pid, vec![]);
+        let telemetry: SharedTelemetry = Arc::new(Mutex::new(TelemetryObserver::default()));
+        runtime.set_research_telemetry(Some(telemetry.clone()));
+        // Nothing attested yet: events are not counted.
+        runtime.observe_research_telemetry(true);
+        telemetry.lock().unwrap().arm(ChildTarget { ..identity });
+        // The runtime's own frame source, bound to this very process.
+        let mut claim = SourceClaim {
+            stage: MeasurementStage::ApplicationFrame,
+            producer_pid: Some(pid),
+            producer_start_ticks: Some(identity.start_ticks),
+            file_owner_uid: Some(identity.uid),
+            launch_id_matched: true,
+        };
+        let mut status = FrameSourceStatus::new(claim.clone());
+        status.last_frame_at = Some(std::time::Instant::now());
+        runtime.frame_source = Some(Arc::new(Mutex::new(status)));
+        for _ in 0..3 {
+            runtime.observe_research_telemetry(true);
+        }
+        runtime.observe_research_telemetry(false); // not a frame: only the source is read
+        let receipts = telemetry.lock().unwrap().take_receipts();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].frames, 3);
+        assert!(receipts[0].source_bound_to_game && receipts[0].source_healthy);
+        // Far too few frames to be eligible, and that is what the receipt says.
+        assert_eq!(receipts[0].frame_verdict, "TooFewFrames");
+        // A source bound to some other process is the wrong renderer.
+        claim.producer_pid = Some(1);
+        runtime.frame_source = Some(Arc::new(Mutex::new(FrameSourceStatus::new(claim))));
+        telemetry.lock().unwrap().arm(ChildTarget { ..identity });
+        runtime.observe_research_telemetry(false);
+        let other = telemetry.lock().unwrap().take_receipts();
+        assert!(!other[0].source_bound_to_game);
+    }
+
+    #[test]
     fn a_gate_armed_for_another_process_never_permits_this_ones_candidate() {
         let pid = std::process::id();
         let cpu_again = CandidateAction::cpu_affinity_profile(profile(), pid);

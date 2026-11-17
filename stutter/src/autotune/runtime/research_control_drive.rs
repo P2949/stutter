@@ -297,6 +297,16 @@ impl ResearchCoordinator {
 
     /// Request cancellation of a driven attempt; the next drive tick aborts and seals it.
     /// The action gate of a funnel campaign, for the runtime to consult (absent otherwise).
+    /// The telemetry observer of a funnel campaign, for the runtime to report into.
+    pub(in crate::autotune::runtime) fn telemetry(
+        &self,
+    ) -> Option<crate::autotune::research::telemetry_observer::SharedTelemetry> {
+        self.driver
+            .as_ref()
+            .and_then(|state| state.funnel.as_ref())
+            .and_then(FunnelDriver::telemetry)
+    }
+
     pub(in crate::autotune::runtime) fn action_gate(
         &self,
     ) -> Option<crate::autotune::research::action_gate::SharedActionGate> {

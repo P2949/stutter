@@ -28,6 +28,7 @@ impl AutotuneRuntime {
         Self {
             research_campaign_active: false,
             research_action_gate: None,
+            research_telemetry: None,
             target_state: RuntimeTargetState::new(config.tree_pid()),
             kpi_collector,
             kpi_observation,

@@ -36,6 +36,9 @@ pub struct ChildVerification {
     /// The action receipts an action child recorded beside its study (absent for other studies).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_receipts: Option<serde_json::Value>,
+    /// What the resident runtime recorded of the game in each attempt (absent when none was kept).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telemetry_receipts: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -50,6 +53,40 @@ impl ChildrenVerification {
     /// At least one child exists and every one's completed attempts matched their own arm's runtime.
     pub fn runtime_qualified(&self) -> bool {
         !self.children.is_empty() && self.children.iter().all(|child| child.runtime_matched)
+    }
+
+    /// (attempts whose receipt shows an eligible frame source bound to the game, completed attempts)
+    /// over every verified child that completed any attempt; `None` when no child did. A child with
+    /// completed attempts but no receipts counts its attempts as not eligible.
+    pub fn telemetry_summary(&self) -> Option<(u32, u32)> {
+        let (mut eligible, mut completed) = (0u32, 0u32);
+        for child in &self.children {
+            let done = child
+                .report
+                .as_ref()
+                .and_then(|report| report["attempts_completed"].as_u64())
+                .and_then(|count| u32::try_from(count).ok())
+                .unwrap_or(0);
+            if done == 0 {
+                continue;
+            }
+            completed = completed.saturating_add(done);
+            let good = child
+                .telemetry_receipts
+                .as_ref()
+                .and_then(serde_json::Value::as_array)
+                .map_or(0, |items| {
+                    items
+                        .iter()
+                        .filter(|item| {
+                            item["frame_verdict"] == "Eligible"
+                                && item["source_bound_to_game"] == true
+                        })
+                        .count()
+                });
+            eligible = eligible.saturating_add(u32::try_from(good).unwrap_or(u32::MAX).min(done));
+        }
+        (completed > 0).then_some((eligible, completed))
     }
 
     pub fn all_verified(&self) -> bool {
@@ -208,6 +245,7 @@ pub fn verify_children(
             Err(anyhow::anyhow!("unexpected entry in the studies directory"))
         };
         let receipts = action_receipts(&studies, &name, uid);
+        let telemetry = study_file(&studies, &name, uid, "telemetry-receipts.json");
         children.push(match result {
             Ok((raw, report, runtime)) => ChildVerification {
                 study: name,
@@ -217,6 +255,7 @@ pub fn verify_children(
                 problem: None,
                 report: Some(report),
                 action_receipts: receipts,
+                telemetry_receipts: telemetry,
             },
             Err(error) => ChildVerification {
                 study: name,
@@ -226,6 +265,7 @@ pub fn verify_children(
                 problem: Some(format!("{error:#}")),
                 report: None,
                 action_receipts: None,
+                telemetry_receipts: None,
             },
         });
     }
@@ -240,8 +280,13 @@ pub fn verify_children(
 /// children must not stand for the whole recorded funnel.
 /// The receipts an action child recorded in its study directory, if any.
 fn action_receipts(studies: &File, name: &str, uid: u32) -> Option<serde_json::Value> {
+    study_file(studies, name, uid, "action-receipts.json")
+}
+
+/// A JSON file a study recorded in its own directory, if present and private.
+fn study_file(studies: &File, name: &str, uid: u32, file: &str) -> Option<serde_json::Value> {
     let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name).ok()?);
-    serde_json::from_slice(&read_private(&dir, "action-receipts.json", uid).ok()?).ok()
+    serde_json::from_slice(&read_private(&dir, file, uid).ok()?).ok()
 }
 
 /// What the child must additionally satisfy given the funnel's own record of it:

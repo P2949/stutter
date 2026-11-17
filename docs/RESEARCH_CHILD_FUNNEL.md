@@ -92,3 +92,15 @@ confirmation. The verifier checks its rule and arm selection exactly as it does 
   Stable, and a factor no measured build can run is `BlockedNoEligibleSource`.
 - Before any study creates anything, its arms' prefixes must be all cold, or all warm and stamped by
   their own build (`prefix_identity::check`).
+
+## Resident telemetry receipts (G3)
+
+While a research attempt runs, the resident runtime reports into a shared `TelemetryObserver` (no second
+monitor): each frame event it receives, and its own frame source's status (the producer pid and start
+time it is bound to, drop and gap counters, health, competing targets, clock alignment). When the
+attempt ends, a receipt per attempt is written to the study's `telemetry-receipts.json` stating whether
+the source was bound to the attested game process and what `quality::judge_frame_source` says of it.
+Competing candidate games stand in for an ambiguous swapchain; a counter the runtime cannot read stays
+unknown, never zero. G3 is accepted only when every completed attempt of the verified children has an
+`Eligible`, game-bound receipt; otherwise it reports `NoTelemetryReceipts` or `FrameSourceNotEligible`.
+Nothing here has run against a real game: the real frame sources' behaviour is unproven.

@@ -16,6 +16,7 @@ use crate::{
         profile_hook::{FileProfileHook, cyberpunk_running, production_spec},
         session_host::arm_prefix_paths,
         study_executor::ProfileHook,
+        telemetry_observer::SharedTelemetry,
     },
     daemon::privilege::UnixSocketPrivilegedActionService,
 };
@@ -69,6 +70,7 @@ fn build(
             crate::autotune::research::action_gate::procfs_state,
         )),
     ));
+    let telemetry: SharedTelemetry = Default::default();
     let rules = RuleRegistry::default();
     let results = study_dir.to_path_buf();
     // The driver rejects a clock that moves backward, so the clock is clamped to never do so.
@@ -86,7 +88,8 @@ fn build(
         Box::new(move |arm: ProtonSource| arm_prefix_paths(&results, arm).1),
         production_inputs(campaign.try_clone()?, intent.clone(), rules.clone()),
     )
-    .with_action_gate(gate.clone());
+    .with_action_gate(gate.clone())
+    .with_telemetry(telemetry.clone());
     // A treatment study no measured build can run is recorded as blocked before it starts.
     let screened = selection_blocker(campaign.try_clone()?, intent.clone(), rules.clone());
     // No CP-LONG work unit is installed in this build: a study on the long profile is recorded as
@@ -105,6 +108,7 @@ fn build(
         rules,
     )?
     .with_selection_blocker(selection)
+    .with_telemetry(telemetry)
     .with_action_gate(gate))
 }
 

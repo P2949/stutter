@@ -88,7 +88,9 @@ impl AutotuneRuntime {
         &mut self,
         event: MonitorEvent,
     ) -> anyhow::Result<Option<AutotuneDecisionStreamEntry>> {
+        let frame_event = matches!(event, MonitorEvent::Frame { .. });
         let decision = self.on_event_inner(event);
+        self.observe_research_telemetry(frame_event);
         // The research action gate sees every event's outcome, success or failure.
         self.observe_research_gate();
         decision

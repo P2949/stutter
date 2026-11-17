@@ -33,6 +33,7 @@ fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict
         child_reports_verified: true,
         restoration_verified: restored,
         health_blocked: health,
+        telemetry: None,
     })
 }
 
@@ -117,4 +118,32 @@ fn a_blocked_or_failed_study_is_not_a_qualified_one() {
         assert!(!of(&verdicts, "G4").accepted, "{result:?}");
         assert!(!of(&verdicts, "G9").accepted, "{result:?}");
     }
+}
+
+#[test]
+fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
+    let studies = full(Some(StudyResult::Qualified));
+    let with = |telemetry: Option<(u32, u32)>, health: bool| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: health,
+            telemetry,
+        });
+        of(&verdicts, "G3").clone()
+    };
+    assert_eq!(with(None, false).blockers, ["NoTelemetryReceipts"]);
+    assert_eq!(
+        with(Some((7, 8)), false).blockers,
+        ["FrameSourceNotEligible"]
+    );
+    assert_eq!(
+        with(Some((0, 8)), false).blockers,
+        ["FrameSourceNotEligible"]
+    );
+    assert!(with(Some((8, 8)), false).accepted);
+    assert_eq!(with(Some((8, 8)), true).blockers, ["GpuHealthIncident"]);
 }

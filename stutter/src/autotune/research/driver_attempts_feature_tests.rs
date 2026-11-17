@@ -164,3 +164,70 @@ fn a_feature_study_records_per_attempt_whether_its_treatment_reached_the_game_pr
     // Only the On treatment ever ran in this fixture, so activation is not shown for the study.
     assert_eq!(outcome.activation, Some(false));
 }
+
+#[test]
+fn each_attempts_telemetry_receipt_is_kept_beside_its_study() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use crate::autotune::research::telemetry_observer::{SharedTelemetry, SourceSnapshot};
+    let root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let parent = parent();
+    let study = plan(&parent).unwrap().remove(0);
+    let mut host = Host::finishing();
+    let target = crate::autotune::research::action_child::ChildTarget {
+        pid: stutter_core::ids::Pid::new(4242),
+        start_ticks: 99,
+        uid: crate::syscall::geteuid(),
+    };
+    host.process = Some(target);
+    let telemetry: SharedTelemetry = Default::default();
+    let mut now = parent.issued_unix_seconds + 1;
+    let mut runner = DriverStudyAttempts::new(
+        File::open(root.path()).unwrap(),
+        parent.clone(),
+        Box::new(host),
+        Box::new(move || {
+            now += 1;
+            now
+        }),
+        Box::new(|| Ok(())),
+        Box::new(|_| std::path::PathBuf::from("/nonexistent")),
+        Box::new(|study| Ok(inputs_for(study))),
+    )
+    .with_telemetry(telemetry.clone());
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    // The runtime reports what it sees of the attested game while the attempt runs.
+    {
+        let mut observer = telemetry.lock().unwrap();
+        assert!(
+            observer.is_observing(),
+            "the sighted process is being observed"
+        );
+        for _ in 0..2_400 {
+            observer.count_frame();
+        }
+        observer.observe_source(SourceSnapshot {
+            producer_pid: Some(4242),
+            producer_start_ticks: Some(99),
+            dropped_frames: 0,
+            unexplained_gaps: 0,
+            healthy: true,
+            competing_targets: 0,
+            alignment_uncertainty_ms: 0.5,
+            frame_age: Some(std::time::Duration::from_millis(5)),
+        });
+    }
+    run_to_end(&mut runner, &study);
+    let file = root
+        .path()
+        .join("studies")
+        .join(&study.study_sha256[..16])
+        .join("telemetry-receipts.json");
+    let receipts: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+    assert_eq!(receipts[0]["pid"], 4242);
+    assert_eq!(receipts[0]["frames"], 2_400);
+    assert_eq!(receipts[0]["source_bound_to_game"], true);
+    assert_eq!(receipts[0]["frame_verdict"], "Eligible");
+}

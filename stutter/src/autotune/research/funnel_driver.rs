@@ -22,6 +22,7 @@ use super::{
     driver_attempts::{DriverStudyAttempts, SelectArms, StudyInputs},
     pilot_rule::FrozenConfirmationRule,
     study_executor::{HostStudyExecutor, ProfileHook},
+    telemetry_observer::SharedTelemetry,
 };
 
 /// The rules qualified pilots froze, by pilot study digest: written from the ledger by the funnel,
@@ -140,6 +141,8 @@ pub struct FunnelDriver {
     rules: RuleRegistry,
     /// The action gate an action child arms, shared with the runtime (absent: no action child).
     gate: Option<SharedActionGate>,
+    /// What the resident runtime sees of the game, shared with it (absent: none kept).
+    telemetry: Option<SharedTelemetry>,
 }
 
 impl FunnelDriver {
@@ -160,6 +163,7 @@ impl FunnelDriver {
             cancelled: false,
             rules,
             gate: None,
+            telemetry: None,
         })
     }
 
@@ -173,6 +177,16 @@ impl FunnelDriver {
     pub fn with_action_gate(mut self, gate: SharedActionGate) -> Self {
         self.gate = Some(gate);
         self
+    }
+
+    /// Share the observer whose receipts each attempt keeps.
+    pub fn with_telemetry(mut self, telemetry: SharedTelemetry) -> Self {
+        self.telemetry = Some(telemetry);
+        self
+    }
+
+    pub fn telemetry(&self) -> Option<SharedTelemetry> {
+        self.telemetry.clone()
     }
 
     pub fn action_gate(&self) -> Option<SharedActionGate> {

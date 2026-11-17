@@ -53,6 +53,8 @@ pub struct DriverStudyAttempts {
     override_now: Option<u64>,
     /// The action gate an action child arms on the sighted game process (absent: never armed).
     gate: Option<SharedActionGate>,
+    /// What the resident runtime reports of the game during each attempt (absent: nothing kept).
+    telemetry: Option<super::telemetry_observer::SharedTelemetry>,
     armed_for: Option<String>,
     /// The running study is a within-source treatment study (the gate then permits an action only
     /// during attempts treated On).
@@ -103,12 +105,19 @@ impl DriverStudyAttempts {
             last_step: None,
             override_now: None,
             gate: None,
+            telemetry: None,
             armed_for: None,
             treatment_study: false,
             environ_of: Box::new(|pid| std::fs::read(format!("/proc/{pid}/environ")).ok()),
             feature_source: None,
             feature_observed: BTreeMap::new(),
         }
+    }
+
+    /// Share the telemetry observer with the runtime: each attempt's receipt is kept beside its study.
+    pub fn with_telemetry(mut self, telemetry: super::telemetry_observer::SharedTelemetry) -> Self {
+        self.telemetry = Some(telemetry);
+        self
     }
 
     /// Share the action gate with the runtime: an Action study arms it on the game process it sights.
@@ -132,6 +141,38 @@ impl DriverStudyAttempts {
     /// The shared attempt host, for the controller to feed its desktop observations.
     pub fn host_mut(&mut self) -> &mut (dyn AttemptHost + Send) {
         self.host.as_mut()
+    }
+
+    /// Observe the attested game process of the running attempt: the observer counts what the resident
+    /// runtime reports of it from here on.
+    fn arm_telemetry(&mut self) {
+        let (Some(telemetry), Some(target)) = (&self.telemetry, self.host.game_process()) else {
+            return;
+        };
+        if let Ok(mut observer) = telemetry.lock() {
+            observer.arm(target);
+        }
+    }
+
+    /// Keep every attempt's telemetry receipt beside the study (write-once; a conflicting file means
+    /// the receipts cannot be recorded and the study simply has none).
+    fn record_telemetry(&self, study: &ChildStudy) {
+        let Some(telemetry) = &self.telemetry else {
+            return;
+        };
+        let receipts = telemetry
+            .lock()
+            .map(|mut observer| observer.take_receipts())
+            .unwrap_or_default();
+        if receipts.is_empty() {
+            return;
+        }
+        if let Ok(studies) = open_dir(&self.campaign, STUDIES_DIR)
+            && let Ok(dir) = open_dir(&studies, dir_name(study))
+            && let Ok(bytes) = serde_json::to_vec_pretty(&receipts)
+        {
+            let _ = write_new(&dir, "telemetry-receipts.json", &bytes);
+        }
     }
 
     /// During a feature study, once per attempt: does the factor's treatment (on or off) show in the
@@ -305,6 +346,7 @@ impl DriverStudyAttempts {
         health_halt: bool,
     ) -> anyhow::Result<AttemptsOutcome> {
         let report = driver.finalize()?;
+        self.record_telemetry(study);
         let study_dir = open_dir(&open_dir(&self.campaign, STUDIES_DIR)?, dir_name(study))?;
         // The study's report is sealed beside its journal; verification recomputes and compares it.
         write_report(&study_dir, &report)?;
@@ -411,6 +453,7 @@ impl StudyAttempts for DriverStudyAttempts {
         self.last_step = Some(step.clone());
         self.arm_gate_for(study);
         self.observe_feature(study);
+        self.arm_telemetry();
         let halted = matches!(step, Step::Halted(_));
         match step {
             Step::Waiting | Step::Running(_) | Step::Sealed(_) => Ok(None),
