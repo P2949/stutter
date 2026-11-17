@@ -53,6 +53,8 @@ pub struct GateInputs<'a> {
     /// (attempts with an eligible, game-bound frame-source receipt, completed attempts); `None` when
     /// no attempt completed.
     pub telemetry: Option<(u32, u32)>,
+    /// Whether every holdout reproduced its confirmation (`None`: no holdout was judged).
+    pub replication: Option<bool>,
     /// A deploy receipt names the very binary doing this verification, runs the expected pin and has
     /// every unit active (`deploy_receipt::deployment_attested`).
     pub deployment_attested: bool,
@@ -226,6 +228,11 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
     // G9: the held-out repetition qualified on top of everything a result rests on, with the
     // system restored and no health incident.
     let mut g9 = profile_blockers(studies, holdout, "NoHoldoutStudy", "HoldoutNotQualified");
+    // A sound holdout is not a replication: it must reach its confirmation's conclusion. A
+    // contradiction, or an inconclusive repetition, reproduces nothing.
+    if inputs.replication == Some(false) {
+        g9.push("HoldoutDoesNotReplicate");
+    }
     for (name, blockers) in [("G2", &g2), ("G4", &g4), ("G5", &g5), ("G7", &g7)] {
         if !blockers.is_empty() {
             g9.push(match name {

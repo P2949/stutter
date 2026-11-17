@@ -218,6 +218,12 @@ fn child_rows(response: &Value, with_report: bool) -> Vec<Value> {
                         "problem": child.get("problem"),
                         "action_receipts": child.get("action_receipts"),
                         "prefix_cohort": child.get("prefix_cohort"),
+                        "replication": child.get("replication"),
+                        // What the resident runtime saw per attempt and the process each completed
+                        // attempt's sealed native result names, so the join can be re-checked.
+                        "telemetry_receipts": child.get("telemetry_receipts"),
+                        "completed_attempts": child.get("completed_attempts"),
+                        "completed_processes": child.get("completed_processes"),
                     });
                     if with_report {
                         row["report"] = child.get("report").cloned().unwrap_or(Value::Null);
@@ -338,7 +344,11 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
             "restore-proof.json",
             pretty(&json!({
                 "restoration_verified": verdict.get("restoration_verified"),
-                "basis": "no physical restoration verifier exists; never inferred from other statuses",
+                "basis": "true only when every planned action study qualified with a verified child whose \
+                          kernel-state receipts are each attributable to a completed attempt treated On, \
+                          every treated attempt carries one, and no research prefix still carries an \
+                          unrestored settings edit; unknown is false and it is never inferred from other \
+                          statuses. The receipts are in action-transactions.json.",
             })),
         ),
         ("verify-result.json", pretty(&verdict)),
@@ -389,12 +399,18 @@ pub fn write(dir: &File, report: &Value, response: &Value) -> anyhow::Result<Str
     Ok(name)
 }
 
-/// Write the bundle for a verified report; a failure is logged and is not a verdict.
-pub fn write_logged(dir: &File, report: &impl serde::Serialize, response: &Value) {
-    let report = serde_json::to_value(report).unwrap_or_default();
-    if let Err(error) = write(dir, &report, response) {
+/// Write the bundle for a verified report and say what happened. A verdict with no durable bundle is
+/// not a final one, so a failure is returned for the response to carry, not merely logged.
+pub fn write_reporting(
+    dir: &File,
+    report: &impl serde::Serialize,
+    response: &Value,
+) -> Result<String, String> {
+    let report = serde_json::to_value(report).map_err(|error| format!("{error:#}"))?;
+    write(dir, &report, response).map_err(|error| {
         log::warn!("final bundle not written: {error:#}");
-    }
+        format!("{error:#}")
+    })
 }
 
 #[cfg(test)]

@@ -471,9 +471,15 @@ pub fn pending_edit(settings: &Path) -> bool {
         name.push(suffix);
         settings.with_file_name(name)
     };
+    // Only a clean "not found" proves there is no trace. Any other answer (a directory that cannot be
+    // searched, an I/O error) leaves it unknown, and unknown is pending: nothing is claimed restored
+    // on a question that could not be asked.
     [".stutter-original", ".stutter-applied"]
         .iter()
-        .any(|suffix| std::fs::symlink_metadata(beside(suffix)).is_ok())
+        .any(|suffix| match std::fs::symlink_metadata(beside(suffix)) {
+            Ok(_) => true,
+            Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+        })
 }
 
 /// After a crash or restart: if a durable snapshot exists the settings may still be edited, so put

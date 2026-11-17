@@ -42,6 +42,7 @@ fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict
         restoration_verified: restored,
         health_blocked: health,
         telemetry: None,
+        replication: None,
         deployment_attested: false,
         lease: None,
         host: None,
@@ -143,6 +144,7 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
             restoration_verified: true,
             health_blocked: health,
             telemetry,
+            replication: None,
             deployment_attested: false,
             lease: None,
             host: None,
@@ -191,6 +193,7 @@ fn g8_is_accepted_only_on_an_attested_deployment_and_needs_no_game() {
             restoration_verified: true,
             health_blocked: health,
             telemetry: None,
+            replication: None,
             deployment_attested: attested,
             lease: None,
             host: None,
@@ -215,6 +218,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
             restoration_verified: true,
             health_blocked: false,
             telemetry: None,
+            replication: None,
             deployment_attested: false,
             lease,
             host: None,
@@ -276,6 +280,7 @@ fn g0_stands_on_a_host_that_has_not_moved_from_what_the_campaign_froze() {
             restoration_verified: true,
             health_blocked: false,
             telemetry: None,
+            replication: None,
             deployment_attested: false,
             lease: None,
             host,
@@ -315,4 +320,30 @@ fn g0_stands_on_a_host_that_has_not_moved_from_what_the_campaign_froze() {
         .blockers,
         ["GameExecutableChanged", "InstallationNotSettled"]
     );
+}
+
+#[test]
+fn g9_needs_the_holdout_to_reproduce_its_confirmation_not_merely_to_be_a_sound_run() {
+    let studies = full(Some(StudyResult::Qualified));
+    let g9 = |replication: Option<bool>| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: false,
+            telemetry: Some((8, 8)),
+            replication,
+            deployment_attested: true,
+            lease: None,
+            host: None,
+        });
+        of(&verdicts, "G9").blockers.clone()
+    };
+    // A contradicting or inconclusive holdout is a sound measurement that reproduces nothing.
+    assert!(g9(Some(false)).contains(&"HoldoutDoesNotReplicate"));
+    assert!(!g9(Some(true)).contains(&"HoldoutDoesNotReplicate"));
+    // No holdout judged at all is not a replication blocker of its own.
+    assert!(!g9(None).contains(&"HoldoutDoesNotReplicate"));
 }

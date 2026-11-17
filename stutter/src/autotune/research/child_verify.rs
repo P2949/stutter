@@ -39,6 +39,9 @@ pub struct ChildVerification {
     /// The cache cohort (cold or warm prefixes) the study ran in, when the host observed it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefix_cohort: Option<serde_json::Value>,
+    /// For a holdout child: whether it reproduced its confirmation (`replication`), by name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replication: Option<String>,
     /// What the resident runtime recorded of the game in each attempt (absent when none was kept).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry_receipts: Option<serde_json::Value>,
@@ -137,6 +140,22 @@ impl ChildrenVerification {
             }
         }
         (completed > 0).then_some((eligible, completed))
+    }
+
+    /// Whether every holdout child reproduced its confirmation: `Some(true)` when there is at least
+    /// one holdout and all did, `Some(false)` when any contradicted it or reproduced nothing, and
+    /// `None` when no holdout was run (that absence is its own blocker).
+    pub fn holdout_replication(&self) -> Option<bool> {
+        let judged: Vec<&str> = self
+            .children
+            .iter()
+            .filter_map(|child| child.replication.as_deref())
+            .collect();
+        (!judged.is_empty()).then(|| {
+            judged
+                .iter()
+                .all(|name| matches!(*name, "reproduced" | "reproduced_null"))
+        })
     }
 
     pub fn all_verified(&self) -> bool {
@@ -304,6 +323,12 @@ pub fn verify_children(
         let telemetry = study_file(&studies, &name, uid, "telemetry-receipts.json");
         let completed = completed_attempts(&studies, &name, uid);
         let processes = completed_processes(&studies, &name, uid);
+        // A holdout is judged against its confirmation: a sound repetition that reaches another
+        // conclusion is a contradiction, not a second pass.
+        let replication = super::replication::replication_of(parent, &name, &|child| {
+            study_file(&studies, child, uid, "report.json")
+        })
+        .map(|outcome| outcome.name().to_owned());
         children.push(match result {
             Ok((raw, report, runtime)) => ChildVerification {
                 study: name,
@@ -314,6 +339,7 @@ pub fn verify_children(
                 report: Some(report),
                 action_receipts: receipts,
                 prefix_cohort: cohort,
+                replication,
                 telemetry_receipts: telemetry,
                 completed_attempts: completed,
                 completed_processes: processes,
@@ -327,6 +353,7 @@ pub fn verify_children(
                 report: None,
                 action_receipts: None,
                 prefix_cohort: None,
+                replication: None,
                 telemetry_receipts: None,
                 completed_attempts: Vec::new(),
                 completed_processes: Vec::new(),

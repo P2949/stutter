@@ -332,6 +332,7 @@ mod telemetry {
             report: Some(json!({ "attempts_completed": completed.len() })),
             action_receipts: None,
             prefix_cohort: None,
+            replication: None,
             telemetry_receipts: receipts,
             completed_attempts: completed.to_vec(),
             completed_processes: completed
@@ -471,6 +472,7 @@ mod restoration {
             report: None,
             action_receipts: receipts.then(|| json!([{}])),
             prefix_cohort: None,
+            replication: None,
             telemetry_receipts: None,
             completed_attempts: Vec::new(),
             completed_processes: Vec::new(),

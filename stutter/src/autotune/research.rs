@@ -147,6 +147,7 @@ pub(crate) mod oracle;
 pub(crate) mod owned_cleanup;
 pub(crate) mod owned_domain;
 pub(crate) mod pilot_rule;
+pub(crate) mod replication;
 pub(crate) mod telemetry_observer;
 pub(crate) mod treatment;
 pub use treatment::{Treatment, TreatmentSpec};

@@ -94,15 +94,19 @@ pub fn procfs_state(pid: u32) -> Option<KernelState> {
         .to_owned();
     let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
     // Every thread of the process, bounded. A thread that exited while reading is gone; one that is
-    // still listed but cannot be read leaves the whole state unknown.
-    let entries = std::fs::read_dir(format!("/proc/{pid}/task"))
-        .ok()?
-        .take(4096)
-        .flatten();
-    let tasks = parse_tasks(entries.filter_map(|entry| {
-        let tid = entry.file_name().to_str()?.parse::<u32>().ok()?;
-        Some((tid, std::fs::read_to_string(entry.path().join("status"))))
-    }))?;
+    // still listed but cannot be read, an enumeration that fails part-way, or a process with more
+    // threads than the bound leaves the whole state unknown rather than a partial answer.
+    let listed = task_entries(
+        std::fs::read_dir(format!("/proc/{pid}/task"))
+            .ok()?
+            .map(|entry| entry.map(|entry| (entry.file_name(), entry.path()))),
+        MAX_TASKS,
+    )?;
+    let tasks = parse_tasks(
+        listed
+            .into_iter()
+            .map(|(tid, path)| (tid, std::fs::read_to_string(path.join("status")))),
+    )?;
     let identity = process_identity(pid).map(|target| (target.start_ticks, target.uid));
     Some(KernelState {
         cpus_allowed: cpus,
@@ -110,6 +114,31 @@ pub fn procfs_state(pid: u32) -> Option<KernelState> {
         tasks,
         identity: Some(identity?),
     })
+}
+
+/// The most threads one process's state is read for; more is unknown, never a truncated answer.
+const MAX_TASKS: usize = 4096;
+
+/// The threads of a process from its `task` directory listing, as (thread id, directory). An entry
+/// that vanished while listing is gone; any other listing error, a name that is not a thread id, or
+/// more than `max` entries makes the whole answer `None`.
+fn task_entries(
+    entries: impl Iterator<Item = std::io::Result<(std::ffi::OsString, std::path::PathBuf)>>,
+    max: usize,
+) -> Option<Vec<(u32, std::path::PathBuf)>> {
+    let mut listed = Vec::new();
+    for entry in entries {
+        let (name, path) = match entry {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return None,
+        };
+        if listed.len() >= max {
+            return None;
+        }
+        listed.push((name.to_str()?.parse::<u32>().ok()?, path));
+    }
+    Some(listed)
 }
 
 /// The allowed-CPU list of every thread from its status text. A thread whose status vanished (it

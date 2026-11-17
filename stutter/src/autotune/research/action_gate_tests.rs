@@ -511,3 +511,33 @@ mod rebinding {
         assert_eq!(evidence.receipts.len(), 2);
     }
 }
+
+#[test]
+fn a_truncated_or_failed_thread_listing_leaves_the_state_unknown() {
+    use std::{ffi::OsString, path::PathBuf};
+    let item = |tid: u32| {
+        Ok((
+            OsString::from(tid.to_string()),
+            PathBuf::from(format!("/t/{tid}")),
+        ))
+    };
+    // A complete listing, with an entry that vanished while listing skipped.
+    let vanished = Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+    let listed = task_entries([item(1), vanished, item(2)].into_iter(), 4).unwrap();
+    assert_eq!(
+        listed.iter().map(|(tid, _)| *tid).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    // More threads than the bound: unknown, never the first few passed off as the whole.
+    assert_eq!(task_entries((0..5).map(item), 4), None);
+    assert_eq!(task_entries((0..4).map(item), 4).map(|l| l.len()), Some(4));
+    // A listing that fails part-way for any other reason (the old `.flatten()` dropped these).
+    let denied = Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+    assert_eq!(
+        task_entries([item(1), denied, item(2)].into_iter(), 4),
+        None
+    );
+    // A name that is not a thread id is not a thread.
+    let odd = Ok((OsString::from("zero"), PathBuf::from("/t/zero")));
+    assert_eq!(task_entries([item(1), odd].into_iter(), 4), None);
+}

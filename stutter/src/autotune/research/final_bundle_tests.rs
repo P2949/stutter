@@ -171,6 +171,7 @@ fn real_campaign_bundle() {
         funnel: false,
         child_runtime_qualified: false,
         child_telemetry: None,
+        child_replication: None,
         deployment_attested: false,
         lease: None,
         host: None,
@@ -323,4 +324,46 @@ fn the_capability_matrix_distinguishes_the_feature_dispositions_and_proves_none(
     assert!(kinds.contains("NotApplicable") && kinds.contains("Unavailable"));
     assert!(kinds.contains("ControlAvailableNotFunctionallyProven"));
     assert!(!kinds.contains("FunctionallyProven"));
+}
+
+#[test]
+fn the_child_rows_carry_the_telemetry_and_the_process_identities_the_join_used() {
+    let mut full = response();
+    full["child_reports"] = json!({
+        "children": [{
+            "study": "s1", "reconstruction": true, "raw_files_verified": true, "problem": null,
+            "telemetry_receipts": [{ "attempt": 0, "pid": 7, "frame_verdict": "Eligible" }],
+            "completed_attempts": [0],
+            "completed_processes": [{ "slot": 0, "pid": 7, "start_ticks": 9, "uid": 1000 }]
+        }],
+        "missing": []
+    });
+    let files: std::collections::BTreeMap<_, _> = build(&json!({}), &full).into_iter().collect();
+    let integrity: Value = serde_json::from_slice(&files["source-integrity.json"]).unwrap();
+    let row = &integrity["child_reports"][0];
+    assert_eq!(row["telemetry_receipts"][0]["frame_verdict"], "Eligible");
+    assert_eq!(row["completed_attempts"], json!([0]));
+    assert_eq!(row["completed_processes"][0]["start_ticks"], 9);
+    let restore: Value = serde_json::from_slice(&files["restore-proof.json"]).unwrap();
+    let basis = restore["basis"].as_str().unwrap();
+    assert!(
+        basis.contains("treated On") && !basis.contains("no physical restoration verifier"),
+        "{basis}"
+    );
+}
+
+#[test]
+fn a_bundle_that_cannot_be_written_is_reported_not_just_logged() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let dir = File::open(root.path()).unwrap();
+    // A written bundle names itself.
+    let name = write_reporting(&dir, &json!({}), &response()).unwrap();
+    assert!(name.starts_with("bundle-"), "{name}");
+    // A directory that does not hold a private bundle location cannot take one: the error comes back.
+    let file = root.path().join("not-a-dir");
+    std::fs::write(&file, b"x").unwrap();
+    let handle = File::open(&file).unwrap();
+    assert!(write_reporting(&handle, &json!({}), &response()).is_err());
 }

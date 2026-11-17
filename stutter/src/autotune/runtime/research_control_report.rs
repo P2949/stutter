@@ -174,6 +174,7 @@ impl ResearchCoordinator {
                             .as_ref()
                             .is_some_and(|c| c.runtime_qualified()),
                         child_telemetry: children.as_ref().and_then(|c| c.telemetry_summary()),
+                        child_replication: children.as_ref().and_then(|c| c.holdout_replication()),
                         // G8 stands on a receipt of what is deployed, about the very binary
                         // doing this verification; none is inferred from the Nix pin.
                         lease: self.lease_facts(&report.intent_sha256, uid),
@@ -204,7 +205,7 @@ impl ResearchCoordinator {
                         health_blocked,
                     },
                 );
-                let body = serde_json::json!({
+                let mut body = serde_json::json!({
                     "status": if verdict.final_gate_qualified { "ok" } else { "blocked" },
                     "code": if verdict.final_gate_qualified { "Qualified" } else { "IncompleteProvenance" },
                     "reconstruction": "passed",
@@ -214,8 +215,19 @@ impl ResearchCoordinator {
                     "child_reports": children,
                     "intent_sha256": report.intent_sha256,
                 });
-                // The named final artifacts, once, beside the report; a failure is not a verdict.
-                crate::autotune::research::final_bundle::write_logged(&dir, &report, &body);
+                // The named final artifacts, once, beside the report. A verdict whose bundle could
+                // not be made durable is not a final one: the response says so and is blocked.
+                match crate::autotune::research::final_bundle::write_reporting(&dir, &report, &body)
+                {
+                    Ok(name) => {
+                        body["bundle"] = serde_json::json!({ "written": true, "name": name })
+                    }
+                    Err(error) => {
+                        body["status"] = "blocked".into();
+                        body["code"] = "BundleNotWritten".into();
+                        body["bundle"] = serde_json::json!({ "written": false, "error": error });
+                    }
+                }
                 body.to_string() + "\n"
             }
             Ok(report) => {

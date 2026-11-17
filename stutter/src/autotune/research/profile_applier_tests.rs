@@ -366,3 +366,24 @@ fn the_applied_marker_is_removed_with_the_snapshot_after_a_proven_restore() {
     restore(&file, &applied).unwrap();
     assert!(!marker.exists() && !snapshot_of(&f).exists());
 }
+
+#[test]
+fn a_directory_that_cannot_be_searched_does_not_look_like_a_clean_one() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let settings = dir.path().join("UserSettings.json");
+    // Nothing beside it: a clean not-found proves there is no trace.
+    assert!(!pending_edit(&settings));
+    // A trace beside it is pending.
+    std::fs::write(dir.path().join("UserSettings.json.stutter-applied"), b"x").unwrap();
+    assert!(pending_edit(&settings));
+    std::fs::remove_file(dir.path().join("UserSettings.json.stutter-applied")).unwrap();
+    // The directory cannot be searched: the question cannot be asked, so it is not "nothing pending".
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
+    let unknown = pending_edit(&settings);
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    // (A superuser can search anything; then the answer is the clean one.)
+    if crate::syscall::geteuid() != 0 {
+        assert!(unknown);
+    }
+}
