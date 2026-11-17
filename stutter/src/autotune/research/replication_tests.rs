@@ -26,8 +26,10 @@ fn the_same_verdict_twice_is_reproduced_and_a_different_one_is_a_contradiction()
     assert_eq!(compare(&null, &null), Replication::ReproducedNull);
     let none = report(&[("ge", "no_useful_effect")]);
     assert_eq!(compare(&none, &none), Replication::ReproducedNull);
-    assert!(Replication::Reproduced.supports() && Replication::ReproducedNull.supports());
-    assert!(!Replication::Contradicted.supports() && !Replication::Undetermined.supports());
+    let supports = |outcome: Replication| Replication::name_supports(outcome.name());
+    assert!(supports(Replication::Reproduced) && supports(Replication::ReproducedNull));
+    assert!(!supports(Replication::Contradicted) && !supports(Replication::Undetermined));
+    assert!(!Replication::name_supports("anything else"));
 }
 
 #[test]

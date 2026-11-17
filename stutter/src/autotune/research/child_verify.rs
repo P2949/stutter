@@ -154,7 +154,7 @@ impl ChildrenVerification {
         (!judged.is_empty()).then(|| {
             judged
                 .iter()
-                .all(|name| matches!(*name, "reproduced" | "reproduced_null"))
+                .all(|name| super::replication::Replication::name_supports(name))
         })
     }
 

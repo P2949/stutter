@@ -20,9 +20,10 @@ pub enum Replication {
 }
 
 impl Replication {
-    /// Whether the holdout supports the confirmation's conclusion.
-    pub fn supports(self) -> bool {
-        matches!(self, Self::Reproduced | Self::ReproducedNull)
+    /// Whether a recorded outcome (by its `name`) is one that supports the confirmation's
+    /// conclusion; the verifier reads outcomes back by name.
+    pub fn name_supports(name: &str) -> bool {
+        name == Self::Reproduced.name() || name == Self::ReproducedNull.name()
     }
 
     pub fn name(self) -> &'static str {
