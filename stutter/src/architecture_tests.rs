@@ -5,6 +5,7 @@ mod action_rollback_errors;
 mod advisor_irq_affinity_overlap;
 mod allow_attributes;
 mod allowlists;
+mod apply_gate;
 mod artifact_paths;
 mod autotune_facades;
 mod autotune_focus_policy;

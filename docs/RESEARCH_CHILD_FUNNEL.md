@@ -281,3 +281,13 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   produce. `docs/validation` holds summaries and markers and `testdata` planner fixtures: no raw
   scheduler-event recording exists for the diagnosis engine; capturing one needs an eBPF load as root on
   the live desktop, which is a decision, not an offline task.
+- **Raw diagnosis capture needs root (demonstrated).** `stutter doctor` reports `unprivileged_bpf_disabled=2`
+  and `is_root=no`, and `stutter record` as this user fails with `failed to read tracepoint format
+  /sys/kernel/tracing/events/sched/sched_wakeup/format: Permission denied`
+  (`ebpf-capture-unprivileged-2026-11-17.json`). A raw scheduler-event recording therefore cannot be made
+  from this account; making one is a root eBPF load on the live desktop, which needs authorization.
+- **PLAN test crosswalk, audited.** `plan-test-crosswalk-2026-11-17.json` maps 41 items from PLAN's
+  package test lists to their covering tests by file and function, with none uncovered. The last
+  gap found, "no operation bypassing `autonomous_apply_gate`", is now an architecture test: the one
+  production call of the apply must follow the gate in its own function (it fails if the gate call is
+  removed).
