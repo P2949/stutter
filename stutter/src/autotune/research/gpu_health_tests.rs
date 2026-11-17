@@ -20,8 +20,24 @@ fn journal(search: &str) -> (tempfile::TempDir, PathBuf) {
     ))
 }
 
+/// Run the probe on a script this test just wrote. Executing a file another thread may still hold open
+/// for writing (a concurrent fork inherits the descriptor) fails once with `ETXTBSY` ("Text file
+/// busy"); that is the test harness racing itself, not the probe, so only that error is retried.
 fn scan_of(path: PathBuf) -> anyhow::Result<ResetScan> {
-    JournalGpuResetProbe::new(path).unwrap().resets_since(0)
+    let probe = JournalGpuResetProbe::new(path).unwrap();
+    let mut result = probe.resets_since(0);
+    for _ in 0..50 {
+        let busy = result
+            .as_ref()
+            .err()
+            .is_some_and(|error| format!("{error:#}").contains("Text file busy"));
+        if !busy {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        result = probe.resets_since(0);
+    }
+    result
 }
 
 #[test]
