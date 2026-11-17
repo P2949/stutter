@@ -156,6 +156,16 @@ impl ResearchCoordinator {
                             .as_ref()
                             .is_some_and(|c| c.runtime_qualified()),
                         child_telemetry: children.as_ref().and_then(|c| c.telemetry_summary()),
+                        // G8 stands on a receipt of what is deployed, about the very binary
+                        // doing this verification; none is inferred from the Nix pin.
+                        deployment_attested: self.study_dir.as_deref().is_some_and(|study| {
+                            crate::autotune::research::deploy_receipt::own_binary_sha256()
+                                .is_some_and(|own| {
+                                    crate::autotune::research::deploy_receipt::deployment_attested(
+                                        study, &own,
+                                    )
+                                })
+                        }),
                         // Restoration is established only by independent campaign evidence: every
                         // planned action study qualified with valid kernel-state receipts, and no
                         // research prefix still carrying an unrestored settings edit. Unknown is false.

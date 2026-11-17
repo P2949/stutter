@@ -52,6 +52,22 @@ enum ResearchCommand {
         #[arg(long)]
         journalctl: PathBuf,
     },
+    /// Record what the Stutter units actually run (binary hash, active state) against an expected
+    /// pin, as a receipt in the study directory. Read-only and local.
+    DeployReceipt {
+        /// The private study directory.
+        #[arg(long)]
+        study_root: PathBuf,
+        /// The exact, root-owned `systemctl` to ask.
+        #[arg(long)]
+        systemctl: PathBuf,
+        /// A unit to inspect (repeat for the controller and the worker).
+        #[arg(long = "unit", required = true)]
+        units: Vec<String>,
+        /// The expected SHA-256 (hex) of the pinned release binary.
+        #[arg(long)]
+        expect_binary_sha256: String,
+    },
     Status,
     Pause,
     Resume,
@@ -91,6 +107,17 @@ impl From<ResearchArgs> for ResearchClientInput {
                 study_root,
                 journalctl,
             },
+            ResearchCommand::DeployReceipt {
+                study_root,
+                systemctl,
+                units,
+                expect_binary_sha256,
+            } => ResearchClientAction::DeployReceipt {
+                study_root,
+                systemctl,
+                units,
+                expect_binary_sha256,
+            },
             ResearchCommand::Status => ResearchClientAction::Status,
             ResearchCommand::Pause => ResearchClientAction::Pause,
             ResearchCommand::Resume => ResearchClientAction::Resume,
@@ -108,6 +135,55 @@ impl From<ResearchArgs> for ResearchClientInput {
 #[cfg(test)]
 mod tests {
     use crate::commands::{input::AppCommand, research::ResearchClientAction};
+
+    #[test]
+    fn deploy_receipt_takes_one_or_more_units_a_systemctl_and_a_pin() {
+        let parsed = crate::cli::parse_app_command_from([
+            "stutter",
+            "research",
+            "deploy-receipt",
+            "--study-root",
+            "/x",
+            "--systemctl",
+            "/y",
+            "--unit",
+            "a.service",
+            "--unit",
+            "b.service",
+            "--expect-binary-sha256",
+            "00",
+        ])
+        .unwrap();
+        assert!(matches!(
+            parsed,
+            AppCommand::Research(input)
+                if matches!(input.action, ResearchClientAction::DeployReceipt { ref units, .. } if units.len() == 2)
+        ));
+        for missing in [
+            vec![
+                "stutter",
+                "research",
+                "deploy-receipt",
+                "--study-root",
+                "/x",
+                "--systemctl",
+                "/y",
+            ],
+            vec![
+                "stutter",
+                "research",
+                "deploy-receipt",
+                "--unit",
+                "a",
+                "--systemctl",
+                "/y",
+                "--expect-binary-sha256",
+                "0",
+            ],
+        ] {
+            assert!(crate::cli::parse_app_command_from(missing).is_err());
+        }
+    }
 
     #[test]
     fn research_cli_accepts_only_named_management_commands() {

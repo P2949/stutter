@@ -41,6 +41,7 @@ fn all_true<'a>(
         funnel: false,
         child_runtime_qualified: false,
         child_telemetry: None,
+        deployment_attested: false,
         restoration_verified: true,
         health_blocked: false,
     }
@@ -126,6 +127,7 @@ fn a_funnel_campaign_is_judged_from_its_children_not_its_empty_flat_schedule() {
         funnel: true,
         child_runtime_qualified: runtime,
         child_telemetry: None,
+        deployment_attested: false,
         restoration_verified: true,
         health_blocked: false,
     };

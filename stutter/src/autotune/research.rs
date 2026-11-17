@@ -54,6 +54,7 @@ pub(crate) mod crosswalk;
     reason = "P2's unprivileged verifier remains inactive until the owned Steam launcher is qualified"
 )]
 pub(crate) mod cyberpunk;
+pub(crate) mod deploy_receipt;
 #[cfg(feature = "wayland-probe")]
 pub(crate) mod desktop_idle;
 pub(crate) mod dispatch_context;

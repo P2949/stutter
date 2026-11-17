@@ -34,6 +34,14 @@ pub enum ResearchClientAction {
         study_root: PathBuf,
         journalctl: PathBuf,
     },
+    /// Read what the Stutter units actually run (binary path and hash, active state) and compare it
+    /// with the expected pin; write the receipt into the study directory. Read-only and local.
+    DeployReceipt {
+        study_root: PathBuf,
+        systemctl: PathBuf,
+        units: Vec<String>,
+        expect_binary_sha256: String,
+    },
     /// Steam-invoked compatibility-tool entry; replaces this process with the planned Proton.
     Dispatch {
         target: DispatchTarget,
@@ -76,6 +84,58 @@ fn health_check(
     Ok(())
 }
 
+/// Capture and record what is deployed (read-only) and print it as JSON.
+fn deploy_receipt(
+    study_root: &std::path::Path,
+    systemctl: &std::path::Path,
+    units: &[String],
+    expected: &str,
+    uid: u32,
+) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    use crate::autotune::research::deploy_receipt as deploy;
+    let meta = std::fs::symlink_metadata(study_root)?;
+    anyhow::ensure!(
+        meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0,
+        "the study directory must be a private directory owned by this user"
+    );
+    anyhow::ensure!(
+        expected.len() == 64
+            && expected
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "the expected pin must be a 64 hex digit SHA-256"
+    );
+    anyhow::ensure!(
+        !units.is_empty() && units.len() <= 8,
+        "name one to eight units"
+    );
+    let systemctl = deploy::trusted_systemctl(systemctl)?;
+    let mut receipts = Vec::new();
+    for unit in units {
+        let text = deploy::show(&systemctl, unit)?;
+        receipts.push(deploy::unit_receipt(
+            unit,
+            &text,
+            std::path::Path::new("/nix/store"),
+        )?);
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let result = deploy::receipt(receipts, expected, now);
+    let bytes = serde_json::to_vec_pretty(&result)?;
+    let dir = std::fs::File::open(study_root)?;
+    crate::autotune::research::report_store::write_new(
+        &dir,
+        &format!("deploy-receipt-{now}.json"),
+        &bytes,
+    )?;
+    println!("{}", String::from_utf8_lossy(&bytes));
+    Ok(())
+}
+
 fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchRequest> {
     Ok(match action {
         ResearchClientAction::Dispatch { .. } => {
@@ -86,6 +146,9 @@ fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchReq
         }
         ResearchClientAction::HealthCheck { .. } => {
             anyhow::bail!("health-check does not use the resident socket")
+        }
+        ResearchClientAction::DeployReceipt { .. } => {
+            anyhow::bail!("deploy-receipt does not use the resident socket")
         }
         ResearchClientAction::Submit(path) => {
             let parent = path
@@ -206,6 +269,15 @@ pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     } = &input.action
     {
         return health_check(study_root, journalctl, uid);
+    }
+    if let ResearchClientAction::DeployReceipt {
+        study_root,
+        systemctl,
+        units,
+        expect_binary_sha256,
+    } = &input.action
+    {
+        return deploy_receipt(study_root, systemctl, units, expect_binary_sha256, uid);
     }
     if let ResearchClientAction::Inventory {
         steamapps,

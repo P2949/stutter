@@ -31,6 +31,9 @@ pub struct GateInputs<'a> {
     /// (attempts with an eligible, game-bound frame-source receipt, completed attempts); `None` when
     /// no attempt completed.
     pub telemetry: Option<(u32, u32)>,
+    /// A deploy receipt names the very binary doing this verification, runs the expected pin and has
+    /// every unit active (`deploy_receipt::deployment_attested`).
+    pub deployment_attested: bool,
 }
 
 /// `Some(true)` when there is at least one study of the kind and every one is qualified, `Some(false)`
@@ -167,7 +170,14 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
         gate("G5", health(g5)),
         not_attested("G6", "NoFaultMatrixReceipt"),
         gate("G7", health(g7)),
-        not_attested("G8", "DeploymentReceiptNotInCampaign"),
+        gate(
+            "G8",
+            if inputs.deployment_attested {
+                Vec::new()
+            } else {
+                vec!["DeploymentNotAttested"]
+            },
+        ),
         gate("G9", health(g9)),
     ]
 }

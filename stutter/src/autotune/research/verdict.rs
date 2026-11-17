@@ -47,6 +47,8 @@ pub struct VerdictInputs<'a> {
     /// (attempts with an eligible, game-bound frame-source receipt, completed attempts) over the
     /// children; `None` when no child completed an attempt.
     pub child_telemetry: Option<(u32, u32)>,
+    /// G8: the deployed binary is attested by a receipt (see `deploy_receipt`).
+    pub deployment_attested: bool,
     pub restoration_verified: bool,
     /// An unacknowledged GPU-health incident is on record.
     pub health_blocked: bool,
@@ -84,6 +86,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         restoration_verified: inputs.restoration_verified,
         health_blocked: inputs.health_blocked,
         telemetry: inputs.child_telemetry,
+        deployment_attested: inputs.deployment_attested,
     });
     // The overall result is the conjunction of the study-backed facts and every gate: a campaign
     // whose host baseline, lease receipts, telemetry, fault matrix or deployment receipt is not attested

@@ -42,6 +42,7 @@ fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict
         restoration_verified: restored,
         health_blocked: health,
         telemetry: None,
+        deployment_attested: false,
     })
 }
 
@@ -140,6 +141,7 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
             restoration_verified: true,
             health_blocked: health,
             telemetry,
+            deployment_attested: false,
         });
         of(&verdicts, "G3").clone()
     };
@@ -171,4 +173,26 @@ fn a_plan_missing_a_performance_profile_cannot_accept_the_gates_that_need_both()
             of(&verdicts, name).blockers
         );
     }
+}
+
+#[test]
+fn g8_is_accepted_only_on_an_attested_deployment_and_needs_no_game() {
+    let studies = full(Some(StudyResult::Qualified));
+    let with = |attested: bool, health: bool| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: health,
+            telemetry: None,
+            deployment_attested: attested,
+        });
+        of(&verdicts, "G8").clone()
+    };
+    assert_eq!(with(false, false).blockers, ["DeploymentNotAttested"]);
+    assert!(with(true, false).accepted);
+    // A GPU incident is about running a game; what is deployed is unaffected by it.
+    assert!(with(true, true).accepted);
 }

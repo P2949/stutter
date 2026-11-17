@@ -104,3 +104,12 @@ Competing candidate games stand in for an ambiguous swapchain; a counter the run
 unknown, never zero. G3 is accepted only when every completed attempt of the verified children has an
 `Eligible`, game-bound receipt; otherwise it reports `NoTelemetryReceipts` or `FrameSourceNotEligible`.
 Nothing here has run against a real game: the real frame sources' behaviour is unproven.
+
+## Deployment receipt (G8)
+
+`stutter research deploy-receipt --study-root <private dir> --systemctl <store path> --unit <unit>... --expect-binary-sha256 <hex>`
+reads (read-only, locally) what each Stutter unit actually runs: the `ExecStart` store path, that file's
+SHA-256 and the unit's active state, and writes `deploy-receipt-<unix>.json` into the study directory.
+G8 is accepted only when the newest receipt says every unit is active and runs the expected pin **and**
+that binary is the one performing the verification (`/proc/self/exe`). A flake pin or a built store
+object is not a running service; a receipt about some other binary attests nothing about this one.
