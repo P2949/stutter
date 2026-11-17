@@ -88,7 +88,14 @@ fn build(
     )
     .with_action_gate(gate.clone());
     // A treatment study no measured build can run is recorded as blocked before it starts.
-    let selection = selection_blocker(campaign.try_clone()?, intent.clone(), rules.clone());
+    let screened = selection_blocker(campaign.try_clone()?, intent.clone(), rules.clone());
+    // No CP-LONG work unit is installed in this build: a study on the long profile is recorded as
+    // blocked, never run on the native benchmark and reported as a long session.
+    let selection: crate::autotune::research::funnel_driver::SelectionBlocker =
+        Box::new(move |study| {
+            crate::autotune::research::long_session::long_unit_blocker(study, None)
+                .or_else(|| screened(study))
+        });
     Ok(FunnelDriver::new(
         campaign,
         intent,
