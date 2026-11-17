@@ -26,7 +26,7 @@ pub struct Phase {
 /// The game process the session ran in, as the controller attested it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SessionProcess {
-    pub pid: u32,
+    pub pid: stutter_core::ids::Pid,
     pub start_ticks: u64,
     pub uid: u32,
 }
@@ -98,7 +98,7 @@ pub fn verify(
     if elapsed > u64::from(authorized_seconds) {
         return Err("LongSessionOutlastedTheAuthorizedWindow");
     }
-    if record.process.pid == 0 || record.process.start_ticks == 0 {
+    if record.process.pid.as_u32() == 0 || record.process.start_ticks == 0 {
         return Err("LongSessionProcessNotIdentified");
     }
     if !record.settled {

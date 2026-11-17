@@ -19,7 +19,7 @@ fn record() -> LongSessionRecord {
         started_unix: start,
         ended_unix: start + 26 * 60,
         process: SessionProcess {
-            pid: 4242,
+            pid: stutter_core::ids::Pid::new(4242),
             start_ticks: 99,
             uid: 1000,
         },
@@ -82,7 +82,10 @@ fn every_way_a_record_can_fail_to_stand_for_the_session_is_its_own_refusal() {
         },
         "LongSessionOutlastedTheAuthorizedWindow",
     );
-    refused(&|r| r.process.pid = 0, "LongSessionProcessNotIdentified");
+    refused(
+        &|r| r.process.pid = stutter_core::ids::Pid::new(0),
+        "LongSessionProcessNotIdentified",
+    );
     refused(
         &|r| r.process.start_ticks = 0,
         "LongSessionProcessNotIdentified",
