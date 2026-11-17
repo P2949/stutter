@@ -31,7 +31,7 @@ fn frame_generation_is_observed_working_only_when_on_reports_it_and_off_does_not
                 (Treatment::On, &on)
             ]
         ),
-        Functional::Observed
+        Functional::GameReportedSelection
     );
     // The control reached the game but the feature did not turn on: activated, not functional.
     assert_eq!(
@@ -54,7 +54,7 @@ fn the_upscaler_is_read_from_its_own_field_not_frame_generations() {
             ResearchFactor::Fsr4,
             &[(Treatment::Off, &off), (Treatment::On, &on)]
         ),
-        Functional::Observed
+        Functional::GameReportedSelection
     );
     // Frame generation being on says nothing about the upscaler.
     let fg_only = context(Some(2), Some(0));

@@ -50,6 +50,7 @@ fn clean(study: &ChildStudy) -> anyhow::Result<StudyRun> {
         attempts_used: study.min_attempts,
         reason: "",
         halt: false,
+        ownership: Ownership::Settled,
         rule: None,
     })
 }
@@ -66,7 +67,10 @@ fn drive(
     let mut steps = Vec::new();
     loop {
         let step = runner.step(executor, blocker, &mut || false).unwrap();
-        let end = matches!(step, RunnerStep::Done | RunnerStep::Halted(_));
+        let end = matches!(
+            step,
+            RunnerStep::Done | RunnerStep::Halted(_) | RunnerStep::OwnershipUnresolved(_)
+        );
         steps.push(step);
         if end || steps.len() > 40 {
             return steps;
@@ -159,6 +163,7 @@ fn an_unqualified_or_failed_prerequisite_blocks_its_dependents() {
                     attempts_used: study.min_attempts,
                     reason: "UnprovenProvenance",
                     halt: false,
+                    ownership: Ownership::Settled,
                     rule: None,
                 });
             }
@@ -195,6 +200,7 @@ fn a_health_stop_ends_the_funnel_without_deciding_what_it_prevented() {
                     attempts_used: 1,
                     reason: "GpuReset",
                     halt: true,
+                    ownership: Ownership::Settled,
                     rule: None,
                 });
             }
@@ -237,7 +243,7 @@ fn an_executor_error_is_charged_recorded_failed_and_never_replayed() {
         aborts: 0,
     };
     let step = runner.step(&mut exec, &no_blocker, &mut || false).unwrap();
-    assert_eq!(step, RunnerStep::Halted("ExecutorError"));
+    assert_eq!(step, RunnerStep::OwnershipUnresolved("ExecutorError"));
     let first = &runner.ledger().dispositions()[0];
     assert_eq!(first.result, Some(StudyResult::Failed));
     assert_eq!(first.reason, "ExecutorError");
@@ -266,6 +272,7 @@ fn qualified_evidence_below_the_studys_own_attempt_count_is_downgraded() {
                 attempts_used: study.min_attempts - 1,
                 reason: "",
                 halt: false,
+                ownership: Ownership::Settled,
                 rule: None,
             })
         },
@@ -448,7 +455,7 @@ fn a_health_stop_whose_restoration_cannot_be_proven_reports_that_not_a_clean_hal
     );
     assert_eq!(
         runner.step(&mut Stuck, &no_blocker, &mut || true).unwrap(),
-        RunnerStep::Halted("RestoreUnproven")
+        RunnerStep::OwnershipUnresolved("RestoreUnproven")
     );
 }
 
@@ -516,27 +523,4 @@ fn a_rule_offered_by_a_study_that_did_not_qualify_is_never_recorded() {
         plan.iter()
             .all(|study| runner.ledger().rule_of(&study.study_sha256).is_none())
     );
-}
-
-#[test]
-fn only_halts_that_leave_a_process_transaction_or_settings_file_unproven_keep_ownership() {
-    for code in [
-        "SettlementUnproven",
-        "RecoveryUnproven",
-        "RestoreUnproven",
-        "ExecutorError",
-    ] {
-        assert!(leaves_ownership_unresolved(code), "{code}");
-    }
-    // Halts after which everything is proven settled end the campaign as an ordinary block.
-    for code in [
-        "BlockedGpuStability",
-        "InterruptedStudy",
-        "GpuReset",
-        "RawEvidenceUnverified",
-        "Halted",
-        "",
-    ] {
-        assert!(!leaves_ownership_unresolved(code), "{code}");
-    }
 }

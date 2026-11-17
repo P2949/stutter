@@ -231,7 +231,7 @@ impl FunnelDriver {
         if self.cancelled {
             return Ok(match self.executor.abort() {
                 Ok(()) => Step::Cancelled,
-                Err(reason) => Step::Halted(reason),
+                Err(reason) => Step::OwnershipUnresolved(reason),
             });
         }
         // Publish every rule the ledger holds, so a confirmation's inputs can find its pilot's.
@@ -253,6 +253,7 @@ impl FunnelDriver {
         let inner = self.executor.take_step();
         Ok(match step {
             RunnerStep::Halted(code) => Step::Halted(code),
+            RunnerStep::OwnershipUnresolved(code) => Step::OwnershipUnresolved(code),
             RunnerStep::Done => Step::Done,
             // While a study runs, and on the tick that finishes one, the inner driver's step moves
             // the lease. A campaign-level ending from inside a study ends the campaign; the
@@ -262,7 +263,8 @@ impl FunnelDriver {
                     ended @ (Step::Expired
                     | Step::ActiveBudgetExhausted
                     | Step::Cancelled
-                    | Step::Halted(_)),
+                    | Step::Halted(_)
+                    | Step::OwnershipUnresolved(_)),
                 ) => ended,
                 Some(Step::Done) | None => Step::Waiting,
                 Some(ongoing) => ongoing,

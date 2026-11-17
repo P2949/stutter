@@ -7,12 +7,24 @@ use super::{ActiveCampaign, ResearchCoordinator, TerminalCampaign};
 use crate::{
     autotune::research::{
         ResearchIntentV1, ResearchJournal, ResearchPhase,
-        driver::{AttemptHost, Driver, LaunchUnresolved, Step, build_schedule},
+        driver::{
+            AttemptHost, ClaimSettlementVerifier, Driver, LaunchUnresolved, Step, build_schedule,
+        },
         funnel_driver::FunnelDriver,
         settlement::ProductionSettlementVerifier,
     },
     daemon::privilege::UnixSocketPrivilegedActionService,
 };
+
+/// Both flat and child drivers use the same independent process and worker witnesses.
+pub(super) fn production_claim_verifier(socket: PathBuf) -> Box<dyn ClaimSettlementVerifier> {
+    Box::new(ProductionSettlementVerifier::new(
+        "/proc".into(),
+        Some(Box::new(move || {
+            UnixSocketPrivilegedActionService::new(socket.clone()).outstanding_tokens()
+        })),
+    ))
+}
 
 /// Builds the attempt host from the frozen intent. Failure means the host cannot be qualified, and
 /// nothing durable has been created yet.
@@ -109,12 +121,7 @@ impl ResearchCoordinator {
         let journal = ResearchJournal::open(journal_dir.into(), intent.uid, schedule)?;
         let mut driver = Driver::new(journal, intent.clone(), dispatch, evidence, len);
         if let Some(socket) = self.settlement_socket.clone() {
-            driver.set_claim_verifier(Box::new(ProductionSettlementVerifier::new(
-                "/proc".into(),
-                Some(Box::new(move || {
-                    UnixSocketPrivilegedActionService::new(socket.clone()).outstanding_tokens()
-                })),
-            )));
+            driver.set_claim_verifier(production_claim_verifier(socket));
         }
         let (host, funnel) = match self.funnel_builder.as_ref() {
             Some(builder) => {
@@ -264,9 +271,7 @@ impl ResearchCoordinator {
             }
             // A durable GPU health stop: preserve what was sealed, leave the rest of the schedule
             // unexecuted, and end the campaign as a typed health block.
-            Step::Halted(code)
-                if crate::autotune::research::child_runner::leaves_ownership_unresolved(code) =>
-            {
+            Step::OwnershipUnresolved(code) => {
                 // Settlement or restoration is unproven: a terminal transition would release the
                 // action slot over a possibly running game, worker transaction or edited settings
                 // file. Keep the lease and every mutation suppressed, as for a driver error, and
@@ -374,6 +379,9 @@ impl ResearchCoordinator {
                     anyhow::bail!("shutdown must not start an attempt")
                 })? {
                 Step::Sealed(_) | Step::Cancelled | Step::Halted(_) => {}
+                Step::OwnershipUnresolved(reason) => {
+                    anyhow::bail!("research ownership remains unresolved: {reason}")
+                }
                 _ => anyhow::bail!("research shutdown did not settle the attempt"),
             }
         }

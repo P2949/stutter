@@ -2,16 +2,17 @@
 //! reached the game process; it does not say the feature worked. Where the game itself reports the
 //! feature's state in its sealed native result, that report is a functional observation: frame
 //! generation appears as `frameGenerationType` and the upscaler as `upscalingType` in the native
-//! context. A factor is observed working only if every attempt treated On reports the feature in use
-//! and every attempt treated Off reports it off. Every other factor has no such report, so it is
-//! `NotObservable` here, never assumed to work.
+//! context. A nonzero enum identifies only a game-reported selection; it does not identify FSR4,
+//! GE's replacement DLL, native frame generation or EM's MLFG, nor prove they function. Every other
+//! factor has no such report, so it is `NotObservable` here.
 
 use super::{ResearchFactor, Treatment, native_context::NativeContext};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Functional {
-    /// On attempts reported the feature in use and Off attempts reported it off.
-    Observed,
+    /// On attempts reported a nonzero selection and Off attempts reported zero. This alone is not
+    /// proof of a particular technology, loaded backend, replacement DLL, or effective operation.
+    GameReportedSelection,
     /// The game reported the feature's state and it contradicts the treatment (an On attempt without
     /// the feature, or an Off attempt with it).
     NotObserved,
@@ -54,7 +55,7 @@ pub fn probe(
         }
     }
     if on > 0 && off > 0 {
-        Functional::Observed
+        Functional::GameReportedSelection
     } else {
         Functional::Unproven
     }

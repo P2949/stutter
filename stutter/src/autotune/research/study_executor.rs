@@ -11,7 +11,7 @@
 
 use super::{
     ProtonSource,
-    child_runner::{StudyExecutor, StudyRun},
+    child_runner::{Ownership, StudyExecutor, StudyRun},
     child_study::{ChildStudy, Profile, Stage, StudyResult},
     functional_probe::Functional,
     native_context::ProfileConformance,
@@ -114,6 +114,8 @@ pub trait StudyAttempts {
 
 enum State {
     Idle,
+    /// Ownership cannot be released by another abort; independent recovery is required.
+    Unresolved,
     /// Attempts are running; `applied` says a profile must be restored when they end.
     Running {
         applied: bool,
@@ -142,7 +144,15 @@ fn run(result: StudyResult, attempts_used: u32, reason: &'static str, halt: bool
         attempts_used,
         reason,
         halt,
+        ownership: Ownership::Settled,
         rule: None,
+    }
+}
+
+fn unresolved(attempts_used: u32, reason: &'static str) -> StudyRun {
+    StudyRun {
+        ownership: Ownership::Unresolved,
+        ..run(StudyResult::Failed, attempts_used, reason, true)
     }
 }
 
@@ -219,12 +229,17 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
 
     /// Restore the profile (if one was applied) and return to idle. `Err` means it is unproven.
     fn restore_if_applied(&mut self, applied: bool) -> Result<(), &'static str> {
-        self.state = State::Idle;
-        if applied {
+        let result = if applied {
             self.profiles.restore()
         } else {
             Ok(())
-        }
+        };
+        self.state = if result.is_ok() {
+            State::Idle
+        } else {
+            State::Unresolved
+        };
+        result
     }
 }
 
@@ -247,27 +262,22 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         remaining_attempts: u32,
         fence: &mut dyn FnMut() -> anyhow::Result<()>,
     ) -> anyhow::Result<Option<StudyRun>> {
+        if matches!(self.state, State::Unresolved) {
+            return Ok(Some(unresolved(0, "OwnershipUnresolved")));
+        }
         if matches!(self.state, State::Idle) {
             // A study whose journal already holds progress was interrupted (a restart). Its
             // attempts must never be replayed, and settings are not touched until whatever it left
             // running is independently settled.
             let interrupted = self.attempts.has_progress(study);
             if interrupted && self.attempts.settle_interrupted(study).is_err() {
-                return Ok(Some(run(
-                    StudyResult::Failed,
-                    study.min_attempts,
-                    "SettlementUnproven",
-                    true,
-                )));
+                self.state = State::Unresolved;
+                return Ok(Some(unresolved(study.min_attempts, "SettlementUnproven")));
             }
             // Settings left edited by a crash are restored before anything else is decided.
             if self.profiles.recover().is_err() {
-                return Ok(Some(run(
-                    StudyResult::Failed,
-                    study.min_attempts,
-                    "RecoveryUnproven",
-                    true,
-                )));
+                self.state = State::Unresolved;
+                return Ok(Some(unresolved(study.min_attempts, "RecoveryUnproven")));
             }
             if interrupted {
                 return Ok(Some(run(
@@ -287,7 +297,8 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
                 }
                 // The settings may still be edited: nothing else may run in this campaign.
                 Err(ProfileFailure::Unrestored(reason)) => {
-                    return Ok(Some(run(StudyResult::Failed, 0, reason, true)));
+                    self.state = State::Unresolved;
+                    return Ok(Some(unresolved(0, reason)));
                 }
             };
             self.state = State::Running { applied };
@@ -303,13 +314,8 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
                 // settings are left as they are (the durable snapshot recovers them later) and the
                 // campaign stops; they are never restored under an unresolved owner.
                 if self.attempts.abort().is_err() {
-                    self.state = State::Idle;
-                    return Ok(Some(run(
-                        StudyResult::Failed,
-                        study.min_attempts,
-                        "SettlementUnproven",
-                        true,
-                    )));
+                    self.state = State::Unresolved;
+                    return Ok(Some(unresolved(study.min_attempts, "SettlementUnproven")));
                 }
                 Err(error)
             }
@@ -319,12 +325,7 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
             .map_or(study.min_attempts, |o| o.attempts_used);
         // A study that ended normally has settled its own attempts; the profile is restored now.
         if self.restore_if_applied(applied).is_err() {
-            return Ok(Some(run(
-                StudyResult::Failed,
-                used,
-                "RestoreUnproven",
-                true,
-            )));
+            return Ok(Some(unresolved(used, "RestoreUnproven")));
         }
         Ok(Some(Self::judge(study, &outcome?)))
     }
@@ -332,10 +333,14 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
     /// Stop a running study (a health stop, cancellation, deadline or shutdown): settle its
     /// attempt, verify no owner remains, then restore and prove the settings.
     fn abort(&mut self) -> Result<(), &'static str> {
+        if matches!(self.state, State::Unresolved) {
+            return Err("OwnershipUnresolved");
+        }
         let State::Running { applied } = self.state else {
             return Ok(());
         };
         if self.attempts.abort().is_err() {
+            self.state = State::Unresolved;
             return Err("SettlementUnproven");
         }
         self.restore_if_applied(applied)

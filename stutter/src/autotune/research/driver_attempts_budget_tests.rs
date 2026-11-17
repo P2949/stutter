@@ -29,6 +29,36 @@ fn a_second_child_starts_from_what_the_first_already_spent_of_the_campaign() {
 }
 
 #[test]
+fn three_children_record_only_their_own_active_time() {
+    let (root, mut runner, _, parent) = attempts(Host::finishing());
+    let studies = plan(&parent).unwrap();
+    let mut total = 0;
+    for study in studies.iter().take(3) {
+        assert_eq!(runner.poll(study, 100).unwrap(), None);
+        let driver = &runner.running.as_ref().unwrap().1;
+        assert_eq!(driver.active_seconds(), total);
+        assert_eq!(driver.child_active_seconds(), 0);
+        run_to_end(&mut runner, study);
+        let child = read_spent(&root, study).active_seconds;
+        assert!(child > 0);
+        total += child;
+    }
+    let studies_dir = File::open(root.path().join("studies")).unwrap();
+    assert_eq!(
+        crate::autotune::research::campaign_budget::spent(
+            &studies_dir,
+            parent.uid,
+            u64::from(parent.max_active_seconds)
+        )
+        .unwrap()
+        .active_seconds,
+        total
+    );
+    assert_eq!(runner.poll(&studies[3], 100).unwrap(), None);
+    assert_eq!(runner.running.as_ref().unwrap().1.active_seconds(), total);
+}
+
+#[test]
 fn a_child_that_would_start_over_an_exhausted_campaign_budget_is_stopped_at_once() {
     let (root, mut runner, first, parent) = attempts(Host::finishing());
     let second = plan(&parent).unwrap().remove(1);

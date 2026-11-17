@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn a_feature_is_qualified_only_on_the_games_own_report_and_the_reasons_say_which_gap_remains() {
+fn game_reported_selection_alone_does_not_qualify_a_feature() {
     use crate::autotune::research::{ResearchFactor, functional_probe::Functional};
     let mut intent = base_intent();
     intent.tools.push(ResearchTool {
@@ -22,10 +22,10 @@ fn a_feature_is_qualified_only_on_the_games_own_report_and_the_reasons_say_which
         let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
         run_to_end(&mut exec, feature).unwrap()
     };
-    // The control reached the game and the game reported the feature working.
+    // Selection is useful context, but does not prove the technology or effective backend.
     assert_eq!(
-        run(Some(Functional::Observed), Some(true)).result,
-        StudyResult::Qualified
+        run(Some(Functional::GameReportedSelection), Some(false)).reason,
+        "FeatureFunctionalUnproven"
     );
     // Reached the game, but the game reported the feature off: not functional, said so.
     assert_eq!(

@@ -14,10 +14,42 @@ fn an_abort_whose_settlement_is_unproven_keeps_the_running_attempt_owned() {
 
 #[test]
 fn a_proven_abort_releases_the_running_attempt() {
-    let (_root, mut runner, study, _) = attempts(Host::finishing());
+    let (root, mut runner, study, _) = attempts(Host::finishing());
     assert_eq!(runner.poll(&study, 100).unwrap(), None);
     assert_eq!(runner.abort(), Ok(()));
     assert!(!runner.has_running());
+    let seal = root
+        .path()
+        .join("studies")
+        .join(&study.study_sha256[..16])
+        .join("journal/0000.json");
+    assert!(
+        seal.is_file(),
+        "an active attempt is durably sealed before release"
+    );
+}
+
+#[test]
+fn an_ambiguous_sent_launch_cannot_be_released_by_a_successful_noop_host_abort() {
+    let mut host = Host::finishing();
+    host.launch_unresolved = true;
+    let (root, mut runner, study, _) = attempts(host);
+    let error = runner.poll(&study, 100).unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<crate::autotune::research::driver::LaunchUnresolved>()
+            .is_some()
+    );
+    assert_eq!(runner.abort(), Err("SettlementUnproven"));
+    assert!(runner.has_running());
+    assert!(
+        !root
+            .path()
+            .join("studies")
+            .join(&study.study_sha256[..16])
+            .join("journal/0000.json")
+            .exists()
+    );
 }
 
 #[test]

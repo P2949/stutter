@@ -20,6 +20,7 @@ struct Host {
     health: bool,
     process: Option<crate::autotune::research::action_child::ChildTarget>,
     abort_fails: bool,
+    launch_unresolved: bool,
     treatment: Option<crate::autotune::research::Treatment>,
     prefix_refusal: Option<&'static str>,
     /// After this many launches the sighted game process is the given one (a new launch, a new process).
@@ -27,6 +28,7 @@ struct Host {
     /// Every factor set the driver enabled before a study, shared so a test can read it back.
     seen_factors:
         std::sync::Arc<std::sync::Mutex<Vec<Vec<crate::autotune::research::ResearchFactor>>>>,
+    launched_context: std::sync::Arc<std::sync::Mutex<Option<DispatchContextV1>>>,
 }
 
 impl Host {
@@ -38,9 +40,11 @@ impl Host {
             unsafe_until_tick: 0,
             ticks: 0,
             seen_factors: Default::default(),
+            launched_context: Default::default(),
             health: false,
             process: None,
             abort_fails: false,
+            launch_unresolved: false,
             treatment: None,
             prefix_refusal: None,
             switch_process: None,
@@ -89,9 +93,15 @@ impl AttemptHost for Host {
             proton_manifest: "/m".into(),
         })
     }
-    fn launch(&mut self, slot: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
+    fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()> {
         self.launches += 1;
         self.current = slot.index;
+        *self.launched_context.lock().unwrap() = Some(context.clone());
+        if self.launch_unresolved {
+            return Err(
+                super::super::driver::LaunchUnresolved("fixture acknowledgement lost").into(),
+            );
+        }
         Ok(())
     }
     fn poll(&mut self) -> Progress {
@@ -160,6 +170,108 @@ fn run_to_end(runner: &mut DriverStudyAttempts, study: &ChildStudy) -> AttemptsO
         }
     }
     panic!("the study never ended")
+}
+
+#[test]
+fn child_consumed_ticket_requires_both_witnesses_until_the_seal_is_durable() {
+    use std::sync::{Arc, Mutex};
+
+    use crate::autotune::research::{
+        driver::{ClaimSettlementGuard, ClaimSettlementVerifier},
+        launch_ticket::{ResearchLaunchTicketV1, SteamVerb, binding, consume_launch_ticket},
+    };
+
+    struct Guard(std::path::PathBuf, Arc<Mutex<Vec<bool>>>);
+    impl ClaimSettlementGuard for Guard {}
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            self.1.lock().unwrap().push(self.0.is_file());
+        }
+    }
+    struct Verifier {
+        process_ok: bool,
+        worker_ok: bool,
+        seal: std::path::PathBuf,
+        drops: Arc<Mutex<Vec<bool>>>,
+    }
+    impl ClaimSettlementVerifier for Verifier {
+        fn verify_process(
+            &mut self,
+            _: &File,
+            _: &DispatchContextV1,
+            _: &ResearchLaunchTicketV1,
+        ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>> {
+            anyhow::ensure!(self.process_ok, "process witness refused");
+            Ok(Box::new(Guard(self.seal.clone(), self.drops.clone())))
+        }
+        fn verify_worker(
+            &mut self,
+            _: &DispatchContextV1,
+        ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>> {
+            anyhow::ensure!(self.worker_ok, "worker witness refused");
+            Ok(Box::new(Guard(self.seal.clone(), self.drops.clone())))
+        }
+    }
+    for (process_ok, worker_ok, cancel) in [
+        (false, true, false),
+        (true, false, false),
+        (true, true, false),
+        (false, true, true),
+        (true, false, true),
+        (true, true, true),
+    ] {
+        let host = Host::finishing();
+        let context = host.launched_context.clone();
+        let (root, runner, study, _) = attempts(host);
+        let study_path = root.path().join("studies").join(&study.study_sha256[..16]);
+        let seal = study_path.join("journal/0000.json");
+        let drops = Arc::new(Mutex::new(Vec::new()));
+        let mut runner = runner.with_claim_verifier_factory(Box::new({
+            let seal = seal.clone();
+            let drops = drops.clone();
+            move || {
+                Box::new(Verifier {
+                    process_ok,
+                    worker_ok,
+                    seal: seal.clone(),
+                    drops: drops.clone(),
+                })
+            }
+        }));
+        for _ in 0..10 {
+            assert!(runner.poll(&study, 100).unwrap().is_none());
+            if context.lock().unwrap().is_some() {
+                break;
+            }
+        }
+        let context = context.lock().unwrap().clone().expect("child launched");
+        let ticket_id = context.tickets.get("run").unwrap();
+        let attempt = study_path.join("dispatch/0000");
+        let ticket: ResearchLaunchTicketV1 = serde_json::from_slice(
+            &std::fs::read(attempt.join(format!("ticket-{ticket_id}.json"))).unwrap(),
+        )
+        .unwrap();
+        consume_launch_ticket(
+            crate::syscall::open_dir_no_symlinks(&attempt).unwrap(),
+            ticket_id,
+            &binding(&context.intent, &context.slot, SteamVerb::Run).unwrap(),
+            ticket.issued_unix_seconds,
+        )
+        .unwrap();
+        let success = if cancel {
+            runner.abort().is_ok()
+        } else {
+            runner.poll(&study, 100).is_ok()
+        };
+        assert_eq!(success, process_ok && worker_ok);
+        assert_eq!(seal.is_file(), process_ok && worker_ok);
+        if cancel {
+            assert_eq!(runner.has_running(), !success);
+        }
+        if process_ok && worker_ok {
+            assert_eq!(*drops.lock().unwrap(), [true, true]);
+        }
+    }
 }
 
 #[test]
@@ -570,7 +682,7 @@ mod funnel {
             }
         }
         // The runner records the failed executor and halts; nothing else may run.
-        assert_eq!(step, Step::Halted("ExecutorError"));
+        assert_eq!(step, Step::OwnershipUnresolved("ExecutorError"));
         let first = &driver.dispositions()[0];
         assert_eq!(first.result, Some(StudyResult::Failed));
         assert_eq!(first.reason, "ExecutorError");

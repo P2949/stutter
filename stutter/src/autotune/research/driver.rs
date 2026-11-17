@@ -121,6 +121,8 @@ pub enum Step {
     Cancelled,
     /// A durable health stop ended the campaign; the remaining schedule is left unexecuted.
     Halted(&'static str),
+    /// A child operation could not prove settlement or restoration; retain campaign ownership.
+    OwnershipUnresolved(&'static str),
 }
 
 pub struct Driver {
@@ -136,6 +138,8 @@ pub struct Driver {
     armed_context: Option<DispatchContextV1>,
     claim_verifier: Option<Box<dyn ClaimSettlementVerifier>>,
     active_seconds: u64,
+    /// Active time charged by earlier children, excluded from this child's ledger entry.
+    prior_active_seconds: u64,
     /// Evidence bytes earlier child studies of the same campaign already used.
     prior_evidence_bytes: u64,
     last_tick_seconds: Option<u64>,
@@ -205,6 +209,7 @@ impl Driver {
             armed_context: None,
             claim_verifier: None,
             active_seconds: 0,
+            prior_active_seconds: 0,
             prior_evidence_bytes: 0,
             last_tick_seconds: None,
             fresh_journal_checked: false,
@@ -218,13 +223,21 @@ impl Driver {
     /// each in full.
     pub fn with_prior(mut self, spent: super::campaign_budget::Spent) -> Self {
         self.active_seconds = spent.active_seconds;
+        self.prior_active_seconds = spent.active_seconds;
         self.prior_evidence_bytes = spent.evidence_bytes;
         self
     }
 
     /// Active seconds charged so far, including any spent before this driver started.
+    #[cfg(test)]
     pub fn active_seconds(&self) -> u64 {
         self.active_seconds
+    }
+
+    /// Active time incurred by this driver alone.
+    pub fn child_active_seconds(&self) -> u64 {
+        self.active_seconds
+            .saturating_sub(self.prior_active_seconds)
     }
 
     /// Settle an attempt that was durably started but never sealed before a restart. The frozen
@@ -308,6 +321,10 @@ impl Driver {
 
     pub fn cancel(&mut self) {
         self.cancel = true;
+    }
+
+    pub(crate) fn last_tick_seconds(&self) -> Option<u64> {
+        self.last_tick_seconds
     }
 
     pub(crate) fn set_claim_verifier(&mut self, verifier: Box<dyn ClaimSettlementVerifier>) {

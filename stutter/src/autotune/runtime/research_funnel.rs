@@ -113,7 +113,7 @@ fn build(
     let results = study_dir.to_path_buf();
     // The driver rejects a clock that moves backward, so the clock is clamped to never do so.
     let mut last = 0u64;
-    let attempts = DriverStudyAttempts::new(
+    let mut attempts = DriverStudyAttempts::new(
         campaign.try_clone()?,
         intent.clone(),
         host,
@@ -128,6 +128,11 @@ fn build(
     )
     .with_action_gate(gate.clone())
     .with_telemetry(telemetry.clone());
+    if let Some(socket) = worker_socket.map(std::path::Path::to_path_buf) {
+        attempts = attempts.with_claim_verifier_factory(Box::new(move || {
+            super::drive::production_claim_verifier(socket.clone())
+        }));
+    }
     // A treatment study no measured build can run is recorded as blocked before it starts.
     let screened = selection_blocker(campaign.try_clone()?, intent.clone(), rules.clone());
     // No CP-LONG work unit is installed in this build: a study on the long profile is recorded as

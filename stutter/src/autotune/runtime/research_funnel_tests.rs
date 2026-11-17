@@ -12,11 +12,17 @@ use crate::autotune::research::{
     study_executor::{ProfileFailure, ProfileHook},
 };
 
-struct NoProfiles;
+struct NoProfiles {
+    rollback_unproven: bool,
+}
 
 impl ProfileHook for NoProfiles {
     fn apply(&mut self, _: Profile) -> Result<bool, ProfileFailure> {
-        Ok(false)
+        if self.rollback_unproven {
+            Err(ProfileFailure::Unrestored("RollbackUnproven"))
+        } else {
+            Ok(false)
+        }
     }
     fn recover(&mut self) -> Result<(), &'static str> {
         Ok(())
@@ -27,7 +33,11 @@ impl ProfileHook for NoProfiles {
 }
 
 pub(in crate::autotune::runtime) fn builder() -> FunnelBuilder {
-    Box::new(|intent, campaign, host| {
+    builder_with_rollback(false)
+}
+
+fn builder_with_rollback(rollback_unproven: bool) -> FunnelBuilder {
+    Box::new(move |intent, campaign, host| {
         let parent = intent.clone();
         let attempts = DriverStudyAttempts::new(
             campaign.try_clone()?,
@@ -42,7 +52,7 @@ pub(in crate::autotune::runtime) fn builder() -> FunnelBuilder {
         FunnelDriver::new(
             campaign,
             intent,
-            Box::new(NoProfiles),
+            Box::new(NoProfiles { rollback_unproven }),
             attempts,
             |_| None,
             Default::default(),
@@ -58,6 +68,10 @@ struct Setup {
 }
 
 fn setup(script: Script, max_attempts: u32, funnel: bool) -> Setup {
+    setup_with_builder(script, max_attempts, funnel.then(builder))
+}
+
+fn setup_with_builder(script: Script, max_attempts: u32, funnel: Option<FunnelBuilder>) -> Setup {
     let campaign = tempfile::tempdir().unwrap();
     let study = tempfile::tempdir().unwrap();
     for dir in [&campaign, &study] {
@@ -87,8 +101,8 @@ fn setup(script: Script, max_attempts: u32, funnel: bool) -> Setup {
     coordinator.set_study_dir(Some(study.path().to_path_buf()));
     let handle = script.clone();
     coordinator.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
-    if funnel {
-        coordinator.set_funnel_builder(Some(builder()));
+    if let Some(builder) = funnel {
+        coordinator.set_funnel_builder(Some(builder));
     }
     let reply = send(
         &mut coordinator,
@@ -104,6 +118,51 @@ fn setup(script: Script, max_attempts: u32, funnel: bool) -> Setup {
         coordinator,
         script,
     }
+}
+
+#[test]
+fn failed_profile_rollback_retains_the_real_coordinator_lease_and_mutation_slot() {
+    let mut s = setup_with_builder(
+        Script {
+            safe: true,
+            ..Default::default()
+        },
+        40,
+        Some(builder_with_rollback(true)),
+    );
+    s.coordinator.drive_attempts(101);
+    assert_eq!(s.script.lock().unwrap().launches, 0);
+    assert!(s.coordinator.owns_action_slot());
+    assert!(s.coordinator.terminal.is_none());
+    assert_eq!(s.coordinator.storage_blocker, Some("UnsafeToResume"));
+    // An attempted shutdown cannot transform the latched failure into a settled owner.
+    assert!(s.coordinator.shutdown_driver(102).is_err());
+    assert!(s.coordinator.owns_action_slot());
+}
+
+#[test]
+fn a_child_launch_with_a_lost_acknowledgement_keeps_the_resident_lease() {
+    let mut s = setup(
+        Script {
+            safe: true,
+            launch_unresolved: true,
+            ..Default::default()
+        },
+        40,
+        true,
+    );
+    s.coordinator.drive_attempts(101);
+    let script = s.script.lock().unwrap();
+    assert_eq!(script.launches, 1);
+    assert_eq!(
+        script.aborts, 0,
+        "a no-op host abort cannot settle a possibly late launch"
+    );
+    drop(script);
+    assert!(s.coordinator.owns_action_slot());
+    assert!(s.coordinator.terminal.is_none());
+    assert_eq!(s.coordinator.storage_blocker, Some("UnsafeToResume"));
+    assert!(s.coordinator.shutdown_driver(102).is_err());
 }
 
 #[test]

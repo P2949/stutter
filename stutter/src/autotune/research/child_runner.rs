@@ -25,8 +25,16 @@ pub struct StudyRun {
     pub reason: &'static str,
     /// A health stop ended the study: nothing further may run in this campaign.
     pub halt: bool,
+    /// Whether settlement and restoration are proven when this run ends.
+    pub ownership: Ownership,
     /// The confirmation rule a qualified pilot froze; `None` for every other study.
     pub rule: Option<super::pilot_rule::FrozenConfirmationRule>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ownership {
+    Settled,
+    Unresolved,
 }
 
 pub trait StudyExecutor {
@@ -60,17 +68,6 @@ pub trait StudyExecutor {
     fn abort(&mut self) -> Result<(), &'static str>;
 }
 
-/// Whether a halt code says something may still be running or left edited: a process, worker
-/// transaction or settings file whose settlement or restoration could not be proven, or an executor
-/// that failed after possibly starting a game. A halt like this is not a settled stop: the campaign
-/// keeps its lease and mutation slot, and nothing else may run, until independent recovery proves it.
-pub fn leaves_ownership_unresolved(code: &str) -> bool {
-    matches!(
-        code,
-        "SettlementUnproven" | "RecoveryUnproven" | "RestoreUnproven" | "ExecutorError"
-    )
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum RunnerStep {
     /// A study is running; nothing is decided yet.
@@ -82,6 +79,8 @@ pub enum RunnerStep {
     },
     /// The funnel stopped without deciding the rest (health). Nothing was recorded for them.
     Halted(&'static str),
+    /// A process, worker transaction or edited settings file may still be owned.
+    OwnershipUnresolved(&'static str),
     /// Every planned study has a recorded decision.
     Done,
 }
@@ -142,8 +141,7 @@ impl StageRunner {
 
     /// As `step`, passing the controller's launch fence to the executor.
     ///
-    /// A `Halted` code that `leaves_ownership_unresolved` means a game, a worker transaction or an
-    /// edited settings file is not proven settled: the caller must keep the campaign's ownership.
+    /// `OwnershipUnresolved` requires the caller to keep the campaign's ownership.
     pub fn step_fenced(
         &mut self,
         executor: &mut dyn StudyExecutor,
@@ -156,10 +154,10 @@ impl StageRunner {
             // running study is settled and its settings restored first, and that proof is what the
             // halt reports when it fails.
             self.in_flight = None;
-            return Ok(RunnerStep::Halted(match executor.abort() {
-                Ok(()) => "BlockedGpuStability",
-                Err(reason) => reason,
-            }));
+            return Ok(match executor.abort() {
+                Ok(()) => RunnerStep::Halted("BlockedGpuStability"),
+                Err(reason) => RunnerStep::OwnershipUnresolved(reason),
+            });
         }
         let remaining = self.remaining_attempts();
         let study = match self.in_flight.take() {
@@ -185,7 +183,7 @@ impl StageRunner {
                     "ExecutorError",
                     study.min_attempts,
                 )?;
-                return Ok(RunnerStep::Halted("ExecutorError"));
+                return Ok(RunnerStep::OwnershipUnresolved("ExecutorError"));
             }
         };
         // Qualified evidence needs at least the study's own attempts.
@@ -202,12 +200,12 @@ impl StageRunner {
             run.attempts_used,
             run.rule.filter(|_| result == StudyResult::Qualified),
         )?;
-        if run.halt {
-            return Ok(RunnerStep::Halted(if reason.is_empty() {
-                "Halted"
-            } else {
-                reason
-            }));
+        if run.halt || run.ownership == Ownership::Unresolved {
+            let code = if reason.is_empty() { "Halted" } else { reason };
+            return Ok(match run.ownership {
+                Ownership::Settled => RunnerStep::Halted(code),
+                Ownership::Unresolved => RunnerStep::OwnershipUnresolved(code),
+            });
         }
         Ok(RunnerStep::Ran { study, result })
     }

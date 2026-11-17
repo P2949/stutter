@@ -46,6 +46,7 @@ pub struct DriverStudyAttempts {
     /// The arms a study runs across: every authorized tool for a screen, and the two arms chosen from
     /// the screen's results for a confirmation, feature or action study.
     select_arms: SelectArms,
+    claim_verifier: Option<Box<dyn Fn() -> Box<dyn super::driver::ClaimSettlementVerifier> + Send>>,
     running: Option<(String, Driver)>,
     /// The driver step of the last poll, for the controller to advance the lease from.
     last_step: Option<Step>,
@@ -103,6 +104,7 @@ impl DriverStudyAttempts {
             launch_fence,
             results_for,
             select_arms,
+            claim_verifier: None,
             running: None,
             last_step: None,
             override_now: None,
@@ -115,6 +117,14 @@ impl DriverStudyAttempts {
             feature_source: None,
             feature_observed: BTreeMap::new(),
         }
+    }
+
+    pub(crate) fn with_claim_verifier_factory(
+        mut self,
+        factory: Box<dyn Fn() -> Box<dyn super::driver::ClaimSettlementVerifier> + Send>,
+    ) -> Self {
+        self.claim_verifier = Some(factory);
+        self
     }
 
     /// Share the telemetry observer with the runtime: each attempt's receipt is kept beside its study.
@@ -307,7 +317,12 @@ impl DriverStudyAttempts {
         let studies = open_dir(&self.campaign, STUDIES_DIR)?;
         let dir = open_dir(&studies, dir_name(study))?;
         let evidence = open_dir(&dir, "evidence")?;
-        super::campaign_budget::record(&dir, &evidence, self.parent.uid, driver.active_seconds())
+        super::campaign_budget::record(
+            &dir,
+            &evidence,
+            self.parent.uid,
+            driver.child_active_seconds(),
+        )
     }
 
     /// Record the action receipts in the study directory. An existing file must be byte-identical.
@@ -403,7 +418,10 @@ impl DriverStudyAttempts {
         let schedule = build_schedule(&intent)?;
         let len = schedule.len();
         let journal = ResearchJournal::open(journal_dir.into(), intent.uid, schedule)?;
-        let driver = Driver::new(journal, intent, dispatch, evidence, len).with_prior(prior);
+        let mut driver = Driver::new(journal, intent, dispatch, evidence, len).with_prior(prior);
+        if let Some(factory) = &self.claim_verifier {
+            driver.set_claim_verifier(factory());
+        }
         self.running = Some((study.study_sha256.clone(), driver));
         Ok(())
     }
@@ -448,13 +466,11 @@ impl DriverStudyAttempts {
             });
         let activation = self.feature_activation(study, u32::try_from(report.attempts_completed)?);
         let functional = self.feature_functional(study, &evidence);
-        // A feature study is qualified only when its treatment reached the game and the game itself
-        // reported the feature working; an action study by its restored action.
+        // The game's enum cannot establish the exact backend or functional fork-specific activation.
+        // Keep feature studies unqualified until independently replayable identity and operation
+        // evidence is connected, even when the environment and game-reported selection agree.
         let stage_evidence = match study.stage {
-            Stage::Feature(_) => Some(
-                activation == Some(true)
-                    && functional == Some(super::functional_probe::Functional::Observed),
-            ),
+            Stage::Feature(_) => Some(false),
             _ => self.stage_evidence(study),
         };
         Ok(AttemptsOutcome {
@@ -488,17 +504,35 @@ impl StudyAttempts for DriverStudyAttempts {
     }
 
     fn abort(&mut self) -> Result<(), &'static str> {
-        // The host stops only what this campaign owns and verifies the settlement; the child's
-        // journal keeps any unsealed attempt, which a restart finds and refuses to replay.
-        // The attempt is released only once the host proves it settled; otherwise the driver that owns
-        // it stays, so the unsettled attempt remains visible to the next tick and to recovery.
-        self.host.abort().map_err(|_| "SettlementUnproven")?;
+        // Cancellation goes through the owning Driver: it refuses an ambiguous launch and, for a
+        // started attempt, retires tickets with independent witnesses before sealing the journal.
+        // A host abort alone cannot prove that a sent launcher will not arrive later, nor settle a
+        // consumed ticket. Keep the driver and profile whenever any part of that proof fails.
+        if let Some((_, driver)) = self.running.as_mut() {
+            driver.cancel();
+            let now = self
+                .override_now
+                .take()
+                .unwrap_or_else(|| (self.clock)())
+                .max(driver.last_tick_seconds().unwrap_or(0));
+            match driver.tick_with_launch_fence(self.host.as_mut(), now, || {
+                anyhow::bail!("cancellation must not launch an attempt")
+            }) {
+                Ok(Step::Sealed(_)) | Ok(Step::Cancelled) => {}
+                _ => return Err("SettlementUnproven"),
+            }
+        } else {
+            self.host.abort().map_err(|_| "SettlementUnproven")?;
+        }
         self.running = None;
         Ok(())
     }
 
     fn settle_interrupted(&mut self, _study: &ChildStudy) -> Result<(), &'static str> {
-        self.host.abort().map_err(|_| "SettlementUnproven")
+        // An in-memory host has no authority to reconstruct a prior driver's claimed tickets,
+        // launcher state, worker tokens and process witnesses. The resident recovery job does
+        // that against the child's durable intent and journal before restoring profiles.
+        Err("SettlementUnproven")
     }
 
     fn take_step(&mut self) -> Option<Step> {
@@ -538,6 +572,9 @@ impl StudyAttempts for DriverStudyAttempts {
         let halted = matches!(step, Step::Halted(_));
         match step {
             Step::Waiting | Step::Running(_) | Step::Sealed(_) => Ok(None),
+            Step::OwnershipUnresolved(reason) => {
+                anyhow::bail!("child ownership unresolved: {reason}")
+            }
             Step::Done
             | Step::Expired
             | Step::ActiveBudgetExhausted

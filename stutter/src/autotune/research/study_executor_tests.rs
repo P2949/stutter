@@ -465,6 +465,8 @@ fn an_unproven_rollback_while_applying_is_an_integrity_stop_not_an_ordinary_fail
         (outcome.result, outcome.reason, outcome.halt),
         (StudyResult::Failed, "RollbackUnproven", true)
     );
+    assert_eq!(outcome.ownership, Ownership::Unresolved);
+    assert_eq!(exec.abort(), Err("OwnershipUnresolved"));
     assert_eq!(
         *log.borrow(),
         ["recover", "apply"],
