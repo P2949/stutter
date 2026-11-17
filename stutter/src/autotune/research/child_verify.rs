@@ -8,7 +8,7 @@
 
 use std::{fs::File, os::fd::AsFd, path::PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{
     ProtonSource, ResearchIntentV1, ResearchJournal,
@@ -45,6 +45,19 @@ pub struct ChildVerification {
     /// The journal slots of the attempts that completed (the child's sealed evidence), which each
     /// need exactly one eligible telemetry receipt.
     pub completed_attempts: Vec<u32>,
+    /// The game process each completed attempt's sealed native completion names, which a telemetry
+    /// receipt must be about. An attempt with no recorded process has nothing to be matched to.
+    #[serde(default)]
+    pub completed_processes: Vec<AttemptProcess>,
+}
+
+/// The identity of the game process of one completed attempt, from its sealed native completion.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttemptProcess {
+    pub slot: u32,
+    pub pid: stutter_core::ids::Pid,
+    pub start_ticks: u64,
+    pub uid: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -104,9 +117,20 @@ impl ChildrenVerification {
                     .iter()
                     .filter(|item| item["attempt"].as_u64() == Some(u64::from(*index)))
                     .collect();
+                // The receipt must be about the very process the sealed native completion names:
+                // matching only the attempt number would let another process's receipt stand in.
+                let process = child
+                    .completed_processes
+                    .iter()
+                    .find(|process| process.slot == *index);
                 if let [only] = mine.as_slice()
                     && only["frame_verdict"] == "Eligible"
                     && only["source_bound_to_game"] == true
+                    && process.is_some_and(|process| {
+                        only["pid"].as_u64() == Some(u64::from(process.pid.as_u32()))
+                            && only["start_ticks"].as_u64() == Some(process.start_ticks)
+                            && only["uid"].as_u64() == Some(u64::from(process.uid))
+                    })
                 {
                     eligible = eligible.saturating_add(1);
                 }
@@ -279,6 +303,7 @@ pub fn verify_children(
         let cohort = study_file(&studies, &name, uid, "prefix-cohort.json");
         let telemetry = study_file(&studies, &name, uid, "telemetry-receipts.json");
         let completed = completed_attempts(&studies, &name, uid);
+        let processes = completed_processes(&studies, &name, uid);
         children.push(match result {
             Ok((raw, report, runtime)) => ChildVerification {
                 study: name,
@@ -291,6 +316,7 @@ pub fn verify_children(
                 prefix_cohort: cohort,
                 telemetry_receipts: telemetry,
                 completed_attempts: completed,
+                completed_processes: processes,
             },
             Err(error) => ChildVerification {
                 study: name,
@@ -303,6 +329,7 @@ pub fn verify_children(
                 prefix_cohort: None,
                 telemetry_receipts: None,
                 completed_attempts: Vec::new(),
+                completed_processes: Vec::new(),
             },
         });
     }
@@ -331,6 +358,33 @@ fn completed_attempts(studies: &File, name: &str, uid: u32) -> Vec<u32> {
     };
     super::report_store::read_evidence(&File::from(evidence), uid)
         .map(|items| items.into_keys().collect())
+        .unwrap_or_default()
+}
+
+/// The game process each completed attempt's sealed native completion names.
+fn completed_processes(studies: &File, name: &str, uid: u32) -> Vec<AttemptProcess> {
+    let Ok(dir) = crate::syscall::openat_dir_nofollow(studies.as_fd(), name) else {
+        return Vec::new();
+    };
+    let dir = File::from(dir);
+    let Ok(evidence) = crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence") else {
+        return Vec::new();
+    };
+    super::report_store::read_evidence(&File::from(evidence), uid)
+        .map(|items| {
+            items
+                .into_iter()
+                .filter_map(|(slot, item)| {
+                    let process = &item.native_completion.as_ref()?.process;
+                    Some(AttemptProcess {
+                        slot,
+                        pid: process.pid,
+                        start_ticks: process.start_ticks,
+                        uid: process.uid,
+                    })
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 

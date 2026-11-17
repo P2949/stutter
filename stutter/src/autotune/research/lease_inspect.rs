@@ -64,10 +64,36 @@ pub fn inspect(dir: &Path, uid: u32) -> anyhow::Result<LeaseInspection> {
     let mut previous = stutter_core::hash::sha256_hex(&header_bytes);
     let mut phase = ResearchPhase::Requested;
     let (mut chain_valid, mut transitions_valid, mut count) = (true, true, 0u32);
-    for sequence in 1..=MAX_EVENTS {
-        let Ok(bytes) = read_private(&handle, &event_name(sequence), uid) else {
-            break;
-        };
+    // Every event record present, by sequence, read from the directory itself rather than probed one
+    // name at a time: a gap, a record past the end or an `event-` entry that is not a well-formed
+    // record cannot hide behind a read that happened to fail.
+    let mut present = std::collections::BTreeSet::new();
+    let mut stray = false;
+    for entry in std::fs::read_dir(dir)? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("event-") {
+            continue;
+        }
+        match name
+            .strip_prefix("event-")
+            .and_then(|rest| rest.strip_suffix(".json"))
+            .and_then(|digits| digits.parse::<usize>().ok())
+        {
+            Some(sequence)
+                if (1..=MAX_EVENTS).contains(&sequence) && event_name(sequence) == name =>
+            {
+                present.insert(sequence);
+            }
+            _ => stray = true,
+        }
+    }
+    let contiguous = (1..=MAX_EVENTS)
+        .take_while(|sequence| present.contains(sequence))
+        .count();
+    chain_valid &= !stray && present.len() == contiguous;
+    for sequence in 1..=contiguous {
+        // A record that is present but cannot be read is an error, not the end of the chain.
+        let bytes = read_private(&handle, &event_name(sequence), uid)?;
         let event: Event = serde_json::from_slice(&bytes)?;
         chain_valid &= event.sequence as usize == sequence && event.previous_sha256 == previous;
         transitions_valid &= event.from == phase && event.from.permits(event.to);
@@ -75,8 +101,6 @@ pub fn inspect(dir: &Path, uid: u32) -> anyhow::Result<LeaseInspection> {
         phase = event.to;
         count += 1;
     }
-    // A record beyond the one that ended the chain would be unaccounted for.
-    chain_valid &= read_private(&handle, &event_name(count as usize + 2), uid).is_err();
     Ok(LeaseInspection {
         events: count,
         chain_valid,

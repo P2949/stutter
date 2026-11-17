@@ -66,6 +66,10 @@ pub struct AttemptTelemetry {
     pub dropped_frames: u64,
     pub unexplained_gaps: u64,
     pub source_healthy: bool,
+    /// Source snapshots taken over the attempt and the distinct producers they reported; bound and
+    /// healthy mean so in every one of them, from exactly one producer.
+    pub snapshots: u64,
+    pub source_epochs: u32,
     pub competing_targets: usize,
     pub clock_alignment_ns: Option<u64>,
     /// `Eligible` only when `quality::judge_frame_source` accepts the source; otherwise why not.
@@ -86,6 +90,12 @@ fn verdict_name(verdict: FrameVerdict) -> &'static str {
     }
 }
 
+/// Whether a snapshot's producer is this exact process (pid and start time).
+fn snapshot_is_bound(source: &SourceSnapshot, target: &ChildTarget) -> bool {
+    source.producer_pid == Some(u32::from(target.pid))
+        && source.producer_start_ticks == Some(target.start_ticks)
+}
+
 #[derive(Debug)]
 struct Running {
     target: ChildTarget,
@@ -93,15 +103,25 @@ struct Running {
     attempt: Option<u32>,
     frames: u64,
     source: Option<SourceSnapshot>,
+    /// How many source snapshots were taken over the attempt.
+    snapshots: u64,
+    /// Some snapshot showed an unhealthy source: a healthy last snapshot does not undo it.
+    unhealthy_seen: bool,
+    /// Some snapshot showed a source not bound to this process.
+    unbound_seen: bool,
+    /// Every distinct producer identity the source reported; more than one is a source change.
+    producers: Vec<(Option<u32>, Option<u64>)>,
 }
 
 impl Running {
     fn receipt(&self) -> AttemptTelemetry {
         let source = self.source.as_ref();
-        let bound = source.is_some_and(|source| {
-            source.producer_pid == Some(u32::from(self.target.pid))
-                && source.producer_start_ticks == Some(self.target.start_ticks)
-        });
+        // Bound and healthy over the whole interval, not merely in the last snapshot, and from one
+        // producer throughout: a source that changed or failed part-way is not one measurement window.
+        let continuous = !self.unbound_seen && self.producers.len() <= 1;
+        let bound =
+            continuous && source.is_some_and(|source| snapshot_is_bound(source, &self.target));
+        let healthy = !self.unhealthy_seen && source.is_some_and(|source| source.healthy);
         let clock = source.and_then(|source| {
             let ns = source.alignment_uncertainty_ms * 1_000_000.0;
             (ns.is_finite() && ns >= 0.0).then_some(ns as u64)
@@ -116,9 +136,8 @@ impl Running {
             valid_frames: Some(self.frames),
             sequence_gaps: source.map_or(0, |source| source.unexplained_gaps),
             dropped: source.map(|source| source.dropped_frames),
-            stale: source.is_none_or(|source| {
-                !source.healthy || source.frame_age.is_none_or(|age| age > STALE_AFTER)
-            }),
+            stale: !healthy
+                || source.is_none_or(|source| source.frame_age.is_none_or(|age| age > STALE_AFTER)),
             clock_alignment_ns: clock,
         };
         AttemptTelemetry {
@@ -130,7 +149,9 @@ impl Running {
             source_bound_to_game: bound,
             dropped_frames: source.map_or(0, |source| source.dropped_frames),
             unexplained_gaps: source.map_or(0, |source| source.unexplained_gaps),
-            source_healthy: source.is_some_and(|source| source.healthy),
+            source_healthy: healthy,
+            snapshots: self.snapshots,
+            source_epochs: self.producers.len() as u32,
             competing_targets: source.map_or(0, |source| source.competing_targets),
             clock_alignment_ns: clock,
             frame_verdict: verdict_name(judge_frame_source(&facts)),
@@ -165,6 +186,10 @@ impl TelemetryObserver {
             attempt,
             frames: 0,
             source: None,
+            snapshots: 0,
+            unhealthy_seen: false,
+            unbound_seen: false,
+            producers: Vec::new(),
         });
     }
 
@@ -178,6 +203,13 @@ impl TelemetryObserver {
     /// The frame source's status after an event.
     pub fn observe_source(&mut self, snapshot: SourceSnapshot) {
         if let Some(running) = self.running.as_mut() {
+            running.snapshots = running.snapshots.saturating_add(1);
+            running.unhealthy_seen |= !snapshot.healthy;
+            running.unbound_seen |= !snapshot_is_bound(&snapshot, &running.target);
+            let producer = (snapshot.producer_pid, snapshot.producer_start_ticks);
+            if !running.producers.contains(&producer) && running.producers.len() < 8 {
+                running.producers.push(producer);
+            }
             running.source = Some(snapshot);
         }
     }

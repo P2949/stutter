@@ -153,3 +153,42 @@ fn real_lease_inspection() {
         inspection.chain_valid && inspection.transitions_valid && inspection.header_matches_intent
     );
 }
+
+#[test]
+fn a_record_far_past_the_end_or_a_stray_event_entry_cannot_hide_from_the_inspection() {
+    // The old probe looked only two names past the end of the chain.
+    let (dir, uid) = settled();
+    std::fs::copy(
+        dir.path().join("event-0004.json"),
+        dir.path().join("event-0009.json"),
+    )
+    .unwrap();
+    assert!(!inspect(dir.path(), uid).unwrap().chain_valid);
+    // A leftover or foreign `event-` entry is not an accounted record either.
+    let (dir, uid) = settled();
+    std::fs::write(dir.path().join("event-0003.json.tmp"), b"torn").unwrap();
+    assert!(!inspect(dir.path(), uid).unwrap().chain_valid);
+    let (dir, uid) = settled();
+    std::fs::write(dir.path().join("event-zero.json"), b"{}").unwrap();
+    assert!(!inspect(dir.path(), uid).unwrap().chain_valid);
+    // A record beyond the bound is not a lease record.
+    let (dir, uid) = settled();
+    std::fs::write(dir.path().join("event-9999.json"), b"{}").unwrap();
+    assert!(!inspect(dir.path(), uid).unwrap().chain_valid);
+}
+
+#[test]
+fn a_record_that_is_present_but_unreadable_is_an_error_not_the_end_of_the_chain() {
+    let (dir, uid) = settled();
+    let path = dir.path().join("event-0003.json");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let result = inspect(dir.path(), uid);
+    // (A superuser can read anything; then the chain is simply valid.)
+    if crate::syscall::geteuid() != 0 {
+        assert!(result.is_err(), "{result:?}");
+    }
+    // The same is true of a record that is not valid JSON.
+    let (dir, uid) = settled();
+    std::fs::write(dir.path().join("event-0003.json"), b"not json").unwrap();
+    assert!(inspect(dir.path(), uid).is_err());
+}

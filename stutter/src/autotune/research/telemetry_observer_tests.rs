@@ -116,3 +116,43 @@ fn a_new_process_ends_the_previous_attempt_and_frames_count_only_while_observing
     assert!(!observer.is_observing());
     assert!(observer.take_receipts().is_empty());
 }
+
+fn over_time(snapshots: Vec<SourceSnapshot>) -> AttemptTelemetry {
+    let mut observer = TelemetryObserver::default();
+    observer.arm(target(4242), Some(0));
+    for snapshot in snapshots {
+        for _ in 0..1_000 {
+            observer.count_frame();
+        }
+        observer.observe_source(snapshot);
+    }
+    observer.take_receipts().remove(0)
+}
+
+#[test]
+fn a_source_must_be_bound_and_healthy_across_the_whole_attempt_not_just_at_its_end() {
+    // Healthy throughout, from one producer: eligible, and the receipt says how much was seen.
+    let steady = over_time(vec![source(4242), source(4242), source(4242)]);
+    assert_eq!(steady.frame_verdict, "Eligible");
+    assert_eq!((steady.snapshots, steady.source_epochs), (3, 1));
+
+    // Unhealthy part-way, healthy again at the end: the last snapshot does not undo the fault.
+    let mut sick = source(4242);
+    sick.healthy = false;
+    let recovered = over_time(vec![source(4242), sick, source(4242)]);
+    assert!(!recovered.source_healthy);
+    assert_ne!(recovered.frame_verdict, "Eligible");
+
+    // Bound to another process part-way, then to the game: not one continuous window.
+    let switched = over_time(vec![source(777), source(4242), source(4242)]);
+    assert!(!switched.source_bound_to_game);
+    assert_eq!(switched.source_epochs, 2);
+    assert_ne!(switched.frame_verdict, "Eligible");
+
+    // The same process reappearing under a new start time is a different producer.
+    let mut restarted = source(4242);
+    restarted.producer_start_ticks = Some(100);
+    let reborn = over_time(vec![source(4242), restarted, source(4242)]);
+    assert!(!reborn.source_bound_to_game);
+    assert_ne!(reborn.frame_verdict, "Eligible");
+}

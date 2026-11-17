@@ -334,11 +334,21 @@ mod telemetry {
             prefix_cohort: None,
             telemetry_receipts: receipts,
             completed_attempts: completed.to_vec(),
+            completed_processes: completed
+                .iter()
+                .map(|slot| AttemptProcess {
+                    slot: *slot,
+                    pid: stutter_core::ids::Pid::new(100 + slot),
+                    start_ticks: 5000 + u64::from(*slot),
+                    uid: 1000,
+                })
+                .collect(),
         }
     }
 
     fn eligible(attempt: u32) -> serde_json::Value {
-        json!({ "attempt": attempt, "frame_verdict": "Eligible", "source_bound_to_game": true })
+        json!({ "attempt": attempt, "pid": 100 + attempt, "start_ticks": 5000 + attempt, "uid": 1000,
+                "frame_verdict": "Eligible", "source_bound_to_game": true })
     }
 
     fn summary(children: Vec<ChildVerification>) -> Option<(u32, u32)> {
@@ -393,6 +403,33 @@ mod telemetry {
             Some((1, 3))
         );
     }
+
+    #[test]
+    fn a_receipt_must_be_about_the_process_the_sealed_native_completion_names() {
+        // Right attempt number, wrong game process: another process's receipt cannot stand in.
+        for (key, wrong) in [("pid", 999u64), ("start_ticks", 1), ("uid", 0)] {
+            let mut receipt = eligible(0);
+            receipt[key] = json!(wrong);
+            assert_eq!(
+                summary(vec![child(&[0], Some(json!([receipt])))]),
+                Some((0, 1)),
+                "{key}"
+            );
+        }
+        // The matching process counts.
+        assert_eq!(
+            summary(vec![child(&[0], Some(json!([eligible(0)])))]),
+            Some((1, 1))
+        );
+        // A completed attempt with no recorded native process has nothing to be matched to.
+        let mut unrecorded = child(&[0], Some(json!([eligible(0)])));
+        unrecorded.completed_processes.clear();
+        assert_eq!(summary(vec![unrecorded]), Some((0, 1)));
+        // A receipt that names no process at all does not count.
+        let anonymous = json!([{ "attempt": 0, "frame_verdict": "Eligible",
+                                  "source_bound_to_game": true }]);
+        assert_eq!(summary(vec![child(&[0], Some(anonymous))]), Some((0, 1)));
+    }
 }
 
 mod restoration {
@@ -436,6 +473,7 @@ mod restoration {
             prefix_cohort: None,
             telemetry_receipts: None,
             completed_attempts: Vec::new(),
+            completed_processes: Vec::new(),
         }
     }
 
