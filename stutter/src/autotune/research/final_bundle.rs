@@ -119,6 +119,53 @@ fn action_status(status: &'static str, receipts: &[Value]) -> &'static str {
     }
 }
 
+/// Count reconstructed child reports when a funnel has run; the flat parent contains no child
+/// attempts. If any child is missing or cannot be reconstructed, the known total is only a lower
+/// bound and must never be presented as the campaign's complete total.
+fn completed_attempts(report: &Value, response: &Value) -> String {
+    let children = response
+        .pointer("/child_reports/children")
+        .and_then(Value::as_array);
+    let missing = response
+        .pointer("/child_reports/missing")
+        .and_then(Value::as_array);
+    if let (Some(children), Some(missing)) = (children, missing)
+        && (!children.is_empty() || !missing.is_empty())
+    {
+        let mut incomplete = !missing.is_empty();
+        let mut total = 0u64;
+        for child in children {
+            let count = (child.get("reconstruction") == Some(&Value::Bool(true)))
+                .then(|| {
+                    child
+                        .pointer("/report/attempts_completed")
+                        .and_then(Value::as_u64)
+                })
+                .flatten();
+            match count.and_then(|count| total.checked_add(count)) {
+                Some(sum) => total = sum,
+                None => incomplete = true,
+            }
+        }
+        return if incomplete {
+            format!("at least {total} (verified child reports; some child evidence is unavailable)")
+        } else {
+            format!("{total} (verified child reports)")
+        };
+    }
+    if (children.is_none() || missing.is_none())
+        && studies(response)
+            .iter()
+            .any(|study| matches!(result_of(study), "qualified" | "unqualified" | "failed"))
+    {
+        return "unknown (child evidence is unavailable)".to_owned();
+    }
+    report
+        .get("attempts_completed")
+        .and_then(Value::as_u64)
+        .map_or_else(|| "unknown".to_owned(), |count| count.to_string())
+}
+
 fn summary(report: &Value, response: &Value) -> String {
     let verdict = response.get("verdict").cloned().unwrap_or(Value::Null);
     let flag = |name: &str| verdict.get(name).and_then(Value::as_bool).unwrap_or(false);
@@ -186,9 +233,7 @@ fn summary(report: &Value, response: &Value) -> String {
         flag("restoration_verified"),
         flag("final_gate_qualified"),
         all.len(),
-        report
-            .get("attempts_completed")
-            .map_or_else(|| "unknown".to_owned(), ToString::to_string),
+        completed_attempts(report, response),
     )
 }
 

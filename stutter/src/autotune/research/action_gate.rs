@@ -55,7 +55,8 @@ enum State {
 pub type TokenProbe = Box<dyn Fn() -> Option<u32> + Send>;
 
 /// The kernel-visible placement of a process that the two supported actions change.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KernelState {
     /// The leader's allowed-CPU list.
     pub cpus_allowed: String,

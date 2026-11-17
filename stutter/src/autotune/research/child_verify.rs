@@ -576,7 +576,6 @@ fn receipts_valid(
     action: super::ResearchAction,
     uid: u32,
 ) -> anyhow::Result<()> {
-    use serde_json::Value;
     let items = receipts
         .as_array()
         .filter(|items| !items.is_empty())
@@ -587,7 +586,9 @@ fn receipts_valid(
             "a receipt names another action"
         );
         anyhow::ensure!(
-            item["pid"].as_u64().is_some_and(|pid| pid > 0)
+            item["pid"]
+                .as_u64()
+                .is_some_and(|pid| pid > 0 && u32::try_from(pid).is_ok())
                 && item["start_ticks"].as_u64().is_some_and(|ticks| ticks > 0)
                 && item["uid"].as_u64() == Some(u64::from(uid)),
             "a receipt does not identify the frozen process"
@@ -598,19 +599,31 @@ fn receipts_valid(
                 .is_some_and(|id| !id.is_empty()),
             "a receipt names no experiment"
         );
-        let (before, after) = (&item["original"], &item["restored"]);
+        let before: super::action_gate::KernelState =
+            serde_json::from_value(item["original"].clone())?;
+        let after: super::action_gate::KernelState =
+            serde_json::from_value(item["restored"].clone())?;
+        let expected_identity = (item["start_ticks"].as_u64().unwrap(), uid);
         anyhow::ensure!(
-            before["cgroup"] == after["cgroup"]
-                && before["cpus_allowed"] == after["cpus_allowed"]
-                && before["identity"] == after["identity"]
-                && !matches!(before["identity"], Value::Null),
+            !before.cgroup.is_empty()
+                && !before.cpus_allowed.is_empty()
+                && before.cgroup == after.cgroup
+                && before.cpus_allowed == after.cpus_allowed
+                && before.identity == Some(expected_identity)
+                && after.identity == Some(expected_identity)
+                && !before.tasks.is_empty()
+                && before
+                    .tasks
+                    .contains_key(&(item["pid"].as_u64().unwrap() as u32))
+                && before.tasks.values().all(|cpus| !cpus.is_empty())
+                && after.tasks.values().all(|cpus| !cpus.is_empty()),
             "a receipt shows a different placement or process after the restore"
         );
-        let moved = before["tasks"].as_object().is_some_and(|tasks| {
-            tasks
-                .iter()
-                .any(|(tid, cpus)| after["tasks"].get(tid).is_some_and(|now| now != cpus))
-        });
+        // An absent task is not proof that it exited; that would need a separate identity witness.
+        let moved = before
+            .tasks
+            .iter()
+            .any(|(tid, cpus)| after.tasks.get(tid) != Some(cpus));
         anyhow::ensure!(!moved, "a thread was not restored");
     }
     Ok(())

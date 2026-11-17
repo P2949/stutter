@@ -178,6 +178,24 @@ fn a_forged_gapped_or_reordered_journal_is_not_a_chain() {
 }
 
 #[test]
+fn distant_gaps_and_unreadable_records_never_look_like_an_empty_journal() {
+    let f = fixture();
+    let distant = f._root.path().join(file_name(ARM, 9));
+    std::fs::write(&distant, b"{}").unwrap();
+    std::fs::set_permissions(&distant, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(InitJournal::open(&f.journal, ARM, uid()).is_err());
+    std::fs::remove_file(&distant).unwrap();
+
+    let first = f._root.path().join(file_name(ARM, 1));
+    std::fs::write(&first, b"{}").unwrap();
+    std::fs::set_permissions(&first, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(InitJournal::open(&f.journal, ARM, uid()).is_err());
+    std::fs::remove_file(&first).unwrap();
+    std::os::unix::fs::symlink("missing", &first).unwrap();
+    assert!(InitJournal::open(&f.journal, ARM, uid()).is_err());
+}
+
+#[test]
 fn an_initialized_prefix_with_no_journal_is_the_users_own_and_a_verified_journal_over_a_lost_prefix_is_not()
  {
     let f = fixture();

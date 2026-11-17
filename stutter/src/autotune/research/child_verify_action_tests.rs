@@ -51,10 +51,13 @@ fn completion(slot: u32) -> CyberpunkBenchmarkCompletion {
 }
 
 fn receipt(slot: u32) -> serde_json::Value {
-    let state = json!({ "cpus_allowed": "0-15", "cgroup": "/a", "tasks": { "1": "0-15" },
-                        "identity": [5, 1000] });
+    let pid = 100 + slot;
+    let start = 5000 + slot;
+    let uid = crate::syscall::geteuid();
+    let state = json!({ "cpus_allowed": "0-15", "cgroup": "/a", "tasks": { pid.to_string(): "0-15" },
+                        "identity": [start, uid] });
     json!({ "action": "CpuAffinityProfile", "transaction": format!("tx-{slot}"),
-            "pid": 100 + slot, "start_ticks": 5000 + slot, "uid": crate::syscall::geteuid(),
+            "pid": pid, "start_ticks": start, "uid": uid,
             "original": state, "restored": state })
 }
 

@@ -53,6 +53,22 @@ fn every_named_artifact_is_produced_with_the_manifest_last_and_binding_the_rest(
 }
 
 #[test]
+fn summary_counts_reconstructed_children_and_labels_missing_evidence() {
+    let mut value = response();
+    value["child_reports"] = json!({ "children": [
+        { "reconstruction": true, "report": { "attempts_completed": 6 } },
+        { "reconstruction": true, "report": { "attempts_completed": 3 } }
+    ], "missing": [] });
+    let report = json!({ "attempts_completed": 0 });
+    assert!(summary(&report, &value).contains("Attempts completed: 9 (verified child reports)."));
+    value["child_reports"]["children"][1]["reconstruction"] = json!(false);
+    value["child_reports"]["missing"] = json!(["missing-study"]);
+    assert!(summary(&report, &value).contains("Attempts completed: at least 6 (verified child reports; some child evidence is unavailable)."));
+    value["child_reports"] = json!({ "children": [], "missing": [] });
+    assert!(summary(&json!({"attempts_completed": 4}), &value).contains("Attempts completed: 4."));
+}
+
+#[test]
 fn missing_evidence_is_stated_never_filled_in() {
     let files: std::collections::BTreeMap<_, _> =
         build(&json!({"attempts_completed": 4}), &response())

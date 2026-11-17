@@ -236,7 +236,7 @@ mod receipts_and_rules {
             "original": {"cpus_allowed": "0-15", "cgroup": "0::/a",
                          "tasks": {"4242": "0-15", "4243": "0-15"}, "identity": [99, 1000]},
             "restored": {"cpus_allowed": "0-15", "cgroup": "0::/a",
-                         "tasks": {"4242": "0-15"}, "identity": [99, 1000]}
+                         "tasks": {"4242": "0-15", "4243": "0-15"}, "identity": [99, 1000]}
         }])
     }
 
@@ -266,6 +266,20 @@ mod receipts_and_rules {
             "pid reuse"
         );
         assert!(bad(&|r| r["original"]["identity"] = json!(null)));
+        assert!(bad(&|r| {
+            r["original"]["cgroup"] = json!(null);
+            r["restored"]["cgroup"] = json!(null);
+        }));
+        assert!(bad(&|r| {
+            r["original"]["cpus_allowed"] = json!(null);
+            r["restored"]["cpus_allowed"] = json!(null);
+        }));
+        assert!(bad(&|r| {
+            r["restored"]["tasks"]
+                .as_object_mut()
+                .unwrap()
+                .remove("4243");
+        }));
         assert!(
             bad(&|r| r["restored"]["tasks"]["4242"] = json!("2-3")),
             "a pinned thread"

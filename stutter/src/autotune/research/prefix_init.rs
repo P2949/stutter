@@ -12,7 +12,7 @@
 //! complete, ordered, unforged chain whose final observation shows the files it exists to create. The
 //! launch itself is a live action and is not performed here.
 
-use std::{fs::File, path::Path};
+use std::{collections::BTreeSet, fs::File, os::fd::AsRawFd, path::Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -115,15 +115,35 @@ impl<'a> InitJournal<'a> {
     pub fn open(dir: &'a File, arm: ProtonSource, uid: u32) -> anyhow::Result<Self> {
         let mut records = Vec::new();
         let mut previous = ZERO.to_owned();
-        for sequence in 1..=16u32 {
-            let Ok(bytes) = read_private(dir, &file_name(arm, sequence), uid) else {
-                // The first missing record ends the chain; a later one would be a gap.
-                anyhow::ensure!(
-                    read_private(dir, &file_name(arm, sequence + 1), uid).is_err(),
-                    "the initialization journal has a gap"
-                );
-                break;
-            };
+        // Enumerate the entire namespace first: checking only the next filename mistakes arbitrary
+        // gaps and inaccessible records for the end of the journal.
+        let prefix = format!("prefix-init-{}-", arm.dir_name());
+        let mut sequences = BTreeSet::new();
+        for entry in std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))? {
+            let name = entry?
+                .file_name()
+                .into_string()
+                .map_err(|_| anyhow::anyhow!("non-UTF8 initialization journal entry"))?;
+            if !name.starts_with(&prefix) {
+                continue;
+            }
+            let sequence = name
+                .strip_prefix(&prefix)
+                .and_then(|s| s.strip_suffix(".json"))
+                .and_then(|s| s.parse::<u32>().ok())
+                .ok_or_else(|| anyhow::anyhow!("invalid initialization journal filename"))?;
+            anyhow::ensure!(
+                sequence > 0 && sequence <= 16 && name == file_name(arm, sequence),
+                "invalid initialization journal filename"
+            );
+            sequences.insert(sequence);
+        }
+        for (index, sequence) in sequences.into_iter().enumerate() {
+            anyhow::ensure!(
+                sequence as usize == index + 1,
+                "the initialization journal has a gap"
+            );
+            let bytes = read_private(dir, &file_name(arm, sequence), uid)?;
             let record: InitRecord = serde_json::from_slice(&bytes)?;
             anyhow::ensure!(
                 record.schema == 1
