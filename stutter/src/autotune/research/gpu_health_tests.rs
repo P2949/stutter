@@ -24,7 +24,7 @@ fn journal(search: &str) -> (tempfile::TempDir, PathBuf) {
 /// for writing (a concurrent fork inherits the descriptor) fails once with `ETXTBSY` ("Text file
 /// busy"); that is the test harness racing itself, not the probe, so only that error is retried.
 fn scan_of(path: PathBuf) -> anyhow::Result<ResetScan> {
-    let probe = JournalGpuResetProbe::new(path).unwrap();
+    let mut probe = JournalGpuResetProbe::new(path).unwrap();
     let mut result = probe.resets_since(0);
     for _ in 0..50 {
         let busy = result
