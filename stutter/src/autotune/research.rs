@@ -118,6 +118,14 @@ pub(crate) mod launch_txn;
 mod lease;
 pub(crate) mod lease_inspect;
 pub(crate) mod loaded_runtime;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged: no physical long-session driver exists to produce a record"
+    )
+)]
+pub(crate) mod long_receipt;
 pub(crate) mod long_session;
 mod mounts;
 pub(crate) mod native_context;

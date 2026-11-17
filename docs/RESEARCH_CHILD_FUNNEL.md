@@ -182,3 +182,9 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   supervised launch itself is a live action and is not run; the module is staged until it is. The
   per-attempt cache-state contract (a first run in a freshly initialized prefix is cold-cache and is
   never pooled with warm runs) is not implemented.
+- **CP-LONG producer interface.** `research::long_receipt` defines the lifecycle a producer follows
+  (`LongSessionDriver`: start, poll, abort), the record a completed session leaves, and `verify`, which
+  accepts it only for the authorized unit (same id and definition digest), played for at least the
+  unit's duration and no longer than the authorized window, in an identified process, settled, with
+  non-overlapping phases covering at least 90% of the session. This build's driver is
+  `UnavailableDriver` (`BlockedNoLongSessionDriver`): nothing here can play a route in the game.
