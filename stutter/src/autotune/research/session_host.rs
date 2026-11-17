@@ -227,6 +227,11 @@ pub fn build_session_host(
     // The player's saves and cloud copy are fingerprinted before anything can launch. If that cannot be
     // done no host is built, so no launch ever runs over data that was never recorded; verification
     // compares the data afterwards with this baseline (G2: original data intact).
+    super::host_hardware::record_baseline(
+        &super::host_hardware::Roots::system(),
+        &std::fs::File::open(&sources.study_dir)?,
+        uid,
+    )?;
     super::protected_state::record_baseline(
         &sources.steamapps,
         &std::fs::File::open(&sources.study_dir)?,

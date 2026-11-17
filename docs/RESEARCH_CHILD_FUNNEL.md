@@ -248,3 +248,16 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   blocked by `ProtectedStateChanged`, `ProtectedStateNotRecorded`, `ProtectedStateUnreadable` or
   `ProtectedStateTooLarge`. A campaign recorded before this existed has no baseline and so cannot
   attest G2. On the real library the saves are 192 entries and 409 MB (about 22 s in a debug build).
+- **Host hardware (G0).** Before any launch the production host records the kernel release, CPU model,
+  online CPUs, SMT state and every CPU's thread-sibling list, and each GPU's vendor, device and bound
+  driver (`host_hardware`, read-only from `/proc` and `/sys`, no serials or paths). A host that cannot be
+  read records nothing and builds no host. Verification compares and G0 names the first change
+  (`HostKernelChanged`, `HostCpuTopologyChanged`, `HostGpuChanged`, `HostHardwareNotRecorded`). On this
+  machine: an i5-10600K whose threads pair 0/6 ... 5/11 (SMT siblings, not twelve cores), and an AMD GPU
+  (0x1002:0x7550) on `amdgpu`.
+- **PLAN test crosswalk.** Every test named in PLAN's package test lists was searched for in the code.
+  Gaps found and closed: protected saves/cloud state (G2), hardware identity (G0), and a test that a
+  lease is never created over a conflicting mutator or validation override. The rest map to existing
+  tests (for example replayed tickets: `each_steam_verb_runs_once_and_replays...`; spoofed peer:
+  `kernel_peer_is_bound_and_wrong_uid_is_rejected`; owner appearing mid-window:
+  `an_owner_appearing_leaves_an_experiment_alone...`).

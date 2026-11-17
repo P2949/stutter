@@ -53,6 +53,8 @@ pub struct VerdictInputs<'a> {
     pub fault_matrix: Result<(), &'static str>,
     /// G2: the player's saves and cloud copy are unchanged since before the campaign (`protected_state`).
     pub protected_state: Result<(), &'static str>,
+    /// G0: the kernel, CPU topology and GPU are the ones recorded before the campaign (`host_hardware`).
+    pub hardware: Result<(), &'static str>,
     /// G8: the deployed binary is attested by a receipt (see `deploy_receipt`).
     pub deployment_attested: bool,
     /// G1: what a read-only inspection of the campaign's lease found.
@@ -99,6 +101,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         replication: inputs.child_replication,
         fault_matrix: inputs.fault_matrix,
         protected_state: inputs.protected_state,
+        hardware: inputs.hardware,
         deployment_attested: inputs.deployment_attested,
         lease: inputs.lease,
         host: inputs.host,

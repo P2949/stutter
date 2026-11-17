@@ -177,6 +177,17 @@ impl ResearchCoordinator {
                             .is_some_and(|c| c.runtime_qualified()),
                         child_telemetry: children.as_ref().and_then(|c| c.telemetry_summary()),
                         child_replication: children.as_ref().and_then(|c| c.holdout_replication()),
+                        hardware: self
+                            .study_dir
+                            .as_deref()
+                            .and_then(|study| std::fs::File::open(study).ok())
+                            .map_or(Err("HostHardwareNotRecorded"), |study| {
+                                crate::autotune::research::host_hardware::status(
+                                    &crate::autotune::research::host_hardware::Roots::system(),
+                                    &study,
+                                    uid,
+                                )
+                            }),
                         protected_state: match (
                             self.host_sources.0.as_deref(),
                             self.study_dir

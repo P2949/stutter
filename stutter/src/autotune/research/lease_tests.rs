@@ -159,3 +159,27 @@ fn event_capacity_covers_the_authorized_attempt_budget() {
     intent.max_attempts = 1_000;
     assert_eq!(event_limit(&intent), MAX_EVENTS);
 }
+
+#[test]
+fn a_campaign_is_refused_when_another_mutator_or_a_validation_override_is_present() {
+    // PLAN P0/P1: no conflicting mutator. The host reports whether an unsupported override or another
+    // mutating action is present, and a lease is never created over either.
+    let (dir, intent, facts) = setup();
+    for (override_present, mutator_present) in [(true, false), (false, true), (true, true)] {
+        let mut conflicting = facts.clone();
+        conflicting.validation_override_present = override_present;
+        conflicting.mutable_action_present = mutator_present;
+        assert!(
+            conflicting.validate(&intent).is_err(),
+            "{override_present} {mutator_present}"
+        );
+        assert!(
+            CampaignLease::create(fd(&dir), intent.clone(), conflicting, 11, 123, 456).is_err(),
+            "no lease is created over {override_present} {mutator_present}"
+        );
+    }
+    // Nothing was created in the campaign directory by the refused attempts.
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    // Without either, the same facts admit.
+    assert!(CampaignLease::create(fd(&dir), intent, facts, 11, 123, 456).is_ok());
+}

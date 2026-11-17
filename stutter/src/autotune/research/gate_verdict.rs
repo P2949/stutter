@@ -70,6 +70,8 @@ pub struct GateInputs<'a> {
     pub fault_matrix: Result<(), &'static str>,
     /// G2: the player's saves and cloud copy are unchanged since before the campaign (`protected_state`).
     pub protected_state: Result<(), &'static str>,
+    /// G0: the kernel, CPU topology and GPU are the ones recorded before the campaign (`host_hardware`).
+    pub hardware: Result<(), &'static str>,
     /// A deploy receipt names the very binary doing this verification, runs the expected pin and has
     /// every unit active (`deploy_receipt::deployment_attested`).
     pub deployment_attested: bool,
@@ -284,7 +286,13 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
     }
 
     vec![
-        gate("G0", host_blockers(inputs.host)),
+        gate("G0", {
+            // The same kernel, CPU topology and GPU as before the first launch; not recorded or
+            // unreadable blocks, and none is read as unchanged.
+            let mut blockers = host_blockers(inputs.host);
+            blockers.extend(inputs.hardware.err());
+            blockers
+        }),
         gate("G1", health_free(lease_blockers(inputs.lease))),
         gate("G2", health(g2)),
         gate("G3", health(g3)),

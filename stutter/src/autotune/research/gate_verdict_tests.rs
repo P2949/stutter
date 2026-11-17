@@ -52,6 +52,7 @@ fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict
         replication: None,
         fault_matrix: Err("NoFaultMatrixReceipt"),
         protected_state: Ok(()),
+        hardware: Ok(()),
         deployment_attested: false,
         lease: None,
         host: None,
@@ -156,6 +157,7 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
             replication: None,
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
+            hardware: Ok(()),
             deployment_attested: false,
             lease: None,
             host: None,
@@ -207,6 +209,7 @@ fn g8_is_accepted_only_on_an_attested_deployment_and_needs_no_game() {
             replication: None,
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
+            hardware: Ok(()),
             deployment_attested: attested,
             lease: None,
             host: None,
@@ -234,6 +237,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
             replication: None,
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
+            hardware: Ok(()),
             deployment_attested: false,
             lease,
             host: None,
@@ -304,6 +308,7 @@ fn g0_stands_on_a_host_that_has_not_moved_from_what_the_campaign_froze() {
             replication: None,
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
+            hardware: Ok(()),
             deployment_attested: false,
             lease: None,
             host,
@@ -389,6 +394,7 @@ fn g9_needs_the_holdout_to_reproduce_its_confirmation_not_merely_to_be_a_sound_r
             replication,
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
+            hardware: Ok(()),
             deployment_attested: true,
             lease: None,
             host: None,
@@ -417,6 +423,7 @@ fn g6_is_accepted_only_from_a_physical_matrix_receipt_and_otherwise_says_why() {
             replication: Some(true),
             fault_matrix,
             protected_state: Ok(()),
+            hardware: Ok(()),
             deployment_attested: true,
             lease: None,
             host: None,
@@ -451,6 +458,7 @@ fn g1_names_each_part_of_the_admission_it_cannot_show() {
             replication: Some(true),
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
+            hardware: Ok(()),
             deployment_attested: true,
             lease: Some(LeaseFacts {
                 chain_valid: true,
@@ -498,6 +506,7 @@ fn g2_needs_the_players_original_data_to_be_intact() {
             replication: Some(true),
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state,
+            hardware: Ok(()),
             deployment_attested: true,
             lease: None,
             host: None,
@@ -513,5 +522,48 @@ fn g2_needs_the_players_original_data_to_be_intact() {
         "ProtectedStateTooLarge",
     ] {
         assert_eq!(g2(Err(reason)), [reason]);
+    }
+}
+
+#[test]
+fn g0_also_needs_the_same_kernel_cpu_topology_and_gpu_as_before_the_campaign() {
+    let studies = full(Some(StudyResult::Qualified));
+    let g0 = |hardware: Result<(), &'static str>| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: false,
+            telemetry: Some((8, 8)),
+            replication: Some(true),
+            fault_matrix: Err("NoFaultMatrixReceipt"),
+            protected_state: Ok(()),
+            hardware,
+            deployment_attested: true,
+            lease: None,
+            host: Some(HostFacts {
+                same_boot: true,
+                build_id_matches: true,
+                game_executable_matches: true,
+                installation_settled: true,
+                proton_identities_match: true,
+                steam_client_matches: true,
+                entitlement_verified: true,
+            }),
+        });
+        let verdict = of(&verdicts, "G0");
+        (verdict.accepted, verdict.blockers.clone())
+    };
+    assert_eq!(g0(Ok(())), (true, vec![]));
+    for reason in [
+        "HostKernelChanged",
+        "HostCpuTopologyChanged",
+        "HostGpuChanged",
+        "HostHardwareNotRecorded",
+        "HostHardwareUnreadable",
+    ] {
+        assert_eq!(g0(Err(reason)), (false, vec![reason]));
     }
 }

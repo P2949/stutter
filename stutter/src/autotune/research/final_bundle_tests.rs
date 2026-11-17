@@ -174,6 +174,7 @@ fn real_campaign_bundle() {
         child_replication: None,
         fault_matrix: Err("NoFaultMatrixReceipt"),
         protected_state: Ok(()),
+        hardware: Ok(()),
         deployment_attested: false,
         lease: None,
         host: None,

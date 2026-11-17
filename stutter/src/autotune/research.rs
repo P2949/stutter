@@ -91,6 +91,7 @@ pub(crate) mod gate_verdict;
 pub(crate) mod gpu_health;
 pub(super) mod host;
 pub(crate) mod host_baseline;
+pub(crate) mod host_hardware;
 #[cfg_attr(
     not(test),
     expect(
