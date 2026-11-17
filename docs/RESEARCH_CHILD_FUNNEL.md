@@ -163,3 +163,13 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   that reaches another conclusion, or an inconclusive one, blocks with `HoldoutDoesNotReplicate`.
 - **Bundle.** Child rows carry telemetry receipts and process identities, and a bundle that cannot be
   written turns the verification response into `BundleNotWritten`.
+- **Profiles.** `cpu_profile` (1080p) and `gpu_profile` (native 3440x1440) are raster-only with ray
+  tracing, frame generation and the upscaler off. List indices come from observed mappings
+  (`profile_mappings`): each arm's own settings file is read, its current selections are remembered as
+  immutable `profile-mappings-<hash>.json` files beside the study, a contradicting observation is
+  refused, and a value never observed keeps the profile `BlockedProfileMapping`. The shipped settings
+  show native resolution and frame generation off but FSR2 selected, so the "no upscaler" value is the
+  one mapping still unobserved. Context conformance is stage-aware: a feature study may differ in its
+  own factor only.
+- **G0** also re-reads the frozen Proton identities, the Steam client and the account's launch
+  record (`ProtonIdentityChanged`, `SteamClientChanged`, `EntitlementNotVerified`).
