@@ -271,3 +271,37 @@ fn the_summary_lists_every_gate_with_its_blockers() {
         "{text}"
     );
 }
+
+#[test]
+fn a_restored_action_is_not_a_demonstrated_benefit() {
+    let mut full = response();
+    full["child_studies"] = json!([
+        { "study_sha256": "ab".repeat(32), "profile": "long", "stage": {"stage": "action"},
+          "result": "qualified", "reason": "" }
+    ]);
+    let receipt = json!([{ "action": "CpuAffinityProfile", "pid": 4242, "transaction": "exp-1" }]);
+    let action = |verdict: Value, pairs: u32| {
+        let mut with = full.clone();
+        with["child_reports"] = json!({
+            "children": [{
+                "study": "abababababababab", "reconstruction": true, "raw_files_verified": true,
+                "action_receipts": receipt,
+                "report": { "arms": [{ "status": "native_context_consistent_unqualified",
+                                       "pairs": pairs, "numeric_verdict": verdict }] }
+            }],
+            "missing": []
+        });
+        let files: std::collections::BTreeMap<_, _> =
+            build(&json!({}), &with).into_iter().collect();
+        serde_json::from_slice::<Value>(&files["action-transactions.json"]).unwrap()
+    };
+    // Safely applied and restored, but the off/on comparison found nothing: no benefit claimed.
+    let neutral = action(json!("no_useful_effect"), 4);
+    assert_eq!(neutral["status"], "Qualified");
+    assert_eq!(neutral["benefit_demonstrated"], false);
+    assert_eq!(neutral["outcome_comparison"][0]["pairs"], 4);
+    // An improvement is reported separately from the safety claim.
+    assert_eq!(action(json!("improved"), 4)["benefit_demonstrated"], true);
+    // A refused comparison (too few pairs) has no verdict and demonstrates nothing.
+    assert_eq!(action(Value::Null, 1)["benefit_demonstrated"], false);
+}

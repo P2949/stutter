@@ -99,7 +99,7 @@ fn every_stage_of_a_six_proton_campaign_builds_a_schedule_over_its_own_arms() {
     let plan = plan(&parent).unwrap();
     let find = |wanted: &dyn Fn(&Stage) -> bool| plan.iter().find(|s| wanted(&s.stage)).unwrap();
     assert_eq!(find(&|s| matches!(s, Stage::Confirm)).min_attempts, 8);
-    assert_eq!(find(&|s| matches!(s, Stage::Action(_))).min_attempts, 2);
+    assert_eq!(find(&|s| matches!(s, Stage::Action(_))).min_attempts, 8);
     assert_eq!(find(&|s| matches!(s, Stage::Feature(_))).min_attempts, 8);
 }
 

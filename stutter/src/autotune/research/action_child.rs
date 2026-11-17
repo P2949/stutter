@@ -176,6 +176,13 @@ impl ActionChildScope {
     }
 
     /// Nothing is applied or pending: every granted action was restored (or never applied).
+    /// A fresh scope for the next attempt's game process: the same actions and window, nothing attempted
+    /// yet. Only a scope with nothing outstanding can hand over.
+    pub fn retargeted(&self, target: ChildTarget) -> Option<Self> {
+        self.is_clean()
+            .then(|| Self::new(self.actions.iter().copied(), target, self.not_after_unix))
+    }
+
     pub fn is_clean(&self) -> bool {
         matches!(self.phase, Phase::Idle)
     }

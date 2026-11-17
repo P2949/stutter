@@ -90,7 +90,7 @@ const PILOT_ATTEMPTS: u32 = 6;
 const CONFIRM_ATTEMPTS: u32 = 8;
 const HOLDOUT_ATTEMPTS: u32 = 8;
 const FEATURE_ATTEMPTS: u32 = 8;
-const ACTION_ATTEMPTS: u32 = 2;
+const ACTION_ATTEMPTS: u32 = 8;
 
 fn study(
     intent_sha256: &str,
@@ -525,8 +525,9 @@ mod tests {
         intent.factors = vec![ResearchFactor::NtSync];
         let studies = plan(&intent).unwrap();
         let tools = u32::try_from(intent.tools.len()).unwrap();
-        // Enough for both screens plus the cheap action study, but not the confirmations.
-        let funnel = fit_budget(&studies, tools * 2 + ACTION_ATTEMPTS);
+        // Enough for both screens plus a few attempts, but not a pilot, a confirmation or the action
+        // study (whose off/on pairs need a comparison's worth of attempts).
+        let funnel = fit_budget(&studies, tools * 2 + PILOT_ATTEMPTS - 1);
         assert!(funnel.runnable.iter().all(|s| s.stage == Stage::Screen));
         assert!(
             funnel

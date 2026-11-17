@@ -232,6 +232,28 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
         .collect();
     // Each applied action's receipt: the frozen process, the kernel state before the apply and the
     // state after the restoration was accepted, recorded by the action child beside its study.
+    // A safely applied and restored action is one claim; that it improved the protected objective is
+    // another, which needs the study's own adequately sampled off/on comparison (`pairs`, verdict).
+    let comparison: Vec<Value> = child_rows(response, true)
+        .iter()
+        .filter(|row| row.get("profile").and_then(Value::as_str) == Some("long"))
+        .map(|row| {
+            let result = row
+                .pointer("/report/arms/0")
+                .cloned()
+                .unwrap_or(Value::Null);
+            json!({
+                "study": row.get("study"),
+                "status": result.get("status"),
+                "pairs": result.get("pairs"),
+                "numeric_verdict": result.get("numeric_verdict"),
+            })
+        })
+        .collect();
+    let benefit_demonstrated = !comparison.is_empty()
+        && comparison
+            .iter()
+            .all(|item| item["numeric_verdict"] == "improved");
     let receipts: Vec<Value> = child_rows(response, false)
         .iter()
         .filter(|row| row.get("profile").and_then(Value::as_str) == Some("long"))
@@ -273,6 +295,9 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
                 "status": action_status(status_of(&long), &receipts),
                 "studies": long,
                 "receipts": receipts,
+                "outcome_comparison": comparison,
+                "benefit_demonstrated": benefit_demonstrated,
+                "note": "status says whether the action was safely applied and restored; benefit_demonstrated says only whether the off/on comparison found an improvement",
                 "note": "transactions come from the normal controller and root worker only",
             })),
         ),

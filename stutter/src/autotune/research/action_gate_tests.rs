@@ -445,3 +445,69 @@ fn an_unreadable_live_thread_is_not_an_exited_one() {
         None
     );
 }
+
+mod rebinding {
+    use super::*;
+
+    fn next_target() -> ChildTarget {
+        ChildTarget {
+            pid: stutter_core::ids::Pid::new(5555),
+            start_ticks: 123,
+            uid: 1000,
+        }
+    }
+
+    #[test]
+    fn each_attempt_is_its_own_process_and_its_own_scope_and_outcomes_accumulate() {
+        let mut g = gate();
+        // First attempt: apply, keep nothing, restore.
+        assert!(g.permit(Some(CPU), target(), NOW));
+        g.observe(view(true, 0, Some(1)));
+        g.observe(view(false, 0, Some(0)));
+        assert_eq!(g.evidence().settled, [(CPU, Decision::Revert)]);
+        // The same action cannot be tried again on the same process...
+        assert!(!g.permit(Some(CPU), target(), NOW));
+        // ...nor on the next launch's process until the gate is moved onto it.
+        assert!(!g.permit(Some(CPU), next_target(), NOW));
+        assert!(g.rebind(next_target()));
+        assert!(
+            !g.permit(Some(CPU), target(), NOW),
+            "the old process is no longer the target"
+        );
+        assert!(g.permit(Some(CPU), next_target(), NOW));
+    }
+
+    #[test]
+    fn the_gate_does_not_move_while_an_action_is_outstanding_or_before_it_is_armed() {
+        let mut g = gate();
+        assert!(g.permit(Some(CPU), target(), NOW));
+        assert!(!g.rebind(next_target()), "busy with an outstanding action");
+        let mut unarmed = ActionGate::unarmed(Box::new(|| None));
+        assert!(!unarmed.rebind(next_target()));
+    }
+
+    #[test]
+    fn what_earlier_attempts_settled_stays_in_the_evidence() {
+        let state = |cpus: &str| KernelState {
+            cpus_allowed: cpus.into(),
+            cgroup: "0::/a".into(),
+            ..Default::default()
+        };
+        let mut g = gate().with_state_probe(Box::new(move |_| Some(state("0-15"))));
+        for (index, process) in [target(), next_target()].into_iter().enumerate() {
+            if index > 0 {
+                assert!(g.rebind(process));
+            }
+            assert!(g.permit(Some(CPU), process, NOW));
+            // The controller's manager holds the action on this attempt's own process.
+            let mut held = view(true, 0, Some(1));
+            held.holdings[0].pid = Some(process.pid);
+            g.observe(held);
+            g.observe(view(false, 0, Some(0)));
+        }
+        let evidence = g.evidence();
+        assert!(evidence.clean && evidence.kernel_state_proven);
+        assert_eq!(evidence.settled.len(), 2);
+        assert_eq!(evidence.receipts.len(), 2);
+    }
+}

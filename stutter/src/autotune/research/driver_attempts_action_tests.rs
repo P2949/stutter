@@ -45,6 +45,22 @@ fn setup_with(
     SharedGate,
     ResearchIntentV1,
 ) {
+    build(study_of, treatment, None)
+}
+
+/// As `setup_with`; the host's game process becomes `switch.1` once `switch.0` attempts have launched,
+/// as a new launch is a new process.
+fn build(
+    study_of: fn(&Stage) -> bool,
+    treatment: Option<crate::autotune::research::Treatment>,
+    switch: Option<(u32, crate::autotune::research::action_child::ChildTarget)>,
+) -> (
+    tempfile::TempDir,
+    DriverStudyAttempts,
+    ChildStudy,
+    SharedGate,
+    ResearchIntentV1,
+) {
     let root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut parent = parent();
@@ -66,6 +82,7 @@ fn setup_with(
     let mut host = Host::finishing();
     host.process = Some(game());
     host.treatment = treatment;
+    host.switch_process = switch;
     let mut now = parent.issued_unix_seconds + 1;
     let attempts = DriverStudyAttempts::new(
         File::open(root.path()).unwrap(),
@@ -252,4 +269,37 @@ fn a_failed_or_conflicting_receipt_write_means_the_action_study_cannot_qualify()
         Some(false),
         "an action without durable receipts is not qualified"
     );
+}
+
+#[test]
+fn a_later_attempt_is_a_new_process_and_the_gate_moves_onto_it_alone() {
+    let second = crate::autotune::research::action_child::ChildTarget {
+        pid: stutter_core::ids::Pid::new(5555),
+        start_ticks: 123,
+        uid: crate::syscall::geteuid(),
+    };
+    let (_root, mut runner, study, gate, parent) = build(
+        |stage| matches!(stage, Stage::Action(_)),
+        Some(crate::autotune::research::Treatment::On),
+        Some((2, second)),
+    );
+    let now = parent.issued_unix_seconds + 5;
+    let cpu = ResearchAction::CpuAffinityProfile;
+    // The first launch's process is the gate's target.
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    assert!(gate.lock().unwrap().permit(Some(cpu), game(), now));
+    gate.lock()
+        .unwrap()
+        .observe_holdings(true, 0, own_holding());
+    gate.lock().unwrap().observe_runtime(false, 0);
+    // Further attempts launch; once the second process is sighted the gate is scoped to it, so the
+    // first launch's process can no longer be acted on, and the new one can.
+    for _ in 0..200 {
+        runner.poll(&study, 100).unwrap();
+        if gate.lock().unwrap().permit(Some(cpu), second, now) {
+            assert!(!gate.lock().unwrap().permit(Some(cpu), game(), now));
+            return;
+        }
+    }
+    panic!("the gate never moved onto the second launch's process");
 }

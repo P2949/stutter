@@ -56,6 +56,8 @@ pub struct DriverStudyAttempts {
     /// What the resident runtime reports of the game during each attempt (absent: nothing kept).
     telemetry: Option<super::telemetry_observer::SharedTelemetry>,
     armed_for: Option<String>,
+    /// The game process the gate is currently scoped to.
+    armed_target: Option<super::action_child::ChildTarget>,
     /// The running study is a within-source treatment study (the gate then permits an action only
     /// during attempts treated On).
     treatment_study: bool,
@@ -107,6 +109,7 @@ impl DriverStudyAttempts {
             gate: None,
             telemetry: None,
             armed_for: None,
+            armed_target: None,
             treatment_study: false,
             environ_of: Box::new(|pid| std::fs::read(format!("/proc/{pid}/environ")).ok()),
             feature_source: None,
@@ -232,7 +235,15 @@ impl DriverStudyAttempts {
             let scope = ActionChildScope::new([action], target, self.parent.deadline_unix_seconds);
             if gate.lock().is_ok_and(|mut gate| gate.arm(scope)) {
                 self.armed_for = Some(study.study_sha256.clone());
+                self.armed_target = Some(target);
             }
+        } else if let Some(target) = self.host.game_process()
+            && self.armed_target != Some(target)
+            && gate.lock().is_ok_and(|mut gate| gate.rebind(target))
+        {
+            // A later attempt is a new game process: the action is scoped to that process alone,
+            // never inherited from the previous launch.
+            self.armed_target = Some(target);
         }
         // In a treatment study the action may be applied only while an attempt treated On runs; this
         // is set after arming, which starts from permitting.

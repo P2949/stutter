@@ -166,6 +166,9 @@ pub struct ActionGate {
     /// In a within-source study only attempts treated On may have an action applied; every other
     /// study leaves this true.
     attempt_on: bool,
+    /// What earlier attempts' scopes settled in this child (each On attempt is its own process and its
+    /// own scope; their outcomes accumulate here).
+    carried: Vec<(ResearchAction, Decision)>,
 }
 
 impl std::fmt::Debug for ActionGate {
@@ -239,6 +242,7 @@ impl ActionGate {
             target: None,
             foreign: false,
             attempt_on: true,
+            carried: Vec::new(),
         }
     }
 
@@ -261,6 +265,7 @@ impl ActionGate {
             target: None,
             foreign: false,
             attempt_on: true,
+            carried: Vec::new(),
         }
     }
 
@@ -270,9 +275,31 @@ impl ActionGate {
             return false;
         }
         self.receipts.clear();
+        self.carried.clear();
         self.foreign = false;
         self.attempt_on = true;
         self.scope = Some(scope);
+        true
+    }
+
+    /// The next attempt is a new game process: move the gate onto it. Refused while an action is
+    /// outstanding or when unarmed; what earlier attempts settled is kept, and the evidence (receipts,
+    /// attribution) carries on.
+    pub fn rebind(&mut self, target: ChildTarget) -> bool {
+        if self.is_busy() {
+            return false;
+        }
+        let Some(next) = self
+            .scope
+            .as_ref()
+            .and_then(|scope| scope.retargeted(target))
+        else {
+            return false;
+        };
+        if let Some(previous) = self.scope.as_ref() {
+            self.carried.extend(previous.settled().iter().copied());
+        }
+        self.scope = Some(next);
         true
     }
 
@@ -484,9 +511,16 @@ impl ActionGate {
     pub fn evidence(&self) -> GateEvidence {
         GateEvidence {
             settled: self
-                .scope
-                .as_ref()
-                .map_or_else(Vec::new, |scope| scope.settled().to_vec()),
+                .carried
+                .iter()
+                .copied()
+                .chain(
+                    self.scope
+                        .as_ref()
+                        .into_iter()
+                        .flat_map(|scope| scope.settled().iter().copied()),
+                )
+                .collect(),
             clean: self.scope.as_ref().is_none_or(ActionChildScope::is_clean)
                 && matches!(self.state, State::Idle)
                 && !self.foreign,
@@ -494,7 +528,8 @@ impl ActionGate {
                 && !self.foreign
                 && !self.receipts.is_empty()
                 && self.receipts.len()
-                    == self.scope.as_ref().map_or(0, |scope| scope.settled().len()),
+                    == self.carried.len()
+                        + self.scope.as_ref().map_or(0, |scope| scope.settled().len()),
             receipts: self.receipts.clone(),
         }
     }

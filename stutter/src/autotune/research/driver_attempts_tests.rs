@@ -22,6 +22,8 @@ struct Host {
     abort_fails: bool,
     treatment: Option<crate::autotune::research::Treatment>,
     prefix_refusal: Option<&'static str>,
+    /// After this many launches the sighted game process is the given one (a new launch, a new process).
+    switch_process: Option<(u32, crate::autotune::research::action_child::ChildTarget)>,
     /// Every factor set the driver enabled before a study, shared so a test can read it back.
     seen_factors:
         std::sync::Arc<std::sync::Mutex<Vec<Vec<crate::autotune::research::ResearchFactor>>>>,
@@ -41,13 +43,17 @@ impl Host {
             abort_fails: false,
             treatment: None,
             prefix_refusal: None,
+            switch_process: None,
         }
     }
 }
 
 impl AttemptHost for Host {
     fn game_process(&mut self) -> Option<crate::autotune::research::action_child::ChildTarget> {
-        self.process
+        match self.switch_process {
+            Some((after, target)) if self.launches >= after => Some(target),
+            _ => self.process,
+        }
     }
     fn health_blocked(&mut self) -> bool {
         self.health
