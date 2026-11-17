@@ -309,3 +309,80 @@ fn an_arm_that_never_had_a_snapshot_does_not_make_recovery_unproven() {
     assert_eq!(hook.recover(), Ok(()));
     assert_eq!(bytes(&a_paths(&paths)), original);
 }
+
+/// A settings document carrying every option the GPU profile edits, as the shipped file does: native
+/// resolution, FSR2 selected as the upscaler, frame generation off.
+const FULL: &str = r#"{"version":1,"data":[{"group_name":"/graphics/raytracing","options":[
+{"name":"RayTracing","type":"bool","value":true},
+{"name":"RayTracedReflections","type":"bool","value":true},
+{"name":"RayTracedSunShadows","type":"bool","value":true},
+{"name":"RayTracedLocalShadows","type":"bool","value":true},
+{"name":"RayTracedPathTracing","type":"bool","value":false}]},
+{"group_name":"/video/display","options":[
+{"name":"Resolution","type":"string_list","value":"3440x1440","index":23}]},
+{"group_name":"/graphics/presets","options":[
+{"name":"ResolutionScaling","type":"string_list","value":"FSR2","index":1},
+{"name":"FrameGeneration","type":"string_list","value":"Off","index":0}]}]}"#;
+
+#[test]
+fn the_gpu_profile_applies_only_once_every_list_value_it_needs_has_been_observed() {
+    use crate::autotune::research::profile_mappings::Mappings;
+    let observe = |text: &str| Mappings::observe(text.as_bytes()).unwrap();
+    let a = arms(2, &[FULL, FULL]);
+    let original = bytes(&a);
+    // What the shipped file shows: the resolution and frame generation are known, the "no upscaler"
+    // value is not. The whole profile is blocked and no arm is touched.
+    let mut shipped = Mappings::default();
+    shipped.merge(&observe(FULL)).unwrap();
+    let mut hook =
+        FileProfileHook::new(a.files, production_spec, idle).with_mappings(shipped.clone());
+    assert_eq!(
+        hook.apply(Profile::Gpu),
+        Err(ProfileFailure::Blocked("BlockedProfileMapping"))
+    );
+    assert_eq!(bytes(&a_paths(&a.paths)), original, "no arm was edited");
+
+    // A file that shows the upscaler off observes that value; then the profile applies to every arm
+    // and every arm is restored byte for byte.
+    let mut known = shipped;
+    known
+        .merge(&observe(&FULL.replace(
+            r#""value":"FSR2","index":1"#,
+            r#""value":"Off","index":0"#,
+        )))
+        .unwrap();
+    let b = arms(2, &[FULL, FULL]);
+    let original = bytes(&b);
+    let mut hook = FileProfileHook::new(b.files, production_spec, idle).with_mappings(known);
+    assert_eq!(hook.apply(Profile::Gpu), Ok(true));
+    let applied = bytes(&a_paths(&b.paths));
+    assert_ne!(applied, original, "the profile changed the settings");
+    let doc: serde_json::Value = serde_json::from_slice(&applied[0]).unwrap();
+    let option = |group: &str, name: &str| {
+        doc["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["group_name"] == group)
+            .unwrap()["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|option| option["name"] == name)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(option("/graphics/raytracing", "RayTracing")["value"], false);
+    let scaling = option("/graphics/presets", "ResolutionScaling");
+    assert_eq!(
+        (&scaling["value"], &scaling["index"]),
+        (&"Off".into(), &0.into())
+    );
+    let resolution = option("/video/display", "Resolution");
+    assert_eq!(
+        (&resolution["value"], &resolution["index"]),
+        (&"3440x1440".into(), &23.into())
+    );
+    assert!(hook.restore().is_ok());
+    assert_eq!(bytes(&a_paths(&b.paths)), original);
+}

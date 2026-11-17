@@ -78,6 +78,27 @@ pub fn cpu_profile() -> ProfileSpec {
     spec
 }
 
+/// The provisional GPU-sensitive profile (PLAN CP-GPU): the native 3440x1440 resolution, heavy
+/// raster with ray tracing off, no frame generation and no upscaler. Every list value it needs is
+/// resolved against observed mappings (`profile_mappings`); one that was never observed (the
+/// "no upscaler" value of `ResolutionScaling`, which the shipped settings never show selected) keeps
+/// the whole profile `BlockedProfileMapping`, naming it, rather than guessing an index.
+pub fn gpu_profile() -> ProfileSpec {
+    let mut spec = ray_tracing_off();
+    spec.name = "gpu_native_raster";
+    let choice = |group, name, value| ProfileEdit {
+        group,
+        name,
+        to: Setting::Choice { value, index: None },
+    };
+    spec.edits.extend([
+        choice("/video/display", "Resolution", "3440x1440"),
+        choice("/graphics/presets", "ResolutionScaling", "Off"),
+        choice("/graphics/presets", "FrameGeneration", "Off"),
+    ]);
+    spec
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
     /// The settings file is not valid JSON of the expected shape.
@@ -220,7 +241,7 @@ impl StudySettingsFile {
         Ok(Self { path })
     }
 
-    fn read(&self) -> Result<Vec<u8>, Refusal> {
+    pub fn read(&self) -> Result<Vec<u8>, Refusal> {
         use std::io::Read;
         let file = std::fs::OpenOptions::new()
             .read(true)

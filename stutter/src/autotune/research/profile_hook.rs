@@ -17,7 +17,7 @@ use super::{
 pub fn production_spec(profile: Profile) -> Result<Option<ProfileSpec>, ProfileFailure> {
     match profile {
         Profile::Cpu => Ok(Some(cpu_profile())),
-        Profile::Gpu => Err(ProfileFailure::Blocked("BlockedProfileMapping")),
+        Profile::Gpu => Ok(Some(super::profile_applier::gpu_profile())),
         Profile::Long => Ok(None),
     }
 }
@@ -30,6 +30,8 @@ pub struct FileProfileHook {
     spec_for: fn(Profile) -> Result<Option<ProfileSpec>, ProfileFailure>,
     game_running: fn() -> bool,
     applied: Vec<(usize, AppliedProfile)>,
+    /// Observed list mappings the profiles are resolved against before they are applied.
+    mappings: super::profile_mappings::Mappings,
 }
 
 impl FileProfileHook {
@@ -44,7 +46,15 @@ impl FileProfileHook {
             spec_for,
             game_running,
             applied: Vec::new(),
+            mappings: super::profile_mappings::Mappings::default(),
         }
+    }
+
+    /// The observed list mappings to resolve profiles against. Without them a profile that needs a
+    /// list index is blocked as `BlockedProfileMapping`.
+    pub fn with_mappings(mut self, mappings: super::profile_mappings::Mappings) -> Self {
+        self.mappings = mappings;
+        self
     }
 
     /// Record the arms whose settings file cannot be opened. Applying a profile is then refused (it
@@ -75,6 +85,7 @@ impl ProfileHook for FileProfileHook {
         let Some(spec) = (self.spec_for)(profile)? else {
             return Ok(false);
         };
+        let spec = self.mappings.resolve(spec);
         if !self.unavailable.is_empty() {
             // A settings file that simply does not exist yet belongs to a prefix no game run has
             // initialized (cold). That is not a failure of the study: it cannot take a profile until

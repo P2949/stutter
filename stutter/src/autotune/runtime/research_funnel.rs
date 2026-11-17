@@ -27,6 +27,40 @@ fn unix_now() -> u64 {
         .map_or(0, |elapsed| elapsed.as_secs())
 }
 
+/// The remembered list mappings plus what the arms' own settings files show now, saved back as an
+/// immutable observation. Untrusted remembered mappings (unreadable or contradictory) are not used,
+/// and an arm whose observation contradicts what is known is ignored, never allowed to overwrite it.
+fn observed_mappings(
+    study_dir: &std::path::Path,
+    uid: u32,
+    files: &[StudySettingsFile],
+) -> crate::autotune::research::profile_mappings::Mappings {
+    use crate::autotune::research::profile_mappings::Mappings;
+    let Ok(dir) = File::open(study_dir) else {
+        return Mappings::default();
+    };
+    let mut known = Mappings::load(&dir, uid).unwrap_or_else(|error| {
+        log::warn!("remembered profile mappings are not usable: {error:#}");
+        Mappings::default()
+    });
+    let mut fresh = Mappings::default();
+    for file in files {
+        if let Some(seen) = file.read().ok().and_then(|bytes| Mappings::observe(&bytes)) {
+            match known.clone().merge(&seen) {
+                Ok(()) => {
+                    let _ = known.merge(&seen);
+                    let _ = fresh.merge(&seen);
+                }
+                Err(reason) => log::warn!("a settings observation is ignored: {reason}"),
+            }
+        }
+    }
+    if let Err(error) = fresh.save(&dir) {
+        log::warn!("profile mappings not remembered: {error:#}");
+    }
+    known
+}
+
 /// The graphics-profile hook over every arm's own `UserSettings.json`. If any of them cannot be
 /// opened safely (a cold prefix has none yet), the hook says so instead of editing a subset.
 fn profiles(study_dir: &std::path::Path, intent: &ResearchIntentV1) -> Box<dyn ProfileHook + Send> {
@@ -41,9 +75,13 @@ fn profiles(study_dir: &std::path::Path, intent: &ResearchIntentV1) -> Box<dyn P
             Err(_) => unavailable.push(settings),
         }
     }
+    // The list mappings observed so far (remembered beside the study) and any the arms' current
+    // settings now show. A profile is resolved against them; a value never observed keeps it blocked.
+    let mappings = observed_mappings(study_dir, intent.uid, &files);
     Box::new(
         FileProfileHook::new(files, production_spec, cyberpunk_running)
-            .with_unavailable(unavailable),
+            .with_unavailable(unavailable)
+            .with_mappings(mappings),
     )
 }
 
