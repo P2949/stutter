@@ -240,3 +240,11 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   fixtures and scores the output through `oracle_cases::from_controller`: a scheduler delay is
   runnable delay, a GPU-bound diagnosis is reported only if the engine attributed it, and a quiet run
   is a correct abstention. This is a fixture exercise and never stands for the physical cases.
+- **Protected player data (G2: original data intact).** Before any launch the production host
+  fingerprints the player's Cyberpunk save directory and each account's Steam Cloud copy
+  (`protected_state`): a read-only content hash that follows no links, keeps no private paths, and treats
+  an absent root as part of the state. A baseline that cannot be made means no host is built. A
+  restarted campaign keeps its first baseline. Verification compares the data now with it, and G2 is
+  blocked by `ProtectedStateChanged`, `ProtectedStateNotRecorded`, `ProtectedStateUnreadable` or
+  `ProtectedStateTooLarge`. A campaign recorded before this existed has no baseline and so cannot
+  attest G2. On the real library the saves are 192 entries and 409 MB (about 22 s in a debug build).

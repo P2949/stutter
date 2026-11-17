@@ -68,6 +68,8 @@ pub struct GateInputs<'a> {
     pub replication: Option<bool>,
     /// G6: whether a physical fault-matrix receipt for this binary attests (`fault_matrix`), or why not.
     pub fault_matrix: Result<(), &'static str>,
+    /// G2: the player's saves and cloud copy are unchanged since before the campaign (`protected_state`).
+    pub protected_state: Result<(), &'static str>,
     /// A deploy receipt names the very binary doing this verification, runs the expected pin and has
     /// every unit active (`deploy_receipt::deployment_attested`).
     pub deployment_attested: bool,
@@ -227,6 +229,11 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
     }
     if !inputs.loaded_runtime_qualified {
         g2.push("LoadedRuntimeUnproven");
+    }
+    // "Original data intact": the saves and cloud copy fingerprinted before the first launch are the
+    // same now. Not recorded, unreadable or changed each block, and none is read as unchanged.
+    if let Err(reason) = inputs.protected_state {
+        g2.push(reason);
     }
 
     // G4: the resident funnel's comparison stages all qualified, each child independently verified.

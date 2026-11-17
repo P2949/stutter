@@ -175,6 +175,7 @@ pub(crate) mod pilot_rule;
 )]
 pub(crate) mod prefix_init;
 pub(crate) mod profile_mappings;
+pub(crate) mod protected_state;
 pub(crate) mod replication;
 pub(crate) mod telemetry_observer;
 pub(crate) mod treatment;

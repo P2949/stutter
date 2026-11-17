@@ -51,6 +51,8 @@ pub struct VerdictInputs<'a> {
     pub child_replication: Option<bool>,
     /// G6: the fault-matrix receipt status (see `fault_matrix::gate_status`).
     pub fault_matrix: Result<(), &'static str>,
+    /// G2: the player's saves and cloud copy are unchanged since before the campaign (`protected_state`).
+    pub protected_state: Result<(), &'static str>,
     /// G8: the deployed binary is attested by a receipt (see `deploy_receipt`).
     pub deployment_attested: bool,
     /// G1: what a read-only inspection of the campaign's lease found.
@@ -96,6 +98,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         telemetry: inputs.child_telemetry,
         replication: inputs.child_replication,
         fault_matrix: inputs.fault_matrix,
+        protected_state: inputs.protected_state,
         deployment_attested: inputs.deployment_attested,
         lease: inputs.lease,
         host: inputs.host,

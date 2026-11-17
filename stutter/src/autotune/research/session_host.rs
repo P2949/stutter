@@ -224,6 +224,14 @@ pub fn build_session_host(
     let uid = crate::syscall::geteuid();
     let compat = compat_root(&sources.study_dir);
     verify_study_compatdata(&sources.steamapps, &sources.study_dir, &compat, uid, false)?;
+    // The player's saves and cloud copy are fingerprinted before anything can launch. If that cannot be
+    // done no host is built, so no launch ever runs over data that was never recorded; verification
+    // compares the data afterwards with this baseline (G2: original data intact).
+    super::protected_state::record_baseline(
+        &sources.steamapps,
+        &std::fs::File::open(&sources.study_dir)?,
+        uid,
+    )?;
     // Every arm has its own private prefix directory, created empty if missing and verified like
     // the root, so no arm can inherit or disturb another arm's prefix, settings or results.
     for tool in &intent.tools {
