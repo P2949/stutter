@@ -123,6 +123,23 @@ impl ResearchCoordinator {
                 let health_blocked = self.study_dir.as_deref().is_none_or(|study| {
                     crate::autotune::research::gpu_health::state_blocked(study)
                 });
+                let restored = children
+                    .as_ref()
+                    .zip(studies.as_deref())
+                    .is_some_and(|(children, planned)| children.actions_restored(planned))
+                    && intent.as_ref().zip(self.study_dir.as_deref()).is_some_and(
+                        |(intent, study)| {
+                            intent.tools.iter().all(|tool| {
+                                !crate::autotune::research::profile_applier::pending_edit(
+                                    &crate::autotune::research::session_host::arm_prefix_paths(
+                                        study,
+                                        tool.source,
+                                    )
+                                    .2,
+                                )
+                            })
+                        },
+                    );
                 let verdict = crate::autotune::research::verdict::judge(
                     &crate::autotune::research::verdict::VerdictInputs {
                         reconstruction_passed: true,
@@ -139,8 +156,10 @@ impl ResearchCoordinator {
                             .as_ref()
                             .is_some_and(|c| c.runtime_qualified()),
                         child_telemetry: children.as_ref().and_then(|c| c.telemetry_summary()),
-                        // No physical restoration verifier exists yet; never inferred.
-                        restoration_verified: false,
+                        // Restoration is established only by independent campaign evidence: every
+                        // planned action study qualified with valid kernel-state receipts, and no
+                        // research prefix still carrying an unrestored settings edit. Unknown is false.
+                        restoration_verified: restored,
                         health_blocked,
                     },
                 );

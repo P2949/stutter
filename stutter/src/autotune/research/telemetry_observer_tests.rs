@@ -25,7 +25,7 @@ fn source(pid: u32) -> SourceSnapshot {
 
 fn observe(frames: u64, snapshot: Option<SourceSnapshot>) -> AttemptTelemetry {
     let mut observer = TelemetryObserver::default();
-    observer.arm(target(4242));
+    observer.arm(target(4242), Some(0));
     for _ in 0..frames {
         observer.count_frame();
     }
@@ -97,12 +97,12 @@ fn each_defect_names_itself_and_an_unknown_is_never_zero() {
 fn a_new_process_ends_the_previous_attempt_and_frames_count_only_while_observing() {
     let mut observer = TelemetryObserver::default();
     observer.count_frame(); // nothing attested yet: not counted
-    observer.arm(target(1));
+    observer.arm(target(1), Some(0));
     observer.count_frame();
     observer.count_frame();
-    observer.arm(target(1)); // the same process continues
+    observer.arm(target(1), Some(0)); // the same process continues
     observer.count_frame();
-    observer.arm(target(2)); // a new attempt
+    observer.arm(target(2), Some(1)); // a new attempt
     observer.count_frame();
     assert!(observer.is_observing());
     let receipts = observer.take_receipts();

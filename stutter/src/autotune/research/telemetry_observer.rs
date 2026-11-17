@@ -54,6 +54,8 @@ impl SourceSnapshot {
 /// One attempt's receipt.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct AttemptTelemetry {
+    /// The journal slot this receipt belongs to; a receipt without one cannot be matched to an attempt.
+    pub attempt: Option<u32>,
     pub pid: stutter_core::ids::Pid,
     pub start_ticks: u64,
     pub uid: u32,
@@ -87,6 +89,8 @@ fn verdict_name(verdict: FrameVerdict) -> &'static str {
 #[derive(Debug)]
 struct Running {
     target: ChildTarget,
+    /// The journal slot this attempt is (the host's launched attempt index), when known.
+    attempt: Option<u32>,
     frames: u64,
     source: Option<SourceSnapshot>,
 }
@@ -118,6 +122,7 @@ impl Running {
             clock_alignment_ns: clock,
         };
         AttemptTelemetry {
+            attempt: self.attempt,
             pid: self.target.pid,
             start_ticks: self.target.start_ticks,
             uid: self.target.uid,
@@ -146,17 +151,18 @@ pub struct TelemetryObserver {
 impl TelemetryObserver {
     /// A research attempt's game process is attested: start (or continue) observing it. A different
     /// process ends the previous attempt first.
-    pub fn arm(&mut self, target: ChildTarget) {
+    pub fn arm(&mut self, target: ChildTarget, attempt: Option<u32>) {
         if self
             .running
             .as_ref()
-            .is_some_and(|running| running.target == target)
+            .is_some_and(|running| running.target == target && running.attempt == attempt)
         {
             return;
         }
         self.end_attempt();
         self.running = Some(Running {
             target,
+            attempt,
             frames: 0,
             source: None,
         });

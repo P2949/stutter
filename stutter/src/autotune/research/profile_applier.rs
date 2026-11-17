@@ -460,6 +460,22 @@ pub fn pending_snapshot(settings: &Path) -> bool {
     std::fs::symlink_metadata(settings.with_file_name(name)).is_ok()
 }
 
+/// Whether an unrestored edit leaves any trace beside this settings path: the original's snapshot or
+/// the applied-bytes marker. Used to check that nothing is still edited.
+pub fn pending_edit(settings: &Path) -> bool {
+    let beside = |suffix: &str| {
+        let mut name = settings
+            .file_name()
+            .map(|n| n.to_os_string())
+            .unwrap_or_default();
+        name.push(suffix);
+        settings.with_file_name(name)
+    };
+    [".stutter-original", ".stutter-applied"]
+        .iter()
+        .any(|suffix| std::fs::symlink_metadata(beside(suffix)).is_ok())
+}
+
 /// After a crash or restart: if a durable snapshot exists the settings may still be edited, so put
 /// the original bytes back, prove it, and only then remove the snapshot. Run before any study.
 pub fn recover(file: &StudySettingsFile) -> Result<Recovery, Refusal> {

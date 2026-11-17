@@ -131,7 +131,11 @@ fn a_funnel_campaign_is_judged_from_its_children_not_its_empty_flat_schedule() {
     };
     let verdict = judge(&funnel(true, true));
     assert!(verdict.raw_files_verified && verdict.loaded_runtime_qualified);
-    assert_eq!(verdict.disposition, "Qualified");
+    // Clean studies are not enough: the gates a campaign cannot attest (host baseline, lease receipts,
+    // telemetry, fault matrix, deployment) keep the overall result from being `Qualified`.
+    assert!(!verdict.final_gate_qualified);
+    assert_eq!(verdict.disposition, "PartiallyQualified");
+    assert!(verdict.gates.iter().any(|gate| !gate.accepted));
     // Unverified children verify no raw files; an unmatched child runtime qualifies no runtime.
     assert!(!judge(&funnel(false, true)).raw_files_verified);
     let unmatched = judge(&funnel(true, false));

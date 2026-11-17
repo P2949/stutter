@@ -238,25 +238,45 @@ fn recover_children(
 /// settled (never before: settings are not restored under an unresolved game). An arm whose settings
 /// file does not exist has nothing to restore; one that exists but cannot be trusted is unsafe.
 fn restore_profiles(study_path: Option<&Path>, intent: &ResearchIntentV1) -> anyhow::Result<()> {
-    use crate::autotune::research::{
-        profile_applier::{StudySettingsFile, recover},
-        session_host::arm_prefix_paths,
-    };
     let Some(study) = study_path else {
         return Ok(());
     };
     for tool in &intent.tools {
-        let settings = arm_prefix_paths(study, tool.source).2;
-        if !settings.exists() {
-            continue;
-        }
-        let file = StudySettingsFile::new(study, settings, intent.uid)
-            .map_err(|_| anyhow::anyhow!("UnsafeToResume: arm settings are not trustworthy"))?;
-        recover(&file)
-            .map_err(|_| anyhow::anyhow!("UnsafeToResume: a profile could not be restored"))?;
+        restore_arm(study, tool.source, intent.uid)?;
     }
     Ok(())
 }
+
+/// One arm's graphics settings. Without a settings file there is nothing to edit-and-restore, but a
+/// durable snapshot can survive without it (the file was removed after the edit): that is an
+/// unrestored edit nobody can inspect, so recovery refuses rather than skipping the arm.
+fn restore_arm(
+    study: &Path,
+    source: crate::autotune::research::ProtonSource,
+    uid: u32,
+) -> anyhow::Result<()> {
+    use crate::autotune::research::{
+        profile_applier::{StudySettingsFile, pending_snapshot, recover},
+        session_host::arm_prefix_paths,
+    };
+    let settings = arm_prefix_paths(study, source).2;
+    if !settings.exists() {
+        anyhow::ensure!(
+            !pending_snapshot(&settings),
+            "UnsafeToResume: a settings snapshot survives without its settings file"
+        );
+        return Ok(());
+    }
+    let file = StudySettingsFile::new(study, settings, uid)
+        .map_err(|_| anyhow::anyhow!("UnsafeToResume: arm settings are not trustworthy"))?;
+    recover(&file)
+        .map_err(|_| anyhow::anyhow!("UnsafeToResume: a profile could not be restored"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "research_recovery_arm_tests.rs"]
+mod arm_tests;
 
 /// Retire the one interrupted attempt of a launched campaign and block the campaign. The attempt
 /// is never replayed and the remaining attempts are not resumed: the consumed active time is not

@@ -93,30 +93,16 @@ pub fn procfs_state(pid: u32) -> Option<KernelState> {
         .trim()
         .to_owned();
     let cgroup = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
-    // Every thread of the process, bounded; a thread that vanishes while reading is skipped.
-    let mut tasks = std::collections::BTreeMap::new();
-    for entry in std::fs::read_dir(format!("/proc/{pid}/task"))
+    // Every thread of the process, bounded. A thread that exited while reading is gone; one that is
+    // still listed but cannot be read leaves the whole state unknown.
+    let entries = std::fs::read_dir(format!("/proc/{pid}/task"))
         .ok()?
         .take(4096)
-        .flatten()
-    {
-        let Some(tid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.parse::<u32>().ok())
-        else {
-            continue;
-        };
-        let Ok(text) = std::fs::read_to_string(entry.path().join("status")) else {
-            continue;
-        };
-        if let Some(list) = text
-            .lines()
-            .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))
-        {
-            tasks.insert(tid, list.trim().to_owned());
-        }
-    }
+        .flatten();
+    let tasks = parse_tasks(entries.filter_map(|entry| {
+        let tid = entry.file_name().to_str()?.parse::<u32>().ok()?;
+        Some((tid, std::fs::read_to_string(entry.path().join("status"))))
+    }))?;
     let identity = process_identity(pid).map(|target| (target.start_ticks, target.uid));
     Some(KernelState {
         cpus_allowed: cpus,
@@ -124,6 +110,27 @@ pub fn procfs_state(pid: u32) -> Option<KernelState> {
         tasks,
         identity: Some(identity?),
     })
+}
+
+/// The allowed-CPU list of every thread from its status text. A thread whose status vanished (it
+/// exited) is skipped; one that fails to read for any other reason makes the whole answer `None`:
+/// an unreadable live thread must not look like an exited one.
+fn parse_tasks(
+    items: impl Iterator<Item = (u32, std::io::Result<String>)>,
+) -> Option<std::collections::BTreeMap<u32, String>> {
+    let mut tasks = std::collections::BTreeMap::new();
+    for (tid, text) in items {
+        let text = match text {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return None,
+        };
+        let list = text
+            .lines()
+            .find_map(|line| line.strip_prefix("Cpus_allowed_list:"))?;
+        tasks.insert(tid, list.trim().to_owned());
+    }
+    Some(tasks)
 }
 
 /// One applied action's receipt: the frozen target, what the kernel showed before the apply and what

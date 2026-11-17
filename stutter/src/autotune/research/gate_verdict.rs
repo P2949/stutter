@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use super::{
     child_ledger::Disposition,
-    child_study::{Stage, StudyResult},
+    child_study::{Profile, Stage, StudyResult},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -67,6 +67,26 @@ fn study_blockers(
     }
 }
 
+/// As `study_blockers`, and the frozen plan's every performance profile must have such a study: a
+/// CPU result alone does not stand for the CPU and GPU comparisons the plan asks for.
+fn profile_blockers(
+    studies: &[Disposition],
+    kind: fn(&Stage) -> bool,
+    missing: &'static str,
+    unqualified: &'static str,
+) -> Vec<&'static str> {
+    let mut blockers = study_blockers(studies, kind, missing, unqualified);
+    let covered = |profile| {
+        studies
+            .iter()
+            .any(|study| study.profile == profile && kind(&study.stage))
+    };
+    if !blockers.contains(&missing) && !(covered(Profile::Cpu) && covered(Profile::Gpu)) {
+        blockers.push("MissingProfileStudy");
+    }
+    blockers
+}
+
 pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
     let studies = inputs.child_studies;
     let health = |mut blockers: Vec<&'static str>| {
@@ -88,7 +108,7 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
 
     // G2: a genuine Steam launch of the game with raw native evidence that replays, run under each
     // arm's own installation, across a qualified screen.
-    let mut g2 = study_blockers(studies, screen, "NoScreenStudy", "ScreenNotQualified");
+    let mut g2 = profile_blockers(studies, screen, "NoScreenStudy", "ScreenNotQualified");
     if !inputs.raw_files_verified {
         g2.push("RawFilesUnverified");
     }
@@ -97,7 +117,7 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
     }
 
     // G4: the resident funnel's comparison stages all qualified, each child independently verified.
-    let mut g4 = study_blockers(
+    let mut g4 = profile_blockers(
         studies,
         comparison,
         "NoComparisonStudies",
@@ -126,7 +146,7 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
 
     // G9: the held-out repetition qualified on top of everything a result rests on, with the
     // system restored and no health incident.
-    let mut g9 = study_blockers(studies, holdout, "NoHoldoutStudy", "HoldoutNotQualified");
+    let mut g9 = profile_blockers(studies, holdout, "NoHoldoutStudy", "HoldoutNotQualified");
     for (name, blockers) in [("G2", &g2), ("G4", &g4), ("G5", &g5), ("G7", &g7)] {
         if !blockers.is_empty() {
             g9.push(match name {

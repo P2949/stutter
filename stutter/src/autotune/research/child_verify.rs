@@ -39,6 +39,9 @@ pub struct ChildVerification {
     /// What the resident runtime recorded of the game in each attempt (absent when none was kept).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub telemetry_receipts: Option<serde_json::Value>,
+    /// The journal slots of the attempts that completed (the child's sealed evidence), which each
+    /// need exactly one eligible telemetry receipt.
+    pub completed_attempts: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -49,6 +52,26 @@ pub struct ChildrenVerification {
 }
 
 impl ChildrenVerification {
+    /// Every planned action study qualified and its verified child carries valid, attributable
+    /// restoration receipts (a child whose receipts are missing or invalid is not `reconstruction`).
+    /// At least one action study must be planned: nothing is restored vacuously.
+    pub fn actions_restored(&self, planned: &[super::child_ledger::Disposition]) -> bool {
+        use super::child_study::{Stage, StudyResult};
+        let actions: Vec<_> = planned
+            .iter()
+            .filter(|study| matches!(study.stage, Stage::Action(_)))
+            .collect();
+        !actions.is_empty()
+            && actions.iter().all(|study| {
+                study.result == Some(StudyResult::Qualified)
+                    && self.children.iter().any(|child| {
+                        study.study_sha256.starts_with(&child.study)
+                            && child.reconstruction
+                            && child.action_receipts.is_some()
+                    })
+            })
+    }
+
     /// At least one child exists and every one reconstructed with its raw files verified.
     /// At least one child exists and every one's completed attempts matched their own arm's runtime.
     pub fn runtime_qualified(&self) -> bool {
@@ -61,30 +84,30 @@ impl ChildrenVerification {
     pub fn telemetry_summary(&self) -> Option<(u32, u32)> {
         let (mut eligible, mut completed) = (0u32, 0u32);
         for child in &self.children {
-            let done = child
-                .report
-                .as_ref()
-                .and_then(|report| report["attempts_completed"].as_u64())
-                .and_then(|count| u32::try_from(count).ok())
-                .unwrap_or(0);
-            if done == 0 {
+            if child.completed_attempts.is_empty() {
                 continue;
             }
-            completed = completed.saturating_add(done);
-            let good = child
+            let receipts: Vec<&serde_json::Value> = child
                 .telemetry_receipts
                 .as_ref()
                 .and_then(serde_json::Value::as_array)
-                .map_or(0, |items| {
-                    items
-                        .iter()
-                        .filter(|item| {
-                            item["frame_verdict"] == "Eligible"
-                                && item["source_bound_to_game"] == true
-                        })
-                        .count()
-                });
-            eligible = eligible.saturating_add(u32::try_from(good).unwrap_or(u32::MAX).min(done));
+                .map(|items| items.iter().collect())
+                .unwrap_or_default();
+            for index in &child.completed_attempts {
+                completed = completed.saturating_add(1);
+                // One-to-one: exactly one receipt names this attempt, and it is eligible and bound
+                // to the game. Missing, duplicated or conflicting receipts do not count.
+                let mine: Vec<_> = receipts
+                    .iter()
+                    .filter(|item| item["attempt"].as_u64() == Some(u64::from(*index)))
+                    .collect();
+                if let [only] = mine.as_slice()
+                    && only["frame_verdict"] == "Eligible"
+                    && only["source_bound_to_game"] == true
+                {
+                    eligible = eligible.saturating_add(1);
+                }
+            }
         }
         (completed > 0).then_some((eligible, completed))
     }
@@ -246,6 +269,7 @@ pub fn verify_children(
         };
         let receipts = action_receipts(&studies, &name, uid);
         let telemetry = study_file(&studies, &name, uid, "telemetry-receipts.json");
+        let completed = completed_attempts(&studies, &name, uid);
         children.push(match result {
             Ok((raw, report, runtime)) => ChildVerification {
                 study: name,
@@ -256,6 +280,7 @@ pub fn verify_children(
                 report: Some(report),
                 action_receipts: receipts,
                 telemetry_receipts: telemetry,
+                completed_attempts: completed,
             },
             Err(error) => ChildVerification {
                 study: name,
@@ -266,6 +291,7 @@ pub fn verify_children(
                 report: None,
                 action_receipts: None,
                 telemetry_receipts: None,
+                completed_attempts: Vec::new(),
             },
         });
     }
@@ -281,6 +307,20 @@ pub fn verify_children(
 /// The receipts an action child recorded in its study directory, if any.
 fn action_receipts(studies: &File, name: &str, uid: u32) -> Option<serde_json::Value> {
     study_file(studies, name, uid, "action-receipts.json")
+}
+
+/// The journal slots of a child's completed attempts, from its sealed evidence directory.
+fn completed_attempts(studies: &File, name: &str, uid: u32) -> Vec<u32> {
+    let Ok(dir) = crate::syscall::openat_dir_nofollow(studies.as_fd(), name) else {
+        return Vec::new();
+    };
+    let dir = File::from(dir);
+    let Ok(evidence) = crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence") else {
+        return Vec::new();
+    };
+    super::report_store::read_evidence(&File::from(evidence), uid)
+        .map(|items| items.into_keys().collect())
+        .unwrap_or_default()
 }
 
 /// A JSON file a study recorded in its own directory, if present and private.

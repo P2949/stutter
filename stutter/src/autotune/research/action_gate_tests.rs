@@ -411,3 +411,37 @@ mod fail_closed {
         assert!(g.evidence().clean && g.evidence().kernel_state_proven);
     }
 }
+
+#[test]
+fn an_unreadable_live_thread_is_not_an_exited_one() {
+    use std::io::{Error, ErrorKind};
+    let ok = |cpus: &str| Ok(format!("Name:\tgame\nCpus_allowed_list:\t{cpus}\n"));
+    let tasks = parse_tasks([(1u32, ok("0-15")), (2, ok("2-3"))].into_iter()).unwrap();
+    assert_eq!(tasks.len(), 2);
+    // A thread that exited while being read is simply gone.
+    let exited = parse_tasks(
+        [
+            (1u32, ok("0-15")),
+            (2, Err(Error::from(ErrorKind::NotFound))),
+        ]
+        .into_iter(),
+    )
+    .unwrap();
+    assert_eq!(exited.keys().copied().collect::<Vec<_>>(), [1]);
+    // A thread that is still there but cannot be read makes the whole answer unknown.
+    assert_eq!(
+        parse_tasks(
+            [
+                (1u32, ok("0-15")),
+                (2, Err(Error::from(ErrorKind::PermissionDenied)))
+            ]
+            .into_iter()
+        ),
+        None
+    );
+    // A status with no CPU list at all is not a restoration either.
+    assert_eq!(
+        parse_tasks([(1u32, Ok("Name:\tx\n".to_owned()))].into_iter()),
+        None
+    );
+}

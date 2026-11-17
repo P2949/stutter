@@ -227,7 +227,68 @@ fn each_attempts_telemetry_receipt_is_kept_beside_its_study() {
     let receipts: serde_json::Value =
         serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
     assert_eq!(receipts[0]["pid"], 4242);
+    assert_eq!(
+        receipts[0]["attempt"], 0,
+        "the receipt names its journal slot"
+    );
     assert_eq!(receipts[0]["frames"], 2_400);
     assert_eq!(receipts[0]["source_bound_to_game"], true);
     assert_eq!(receipts[0]["frame_verdict"], "Eligible");
+}
+
+#[test]
+fn a_telemetry_receipt_that_cannot_be_recorded_is_an_evidence_failure_not_a_silent_omission() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use crate::autotune::research::telemetry_observer::SharedTelemetry;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let parent = parent();
+    let study = plan(&parent).unwrap().remove(0);
+    let mut host = Host::finishing();
+    host.process = Some(crate::autotune::research::action_child::ChildTarget {
+        pid: stutter_core::ids::Pid::new(4242),
+        start_ticks: 99,
+        uid: crate::syscall::geteuid(),
+    });
+    let telemetry: SharedTelemetry = Default::default();
+    let mut now = parent.issued_unix_seconds + 1;
+    let mut runner = DriverStudyAttempts::new(
+        File::open(root.path()).unwrap(),
+        parent.clone(),
+        Box::new(host),
+        Box::new(move || {
+            now += 1;
+            now
+        }),
+        Box::new(|| Ok(())),
+        Box::new(|_| std::path::PathBuf::from("/nonexistent")),
+        Box::new(|study| Ok(inputs_for(study))),
+    )
+    .with_telemetry(telemetry);
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    // Something already holds the receipts file, so this attempt's receipt cannot be written.
+    let file = root
+        .path()
+        .join("studies")
+        .join(&study.study_sha256[..16])
+        .join("telemetry-receipts.json");
+    std::fs::write(&file, b"[]").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut failure = None;
+    for _ in 0..200 {
+        match runner.poll(&study, 100) {
+            Err(error) => {
+                failure = Some(error.to_string());
+                break;
+            }
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+        }
+    }
+    let message = failure.expect("the study fails instead of dropping the receipt");
+    assert!(
+        message.contains("telemetry receipts not recorded"),
+        "{message}"
+    );
 }

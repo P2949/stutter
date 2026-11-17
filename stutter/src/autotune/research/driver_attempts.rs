@@ -149,30 +149,34 @@ impl DriverStudyAttempts {
         let (Some(telemetry), Some(target)) = (&self.telemetry, self.host.game_process()) else {
             return;
         };
+        let attempt = self.host.attempt_index();
         if let Ok(mut observer) = telemetry.lock() {
-            observer.arm(target);
+            observer.arm(target, attempt);
         }
     }
 
     /// Keep every attempt's telemetry receipt beside the study (write-once; a conflicting file means
     /// the receipts cannot be recorded and the study simply has none).
-    fn record_telemetry(&self, study: &ChildStudy) {
+    fn record_telemetry(&self, study: &ChildStudy) -> anyhow::Result<()> {
         let Some(telemetry) = &self.telemetry else {
-            return;
+            return Ok(());
         };
         let receipts = telemetry
             .lock()
-            .map(|mut observer| observer.take_receipts())
-            .unwrap_or_default();
+            .map_err(|_| anyhow::anyhow!("the telemetry observer is poisoned"))?
+            .take_receipts();
         if receipts.is_empty() {
-            return;
+            return Ok(());
         }
-        if let Ok(studies) = open_dir(&self.campaign, STUDIES_DIR)
-            && let Ok(dir) = open_dir(&studies, dir_name(study))
-            && let Ok(bytes) = serde_json::to_vec_pretty(&receipts)
-        {
-            let _ = write_new(&dir, "telemetry-receipts.json", &bytes);
-        }
+        // A receipt that cannot be made durable is an evidence failure, not a quiet omission.
+        let studies = open_dir(&self.campaign, STUDIES_DIR)?;
+        let dir = open_dir(&studies, dir_name(study))?;
+        write_new(
+            &dir,
+            "telemetry-receipts.json",
+            &serde_json::to_vec_pretty(&receipts)?,
+        )
+        .map_err(|error| anyhow::anyhow!("telemetry receipts not recorded: {error:#}"))
     }
 
     /// During a feature study, once per attempt: does the factor's treatment (on or off) show in the
@@ -346,7 +350,7 @@ impl DriverStudyAttempts {
         health_halt: bool,
     ) -> anyhow::Result<AttemptsOutcome> {
         let report = driver.finalize()?;
-        self.record_telemetry(study);
+        self.record_telemetry(study)?;
         let study_dir = open_dir(&open_dir(&self.campaign, STUDIES_DIR)?, dir_name(study))?;
         // The study's report is sealed beside its journal; verification recomputes and compares it.
         write_report(&study_dir, &report)?;

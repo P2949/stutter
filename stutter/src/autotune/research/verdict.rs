@@ -76,22 +76,6 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
             .child_studies
             .iter()
             .all(|study| study.result == Some(StudyResult::Qualified));
-    let final_gate_qualified = inputs.reconstruction_passed
-        && raw_files_verified
-        && loaded_runtime_qualified
-        && child_studies_qualified
-        && inputs.child_reports_verified
-        && inputs.restoration_verified
-        && !inputs.health_blocked;
-    let disposition = if inputs.health_blocked {
-        "AbortedHealth"
-    } else if final_gate_qualified {
-        "Qualified"
-    } else if inputs.reconstruction_passed && raw_files_verified {
-        "PartiallyQualified"
-    } else {
-        "Unverified"
-    };
     let gates = super::gate_verdict::gates(&super::gate_verdict::GateInputs {
         raw_files_verified,
         loaded_runtime_qualified,
@@ -101,6 +85,26 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         health_blocked: inputs.health_blocked,
         telemetry: inputs.child_telemetry,
     });
+    // The overall result is the conjunction of the study-backed facts and every gate: a campaign
+    // whose host baseline, lease receipts, telemetry, fault matrix or deployment receipt is not attested
+    // cannot be `Qualified`, however clean its studies are.
+    let final_gate_qualified = inputs.reconstruction_passed
+        && raw_files_verified
+        && loaded_runtime_qualified
+        && child_studies_qualified
+        && inputs.child_reports_verified
+        && inputs.restoration_verified
+        && !inputs.health_blocked
+        && gates.iter().all(|gate| gate.accepted);
+    let disposition = if inputs.health_blocked {
+        "AbortedHealth"
+    } else if final_gate_qualified {
+        "Qualified"
+    } else if inputs.reconstruction_passed && raw_files_verified {
+        "PartiallyQualified"
+    } else {
+        "Unverified"
+    };
     Verdict {
         reconstruction_passed: inputs.reconstruction_passed,
         raw_files_verified,

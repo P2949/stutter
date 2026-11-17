@@ -322,62 +322,160 @@ mod telemetry {
 
     use super::*;
 
-    fn child(done: u64, receipts: Option<serde_json::Value>) -> ChildVerification {
+    fn child(completed: &[u32], receipts: Option<serde_json::Value>) -> ChildVerification {
         ChildVerification {
             study: "0123456789abcdef".into(),
             reconstruction: true,
             raw_files_verified: true,
             runtime_matched: true,
             problem: None,
-            report: Some(json!({ "attempts_completed": done })),
+            report: Some(json!({ "attempts_completed": completed.len() })),
             action_receipts: None,
             telemetry_receipts: receipts,
+            completed_attempts: completed.to_vec(),
         }
     }
 
-    fn eligible() -> serde_json::Value {
-        json!({ "frame_verdict": "Eligible", "source_bound_to_game": true })
+    fn eligible(attempt: u32) -> serde_json::Value {
+        json!({ "attempt": attempt, "frame_verdict": "Eligible", "source_bound_to_game": true })
+    }
+
+    fn summary(children: Vec<ChildVerification>) -> Option<(u32, u32)> {
+        ChildrenVerification {
+            children,
+            missing: Vec::new(),
+        }
+        .telemetry_summary()
     }
 
     #[test]
-    fn only_eligible_game_bound_receipts_count_against_the_completed_attempts() {
-        let verification = |children| ChildrenVerification {
-            children,
-            missing: Vec::new(),
-        };
+    fn each_completed_attempt_needs_exactly_one_eligible_game_bound_receipt_that_names_it() {
         // Nothing completed: no claim either way.
-        assert_eq!(verification(vec![child(0, None)]).telemetry_summary(), None);
-        // Completed attempts with no receipts count as not eligible, never as vacuously fine.
+        assert_eq!(summary(vec![child(&[], None)]), None);
+        // Completed attempts with no receipts are not eligible, never vacuously fine.
+        assert_eq!(summary(vec![child(&[0, 1], None)]), Some((0, 2)));
+        // One receipt per attempt, each naming its own attempt.
+        let both = json!([eligible(0), eligible(1)]);
+        assert_eq!(summary(vec![child(&[0, 1], Some(both))]), Some((2, 2)));
+    }
+
+    #[test]
+    fn a_receipt_cannot_stand_in_for_another_attempt_or_be_counted_twice() {
+        // A duplicate of attempt 0 covers nothing for attempt 1.
+        let duplicated = json!([eligible(0), eligible(0)]);
         assert_eq!(
-            verification(vec![child(4, None)]).telemetry_summary(),
-            Some((0, 4))
+            summary(vec![child(&[0, 1], Some(duplicated))]),
+            Some((0, 2))
         );
-        let two = json!([eligible(), eligible()]);
-        assert_eq!(
-            verification(vec![child(2, Some(two))]).telemetry_summary(),
-            Some((2, 2))
-        );
-        // A receipt that is not eligible, or whose source was not the game, does not count.
-        let mixed = json!([
-            eligible(),
-            { "frame_verdict": "Lossy", "source_bound_to_game": true },
-            { "frame_verdict": "Eligible", "source_bound_to_game": false }
+        // Two receipts for one attempt conflict: neither counts.
+        let conflicting = json!([
+            eligible(1),
+            { "attempt": 1, "frame_verdict": "Lossy", "source_bound_to_game": true }
         ]);
+        assert_eq!(summary(vec![child(&[1], Some(conflicting))]), Some((0, 1)));
+        // A receipt for an attempt that did not complete, or one naming no attempt, counts for nothing.
+        let stray =
+            json!([eligible(7), { "frame_verdict": "Eligible", "source_bound_to_game": true }]);
+        assert_eq!(summary(vec![child(&[0], Some(stray))]), Some((0, 1)));
+        // An ineligible or unbound receipt does not count.
+        let weak = json!([
+            { "attempt": 0, "frame_verdict": "Lossy", "source_bound_to_game": true },
+            { "attempt": 1, "frame_verdict": "Eligible", "source_bound_to_game": false }
+        ]);
+        assert_eq!(summary(vec![child(&[0, 1], Some(weak))]), Some((0, 2)));
+        // Children add up.
         assert_eq!(
-            verification(vec![child(3, Some(mixed))]).telemetry_summary(),
+            summary(vec![
+                child(&[0], Some(json!([eligible(0)]))),
+                child(&[0, 1], None)
+            ]),
             Some((1, 3))
         );
-        // More receipts than attempts cannot inflate the count past the attempts.
-        let many = json!([eligible(), eligible(), eligible()]);
-        assert_eq!(
-            verification(vec![child(2, Some(many))]).telemetry_summary(),
-            Some((2, 2))
+    }
+}
+
+mod restoration {
+    use serde_json::json;
+
+    use super::*;
+    use crate::autotune::research::{
+        ResearchAction,
+        child_ledger::Disposition,
+        child_study::{Profile, StudyResult},
+    };
+
+    fn planned(result: Option<StudyResult>) -> Vec<Disposition> {
+        vec![
+            Disposition {
+                study_sha256: "ab".repeat(32),
+                profile: Profile::Long,
+                stage: Stage::Action(ResearchAction::CpuAffinityProfile),
+                result,
+                reason: String::new(),
+            },
+            Disposition {
+                study_sha256: "cd".repeat(32),
+                profile: Profile::Cpu,
+                stage: Stage::Screen,
+                result: Some(StudyResult::Qualified),
+                reason: String::new(),
+            },
+        ]
+    }
+
+    fn child(reconstruction: bool, receipts: bool) -> ChildVerification {
+        ChildVerification {
+            study: "abababababababab".into(),
+            reconstruction,
+            raw_files_verified: true,
+            runtime_matched: true,
+            problem: None,
+            report: None,
+            action_receipts: receipts.then(|| json!([{}])),
+            telemetry_receipts: None,
+            completed_attempts: Vec::new(),
+        }
+    }
+
+    fn restored(children: Vec<ChildVerification>, planned: &[Disposition]) -> bool {
+        ChildrenVerification {
+            children,
+            missing: Vec::new(),
+        }
+        .actions_restored(planned)
+    }
+
+    #[test]
+    fn restoration_needs_every_planned_action_qualified_with_a_verified_child_that_has_receipts() {
+        let qualified = planned(Some(StudyResult::Qualified));
+        assert!(restored(vec![child(true, true)], &qualified));
+        // Nothing is restored vacuously: no action study in the plan proves nothing.
+        assert!(!restored(vec![child(true, true)], &[]));
+        // An action that did not qualify, a child that failed verification, or one without
+        // receipts is not a restoration.
+        assert!(!restored(
+            vec![child(true, true)],
+            &planned(Some(StudyResult::Unqualified))
+        ));
+        assert!(!restored(vec![child(true, true)], &planned(None)));
+        assert!(!restored(vec![child(false, true)], &qualified));
+        assert!(!restored(vec![child(true, false)], &qualified));
+        assert!(!restored(Vec::new(), &qualified));
+    }
+
+    #[test]
+    fn an_unrestored_settings_edit_leaves_a_trace_that_blocks_restoration() {
+        use crate::autotune::research::profile_applier::pending_edit;
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("UserSettings.json");
+        assert!(!pending_edit(&settings));
+        std::fs::write(dir.path().join("UserSettings.json.stutter-applied"), b"x").unwrap();
+        assert!(
+            pending_edit(&settings),
+            "the applied marker alone is a trace"
         );
-        // Children add up.
-        let one = json!([eligible()]);
-        assert_eq!(
-            verification(vec![child(1, Some(one)), child(3, None)]).telemetry_summary(),
-            Some((1, 4))
-        );
+        std::fs::remove_file(dir.path().join("UserSettings.json.stutter-applied")).unwrap();
+        std::fs::write(dir.path().join("UserSettings.json.stutter-original"), b"{}").unwrap();
+        assert!(pending_edit(&settings), "the snapshot alone is a trace");
     }
 }

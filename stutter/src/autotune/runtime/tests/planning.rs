@@ -192,7 +192,10 @@ mod research_action_gate {
         runtime.set_research_telemetry(Some(telemetry.clone()));
         // Nothing attested yet: events are not counted.
         runtime.observe_research_telemetry(true);
-        telemetry.lock().unwrap().arm(ChildTarget { ..identity });
+        telemetry
+            .lock()
+            .unwrap()
+            .arm(ChildTarget { ..identity }, Some(0));
         // The runtime's own frame source, bound to this very process.
         let mut claim = SourceClaim {
             stage: MeasurementStage::ApplicationFrame,
@@ -217,7 +220,10 @@ mod research_action_gate {
         // A source bound to some other process is the wrong renderer.
         claim.producer_pid = Some(1);
         runtime.frame_source = Some(Arc::new(Mutex::new(FrameSourceStatus::new(claim))));
-        telemetry.lock().unwrap().arm(ChildTarget { ..identity });
+        telemetry
+            .lock()
+            .unwrap()
+            .arm(ChildTarget { ..identity }, Some(0));
         runtime.observe_research_telemetry(false);
         let other = telemetry.lock().unwrap().take_receipts();
         assert!(!other[0].source_bound_to_game);

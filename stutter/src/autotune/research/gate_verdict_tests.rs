@@ -5,9 +5,13 @@ use crate::autotune::research::{
 };
 
 fn study(stage: Stage, result: Option<StudyResult>) -> Disposition {
+    on(Profile::Cpu, stage, result)
+}
+
+fn on(profile: Profile, stage: Stage, result: Option<StudyResult>) -> Disposition {
     Disposition {
         study_sha256: "a".repeat(64),
-        profile: Profile::Cpu,
+        profile,
         stage,
         result,
         reason: String::new(),
@@ -15,14 +19,18 @@ fn study(stage: Stage, result: Option<StudyResult>) -> Disposition {
 }
 
 fn full(result: Option<StudyResult>) -> Vec<Disposition> {
-    vec![
-        study(Stage::Screen, result),
-        study(Stage::Pilot, result),
-        study(Stage::Confirm, result),
-        study(Stage::Holdout, result),
+    let mut studies = Vec::new();
+    // The plan's comparison stages exist for both performance profiles.
+    for profile in [Profile::Cpu, Profile::Gpu] {
+        for stage in [Stage::Screen, Stage::Pilot, Stage::Confirm, Stage::Holdout] {
+            studies.push(on(profile, stage, result));
+        }
+    }
+    studies.extend([
         study(Stage::Action(ResearchAction::CpuAffinityProfile), result),
         study(Stage::Feature(ResearchFactor::NtSync), result),
-    ]
+    ]);
+    studies
 }
 
 fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict> {
@@ -146,4 +154,21 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
     );
     assert!(with(Some((8, 8)), false).accepted);
     assert_eq!(with(Some((8, 8)), true).blockers, ["GpuHealthIncident"]);
+}
+
+#[test]
+fn a_plan_missing_a_performance_profile_cannot_accept_the_gates_that_need_both() {
+    // Only the CPU profile's comparison stages exist: the GPU comparisons the plan asks for do not.
+    let mut cpu_only = full(Some(StudyResult::Qualified));
+    cpu_only.retain(|study| study.profile != Profile::Gpu);
+    let verdicts = run(&cpu_only, true, false);
+    for name in ["G2", "G4", "G9"] {
+        assert!(
+            of(&verdicts, name)
+                .blockers
+                .contains(&"MissingProfileStudy"),
+            "{name}: {:?}",
+            of(&verdicts, name).blockers
+        );
+    }
 }
