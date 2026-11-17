@@ -69,19 +69,17 @@ pub struct SteamAttemptHost<P: SteamPort> {
 }
 
 impl<P: SteamPort> SteamAttemptHost<P> {
-    /// The factors this attempt runs with: the study's factors, except that in a within-source study
-    /// the Off attempts run at baseline.
-    fn factors_for(&self, slot: &AttemptSlot) -> Vec<super::ResearchFactor> {
+    /// The study's factors and whether this attempt runs them On. A within-source Off attempt runs
+    /// the catalog's explicit control environment for the same factors, never an empty one: for
+    /// NTSync the control is `PROTON_NO_NTSYNC=1`, and an empty environment would give both arms
+    /// the same one.
+    fn factors_for(&self, slot: &AttemptSlot) -> (Vec<super::ResearchFactor>, bool) {
         let off = self
             .treatments
             .as_ref()
             .and_then(|treatments| treatments.get(slot.index as usize))
             .is_some_and(|treatment| *treatment == super::Treatment::Off);
-        if off {
-            Vec::new()
-        } else {
-            self.factors.clone()
-        }
+        (self.factors.clone(), !off)
     }
 
     pub fn new(port: P) -> Self {
@@ -163,8 +161,11 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
             study_compat_data: self.port.study_compat_data().join(slot.arm.dir_name()),
             // Only the factors this study enabled (none for screening): a blocked or conflicting
             // factor refuses the arm rather than running it at baseline unannounced.
-            arm_env: features::arm_env(slot.arm, &self.factors_for(slot))
-                .map_err(|(f, b)| anyhow::anyhow!("feature {f:?} blocked: {b:?}"))?,
+            arm_env: {
+                let (factors, on) = self.factors_for(slot);
+                features::arm_env(slot.arm, &factors, on)
+                    .map_err(|(f, b)| anyhow::anyhow!("feature {f:?} blocked: {b:?}"))?
+            },
             steamapps,
             proton_manifest,
         })
@@ -527,8 +528,11 @@ mod tests {
             index,
             ..em.clone()
         };
-        // Off runs at baseline; On carries the factor; the study's own arm is the same build.
-        assert!(host.arm_spec(&at(0)).unwrap().arm_env.is_empty());
+        // Off runs the catalog's explicit control; On carries the factor; same build.
+        assert_eq!(
+            host.arm_spec(&at(0)).unwrap().arm_env["PROTON_ENABLE_WAYLAND"],
+            "0"
+        );
         assert_eq!(
             host.arm_spec(&at(1)).unwrap().arm_env["PROTON_ENABLE_WAYLAND"],
             "1"
@@ -546,5 +550,18 @@ mod tests {
             host.arm_spec(&at(0)).unwrap().arm_env["PROTON_ENABLE_WAYLAND"],
             "1"
         );
+        // NTSync: the control arm disables it, so the two arms never share an environment.
+        let mut ge = slot();
+        ge.arm = ProtonSource::Ge;
+        host.set_enabled_factors(&[ResearchFactor::NtSync]);
+        host.set_treatments(Some(vec![Treatment::Off, Treatment::On]));
+        let ge_at = |index: u32| AttemptSlot {
+            index,
+            ..ge.clone()
+        };
+        let off = host.arm_spec(&ge_at(0)).unwrap().arm_env;
+        let on = host.arm_spec(&ge_at(1)).unwrap().arm_env;
+        assert_eq!(off["PROTON_NO_NTSYNC"], "1");
+        assert_ne!(off, on);
     }
 }

@@ -18,6 +18,7 @@ struct Script {
     launches: u32,
     aborts: u32,
     abort_fails: bool,
+    health_blocked: bool,
     launch_fails: bool,
     launch_unresolved: bool,
     current: u32,
@@ -28,6 +29,9 @@ struct Script {
 struct Fake(Arc<Mutex<Script>>);
 
 impl AttemptHost for Fake {
+    fn health_blocked(&mut self) -> bool {
+        self.0.lock().unwrap().health_blocked
+    }
     fn safe_window(&mut self) -> bool {
         self.0.lock().unwrap().safe
     }

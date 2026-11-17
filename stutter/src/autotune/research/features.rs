@@ -89,15 +89,18 @@ pub fn factor_env(
     }
 }
 
-/// Merge the "on" environments for the enabled factors; every other factor stays at baseline by
-/// absence. Conflicting values for one key are refused rather than resolved silently.
+/// Merge the environments of the study's factors for one treatment (`on` is the study arm, off the
+/// control arm): the catalog's own value for each, so the control arm carries the explicit baseline
+/// (for example `PROTON_NO_NTSYNC=1` for NTSync) rather than silently nothing. Every other factor
+/// stays at baseline by absence. Conflicting values for one key are refused, not resolved silently.
 pub fn arm_env(
     source: ProtonSource,
     enabled: &[ResearchFactor],
+    on: bool,
 ) -> Result<Env, (ResearchFactor, FactorBlock)> {
     let mut merged = Env::new();
     for factor in enabled {
-        for (key, value) in factor_env(source, *factor, true).map_err(|block| (*factor, block))? {
+        for (key, value) in factor_env(source, *factor, on).map_err(|block| (*factor, block))? {
             if merged.get(&key).is_some_and(|existing| *existing != value) {
                 return Err((*factor, FactorBlock::ConflictingEnvironment));
             }
@@ -335,15 +338,43 @@ mod tests {
         let on = arm_env(
             ProtonSource::Em,
             &[ResearchFactor::WineWayland, ResearchFactor::FrameGeneration],
+            true,
         )
         .unwrap();
         assert_eq!(on["PROTON_ENABLE_WAYLAND"], "1");
         assert_eq!(on["MLFG_UPGRADE"], "1");
-        assert!(arm_env(ProtonSource::Ge, &[ResearchFactor::AntiLag2]).is_err());
+        assert!(arm_env(ProtonSource::Ge, &[ResearchFactor::AntiLag2], true).is_err());
         assert_eq!(
             factor_env(ProtonSource::Ge, ResearchFactor::NtSync, false).unwrap()["PROTON_NO_NTSYNC"],
             "1"
         );
+    }
+
+    #[test]
+    fn each_treatment_runs_the_catalogs_own_environment_and_ntsync_arms_differ() {
+        for source in SOURCES {
+            for factor in ALL {
+                for on in [true, false] {
+                    if let Ok(expected) = factor_env(source, factor, on) {
+                        assert_eq!(
+                            arm_env(source, &[factor], on).unwrap(),
+                            expected,
+                            "{source:?} {factor:?} on={on}"
+                        );
+                    }
+                }
+            }
+        }
+        // The control arm of NTSync disables it; an empty control would equal the study arm.
+        for source in [ProtonSource::Ge, ProtonSource::CachyOs, ProtonSource::Em] {
+            let on = arm_env(source, &[ResearchFactor::NtSync], true).unwrap();
+            let off = arm_env(source, &[ResearchFactor::NtSync], false).unwrap();
+            assert_ne!(on, off, "{source:?}");
+            assert_eq!(off["PROTON_NO_NTSYNC"], "1");
+        }
+        // The Wayland control is explicit, not absent.
+        let off = arm_env(ProtonSource::Ge, &[ResearchFactor::WineWayland], false).unwrap();
+        assert_eq!(off["PROTON_ENABLE_WAYLAND"], "0");
     }
 
     #[test]

@@ -264,6 +264,23 @@ impl ResearchCoordinator {
             }
             // A durable GPU health stop: preserve what was sealed, leave the rest of the schedule
             // unexecuted, and end the campaign as a typed health block.
+            Step::Halted(code)
+                if crate::autotune::research::child_runner::leaves_ownership_unresolved(code) =>
+            {
+                // Settlement or restoration is unproven: a terminal transition would release the
+                // action slot over a possibly running game, worker transaction or edited settings
+                // file. Keep the lease and every mutation suppressed, as for a driver error, and
+                // let independent recovery settle it.
+                log::error!("research halted with unresolved ownership: {code}");
+                self.persist_report();
+                if let Some(state) = self.driver.as_mut()
+                    && let Err(error) = state.abort_host()
+                {
+                    log::error!("research process settlement is unverified: {error:#}");
+                }
+                self.storage_blocker = Some("UnsafeToResume");
+                return;
+            }
             Step::Halted(code) => {
                 let code = if self.persist_report() {
                     code

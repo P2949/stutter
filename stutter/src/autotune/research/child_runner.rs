@@ -60,6 +60,17 @@ pub trait StudyExecutor {
     fn abort(&mut self) -> Result<(), &'static str>;
 }
 
+/// Whether a halt code says something may still be running or left edited: a process, worker
+/// transaction or settings file whose settlement or restoration could not be proven, or an executor
+/// that failed after possibly starting a game. A halt like this is not a settled stop: the campaign
+/// keeps its lease and mutation slot, and nothing else may run, until independent recovery proves it.
+pub fn leaves_ownership_unresolved(code: &str) -> bool {
+    matches!(
+        code,
+        "SettlementUnproven" | "RecoveryUnproven" | "RestoreUnproven" | "ExecutorError"
+    )
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum RunnerStep {
     /// A study is running; nothing is decided yet.
@@ -130,6 +141,9 @@ impl StageRunner {
     }
 
     /// As `step`, passing the controller's launch fence to the executor.
+    ///
+    /// A `Halted` code that `leaves_ownership_unresolved` means a game, a worker transaction or an
+    /// edited settings file is not proven settled: the caller must keep the campaign's ownership.
     pub fn step_fenced(
         &mut self,
         executor: &mut dyn StudyExecutor,

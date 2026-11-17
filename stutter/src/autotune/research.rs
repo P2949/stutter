@@ -27,6 +27,7 @@ pub(crate) mod action_study;
 )]
 pub(crate) mod analysis;
 pub(crate) mod arm_selection;
+pub(crate) mod campaign_budget;
 #[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod child_intent;
 pub(crate) mod child_ledger;

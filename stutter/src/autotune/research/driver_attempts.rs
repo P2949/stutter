@@ -276,6 +276,14 @@ impl DriverStudyAttempts {
         )
     }
 
+    /// Record what a finished child spent of the campaign's active-time and evidence budgets.
+    fn record_budget(&self, study: &ChildStudy, driver: &Driver) -> anyhow::Result<()> {
+        let studies = open_dir(&self.campaign, STUDIES_DIR)?;
+        let dir = open_dir(&studies, dir_name(study))?;
+        let evidence = open_dir(&dir, "evidence")?;
+        super::campaign_budget::record(&dir, &evidence, self.parent.uid, driver.active_seconds())
+    }
+
     /// Record the action receipts in the study directory. An existing file must be byte-identical.
     fn write_receipts(
         &self,
@@ -326,6 +334,12 @@ impl DriverStudyAttempts {
             }
             Err(error) => return Err(error.into()),
         };
+        // What the campaign's earlier children already used, read before this one's directory exists.
+        let prior = super::campaign_budget::spent(
+            &studies,
+            self.parent.uid,
+            u64::from(self.parent.max_active_seconds),
+        )?;
         // A directory that already exists means the study ran before: it is adopted by nobody here
         // (the executor refuses to start such a study), so creating it again fails closed.
         let study_dir = create_dir(&studies, dir_name(study))?;
@@ -360,7 +374,7 @@ impl DriverStudyAttempts {
         let schedule = build_schedule(&intent)?;
         let len = schedule.len();
         let journal = ResearchJournal::open(journal_dir.into(), intent.uid, schedule)?;
-        let driver = Driver::new(journal, intent, dispatch, evidence, len);
+        let driver = Driver::new(journal, intent, dispatch, evidence, len).with_prior(prior);
         self.running = Some((study.study_sha256.clone(), driver));
         Ok(())
     }
@@ -491,6 +505,9 @@ impl StudyAttempts for DriverStudyAttempts {
                 let Some((_, driver)) = self.running.take() else {
                     return Ok(None);
                 };
+                // What this child used is recorded before anything else is decided about it, so
+                // the next child starts from the campaign's true spend; unrecorded fails closed.
+                self.record_budget(study, &driver)?;
                 Ok(Some(self.outcome(study, &driver, halted)?))
             }
         }

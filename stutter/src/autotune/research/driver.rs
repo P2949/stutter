@@ -136,6 +136,8 @@ pub struct Driver {
     armed_context: Option<DispatchContextV1>,
     claim_verifier: Option<Box<dyn ClaimSettlementVerifier>>,
     active_seconds: u64,
+    /// Evidence bytes earlier child studies of the same campaign already used.
+    prior_evidence_bytes: u64,
     last_tick_seconds: Option<u64>,
     fresh_journal_checked: bool,
     /// Set when a launch request may have reached Steam and its effect is unknown. The driver
@@ -203,11 +205,26 @@ impl Driver {
             armed_context: None,
             claim_verifier: None,
             active_seconds: 0,
+            prior_evidence_bytes: 0,
             last_tick_seconds: None,
             fresh_journal_checked: false,
             unresolved_launch: None,
             cancel: false,
         }
+    }
+
+    /// Start from what earlier children of the same campaign already spent, so the campaign's
+    /// authorized active time and evidence bytes are shared by all of them rather than granted to
+    /// each in full.
+    pub fn with_prior(mut self, spent: super::campaign_budget::Spent) -> Self {
+        self.active_seconds = spent.active_seconds;
+        self.prior_evidence_bytes = spent.evidence_bytes;
+        self
+    }
+
+    /// Active seconds charged so far, including any spent before this driver started.
+    pub fn active_seconds(&self) -> u64 {
+        self.active_seconds
     }
 
     /// Settle an attempt that was durably started but never sealed before a restart. The frozen
@@ -466,7 +483,9 @@ impl Driver {
                             ensure_evidence_budget(
                                 &self.evidence,
                                 self.intent.uid,
-                                self.intent.max_evidence_bytes,
+                                self.intent
+                                    .max_evidence_bytes
+                                    .saturating_sub(self.prior_evidence_bytes),
                                 &evidence,
                             )
                         })

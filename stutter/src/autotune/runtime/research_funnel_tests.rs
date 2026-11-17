@@ -210,6 +210,44 @@ fn cancelling_a_funnel_campaign_settles_the_host_and_ends_aborted() {
 }
 
 #[test]
+fn a_health_halt_with_unproven_settlement_keeps_the_campaign_and_the_mutation_slot() {
+    for abort_fails in [false, true] {
+        let mut s = setup(
+            Script {
+                safe: true,
+                ..Default::default()
+            },
+            40,
+            true,
+        );
+        s.coordinator.drive_attempts(101);
+        assert_eq!(phase(&s.coordinator), Some(ResearchPhase::Launching));
+        {
+            let mut script = s.script.lock().unwrap();
+            script.health_blocked = true;
+            script.abort_fails = abort_fails;
+        }
+        s.coordinator.drive_attempts(102);
+        if abort_fails {
+            // Whether the game is settled is unknown: ownership is retained and nothing else runs.
+            assert!(s.coordinator.owns_action_slot(), "ownership is retained");
+            assert!(s.coordinator.terminal.is_none(), "no terminal transition");
+            assert_eq!(
+                s.coordinator.storage_blocker,
+                Some("UnsafeToResume"),
+                "resumption is suppressed"
+            );
+        } else {
+            assert!(!s.coordinator.owns_action_slot());
+            assert_eq!(
+                s.coordinator.terminal.as_ref().unwrap().phase,
+                ResearchPhase::Blocked
+            );
+        }
+    }
+}
+
+#[test]
 fn controller_shutdown_settles_a_funnel_attempt_or_refuses_when_settlement_is_unproven() {
     for abort_fails in [false, true] {
         let mut s = setup(

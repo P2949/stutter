@@ -676,3 +676,6 @@ mod abort;
 
 #[path = "driver_attempts_feature_tests.rs"]
 mod feature;
+
+#[path = "driver_attempts_budget_tests.rs"]
+mod budget;
