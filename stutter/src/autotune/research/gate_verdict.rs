@@ -20,6 +20,16 @@ pub struct GateVerdict {
     pub blockers: Vec<&'static str>,
 }
 
+/// What a read-only re-reading of the host found, compared with what the campaign froze (G0).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostFacts {
+    pub same_boot: bool,
+    pub build_id_matches: bool,
+    pub game_executable_matches: bool,
+    /// Steam indicates no pending update of the installation.
+    pub installation_settled: bool,
+}
+
 /// What a read-only inspection of the campaign's lease found (G1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LeaseFacts {
@@ -48,6 +58,8 @@ pub struct GateInputs<'a> {
     pub deployment_attested: bool,
     /// The lease inspection, `None` when the lease directory could not be inspected.
     pub lease: Option<LeaseFacts>,
+    /// The host baseline comparison, `None` when the installation could not be read.
+    pub host: Option<HostFacts>,
 }
 
 /// `Some(true)` when there is at least one study of the kind and every one is qualified, `Some(false)`
@@ -100,6 +112,28 @@ fn profile_blockers(
     };
     if !blockers.contains(&missing) && !(covered(Profile::Cpu) && covered(Profile::Gpu)) {
         blockers.push("MissingProfileStudy");
+    }
+    blockers
+}
+
+/// G0 from the host comparison: the host is still the one the campaign froze. Whether the original
+/// capture was right is not claimed, only that nothing has moved away from it.
+fn host_blockers(host: Option<HostFacts>) -> Vec<&'static str> {
+    let Some(host) = host else {
+        return vec!["HostNotInspected"];
+    };
+    let mut blockers = Vec::new();
+    if !host.same_boot {
+        blockers.push("HostRebootedSinceCampaign");
+    }
+    if !host.build_id_matches {
+        blockers.push("GameBuildChanged");
+    }
+    if !host.game_executable_matches {
+        blockers.push("GameExecutableChanged");
+    }
+    if !host.installation_settled {
+        blockers.push("InstallationNotSettled");
     }
     blockers
 }
@@ -204,7 +238,7 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
     }
 
     vec![
-        not_attested("G0", "HostBaselineNotAttestedByVerification"),
+        gate("G0", host_blockers(inputs.host)),
         gate("G1", health_free(lease_blockers(inputs.lease))),
         gate("G2", health(g2)),
         gate("G3", health(g3)),

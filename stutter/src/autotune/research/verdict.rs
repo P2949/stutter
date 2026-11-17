@@ -51,6 +51,8 @@ pub struct VerdictInputs<'a> {
     pub deployment_attested: bool,
     /// G1: what a read-only inspection of the campaign's lease found.
     pub lease: Option<super::gate_verdict::LeaseFacts>,
+    /// G0: the host as read now against what the campaign froze.
+    pub host: Option<super::gate_verdict::HostFacts>,
     pub restoration_verified: bool,
     /// An unacknowledged GPU-health incident is on record.
     pub health_blocked: bool,
@@ -90,6 +92,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         telemetry: inputs.child_telemetry,
         deployment_attested: inputs.deployment_attested,
         lease: inputs.lease,
+        host: inputs.host,
     });
     // The overall result is the conjunction of the study-backed facts and every gate: a campaign
     // whose host baseline, lease receipts, telemetry, fault matrix or deployment receipt is not attested

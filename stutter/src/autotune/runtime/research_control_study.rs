@@ -9,6 +9,11 @@ impl ResearchCoordinator {
         self.study_dir = path;
     }
 
+    /// The Steam library directory used to re-read the host (read-only) when a campaign is verified.
+    pub(in crate::autotune::runtime) fn set_steamapps_dir(&mut self, path: Option<PathBuf>) {
+        self.steamapps_dir = path;
+    }
+
     pub(super) fn study_root_matches(&self, facts: &CampaignFacts) -> bool {
         let Some(expected) = facts.study_root else {
             // Historical prelaunch records can be read, but current host facts always include it.

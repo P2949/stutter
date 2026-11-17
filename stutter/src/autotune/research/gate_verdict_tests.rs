@@ -44,6 +44,7 @@ fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict
         telemetry: None,
         deployment_attested: false,
         lease: None,
+        host: None,
     })
 }
 
@@ -144,6 +145,7 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
             telemetry,
             deployment_attested: false,
             lease: None,
+            host: None,
         });
         of(&verdicts, "G3").clone()
     };
@@ -191,6 +193,7 @@ fn g8_is_accepted_only_on_an_attested_deployment_and_needs_no_game() {
             telemetry: None,
             deployment_attested: attested,
             lease: None,
+            host: None,
         });
         of(&verdicts, "G8").clone()
     };
@@ -214,6 +217,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
             telemetry: None,
             deployment_attested: false,
             lease,
+            host: None,
         });
         of(&verdicts, "G1").clone()
     };
@@ -258,4 +262,57 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
         for_this_campaign: false,
     }));
     assert_eq!(broken.blockers.len(), 5);
+}
+
+#[test]
+fn g0_stands_on_a_host_that_has_not_moved_from_what_the_campaign_froze() {
+    let studies = full(Some(StudyResult::Qualified));
+    let with = |host: Option<HostFacts>| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: false,
+            telemetry: None,
+            deployment_attested: false,
+            lease: None,
+            host,
+        });
+        of(&verdicts, "G0").clone()
+    };
+    let steady = HostFacts {
+        same_boot: true,
+        build_id_matches: true,
+        game_executable_matches: true,
+        installation_settled: true,
+    };
+    assert_eq!(with(None).blockers, ["HostNotInspected"]);
+    assert!(with(Some(steady)).accepted);
+    assert_eq!(
+        with(Some(HostFacts {
+            same_boot: false,
+            ..steady
+        }))
+        .blockers,
+        ["HostRebootedSinceCampaign"]
+    );
+    assert_eq!(
+        with(Some(HostFacts {
+            build_id_matches: false,
+            ..steady
+        }))
+        .blockers,
+        ["GameBuildChanged"]
+    );
+    assert_eq!(
+        with(Some(HostFacts {
+            game_executable_matches: false,
+            installation_settled: false,
+            ..steady
+        }))
+        .blockers,
+        ["GameExecutableChanged", "InstallationNotSettled"]
+    );
 }
