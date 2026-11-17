@@ -564,3 +564,35 @@ fn a_process_that_changed_during_the_capture_has_no_identity() {
     let own = procfs_state(std::process::id()).expect("own state");
     assert!(own.identity.is_some() && !own.tasks.is_empty());
 }
+
+#[test]
+fn a_thread_that_exited_while_being_read_is_gone_not_unreadable() {
+    let esrch = || std::io::Error::from_raw_os_error(libc::ESRCH);
+    assert!(thread_is_gone(&esrch()));
+    assert!(thread_is_gone(&std::io::Error::from(
+        std::io::ErrorKind::NotFound
+    )));
+    // A live thread that cannot be read (permission) is still unknown, not exited.
+    assert!(!thread_is_gone(&std::io::Error::from(
+        std::io::ErrorKind::PermissionDenied
+    )));
+    // So an exited thread is skipped by both stages of the capture, and the others still answer.
+    let status = |cpus: &str| Ok(format!("Name:\tx\nCpus_allowed_list:\t{cpus}\n"));
+    let tasks =
+        parse_tasks([(1u32, status("0-3")), (2, Err(esrch())), (3, status("2"))].into_iter())
+            .unwrap();
+    assert_eq!(tasks.keys().copied().collect::<Vec<_>>(), vec![1, 3]);
+    let listed = task_entries(
+        [
+            Ok((
+                std::ffi::OsString::from("1"),
+                std::path::PathBuf::from("/t/1"),
+            )),
+            Err(esrch()),
+        ]
+        .into_iter(),
+        4,
+    )
+    .unwrap();
+    assert_eq!(listed.len(), 1);
+}

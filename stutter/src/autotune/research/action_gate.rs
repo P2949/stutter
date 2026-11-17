@@ -119,6 +119,13 @@ pub fn procfs_state(pid: u32) -> Option<KernelState> {
     })
 }
 
+/// Whether a read error says the thread no longer exists: its `/proc` entry is gone (`NotFound`) or the
+/// kernel reports the task has exited while its file was being read (`ESRCH`). Either way it is an
+/// exited thread, not an unreadable live one.
+fn thread_is_gone(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
+}
+
 /// The most threads one process's state is read for; more is unknown, never a truncated answer.
 const MAX_TASKS: usize = 4096;
 
@@ -133,7 +140,7 @@ fn task_entries(
     for entry in entries {
         let (name, path) = match entry {
             Ok(entry) => entry,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) if thread_is_gone(&error) => continue,
             Err(_) => return None,
         };
         if listed.len() >= max {
@@ -161,7 +168,7 @@ fn parse_tasks(
     for (tid, text) in items {
         let text = match text {
             Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) if thread_is_gone(&error) => continue,
             Err(_) => return None,
         };
         let list = text
