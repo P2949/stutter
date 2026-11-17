@@ -19,6 +19,22 @@ use super::{
 
 const MAX_FILE: u64 = 64 * 1024;
 
+/// Canonical campaign-scoped baseline name; the full intent digest prevents cross-campaign reuse.
+pub(crate) fn baseline_name(kind: &str, campaign: &str) -> anyhow::Result<String> {
+    anyhow::ensure!(
+        campaign.len() == 64
+            && campaign
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "invalid campaign identity"
+    );
+    anyhow::ensure!(
+        matches!(kind, "host-hardware" | "protected-state"),
+        "invalid baseline kind"
+    );
+    Ok(format!("{kind}-before-{campaign}.json"))
+}
+
 pub fn write_new(dir: &File, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
     anyhow::ensure!(bytes.len() as u64 <= MAX_FILE, "record too large");
     let mut file = crate::syscall::create_new_at(dir.as_fd(), name)?;

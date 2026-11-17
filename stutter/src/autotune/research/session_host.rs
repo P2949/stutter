@@ -231,11 +231,13 @@ pub fn build_session_host(
         &super::host_hardware::Roots::system(),
         &std::fs::File::open(&sources.study_dir)?,
         uid,
+        &intent.digest()?,
     )?;
     super::protected_state::record_baseline(
         &sources.steamapps,
         &std::fs::File::open(&sources.study_dir)?,
         uid,
+        &intent.digest()?,
     )?;
     // Every arm has its own private prefix directory, created empty if missing and verified like
     // the root, so no arm can inherit or disturb another arm's prefix, settings or results.

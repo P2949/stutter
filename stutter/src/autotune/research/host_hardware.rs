@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 
 use super::report_store::{read_private, write_new};
 
-const FILE: &str = "host-hardware-before.json";
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Gpu {
     pub vendor: String,
@@ -160,18 +158,31 @@ pub fn compare(before: &Hardware, after: &Hardware) -> Result<(), &'static str> 
 
 /// Record the identity before any launch beside the study. An existing record is kept; one that cannot
 /// be made is an error, so nothing launches on hardware that was never recorded.
-pub fn record_baseline(roots: &Roots, study_dir: &File, uid: u32) -> anyhow::Result<()> {
-    if let Ok(bytes) = read_private(study_dir, FILE, uid) {
+pub fn record_baseline(
+    roots: &Roots,
+    study_dir: &File,
+    uid: u32,
+    campaign: &str,
+) -> anyhow::Result<()> {
+    let file = super::report_store::baseline_name("host-hardware", campaign)?;
+    if let Ok(bytes) = read_private(study_dir, &file, uid) {
         serde_json::from_slice::<Hardware>(&bytes)?;
         return Ok(());
     }
     let hardware = capture(roots).map_err(|reason| anyhow::anyhow!(reason))?;
-    write_new(study_dir, FILE, &serde_json::to_vec_pretty(&hardware)?)
+    write_new(study_dir, &file, &serde_json::to_vec_pretty(&hardware)?)
 }
 
 /// The hardware now against the recorded baseline, or why not (`HostHardwareNotRecorded`).
-pub fn status(roots: &Roots, study_dir: &File, uid: u32) -> Result<(), &'static str> {
-    let before: Hardware = read_private(study_dir, FILE, uid)
+pub fn status(
+    roots: &Roots,
+    study_dir: &File,
+    uid: u32,
+    campaign: &str,
+) -> Result<(), &'static str> {
+    let file = super::report_store::baseline_name("host-hardware", campaign)
+        .map_err(|_| "CampaignIdentityInvalid")?;
+    let before: Hardware = read_private(study_dir, &file, uid)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .ok_or("HostHardwareNotRecorded")?;

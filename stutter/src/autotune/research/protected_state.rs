@@ -26,11 +26,10 @@ const MAX_ENTRIES: usize = 50_000;
 const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 /// The most bytes hashed across all roots.
 const MAX_TOTAL_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-const FILE: &str = "protected-state-before.json";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RootPrint {
-    /// A stable label for the root (`saves`, or `cloud-<account>`), never a private path.
+    /// A stable label for the root (`saves`, or a digest-labeled cloud account), never a private path.
     pub label: String,
     pub present: bool,
     pub entries: u64,
@@ -45,33 +44,59 @@ pub struct Snapshot {
     pub roots: Vec<RootPrint>,
 }
 
-/// The directories to protect under a Steam library's `steamapps`: the Cyberpunk save directory in the
-/// player's own prefix, and each account's Steam Cloud copy for the game.
-fn roots(steamapps: &Path) -> Vec<(String, PathBuf)> {
+/// Discover the actual game library independently from the primary client's userdata directory.
+fn roots(primary_steamapps: &Path) -> Result<Vec<(String, PathBuf)>, &'static str> {
+    let uid = crate::syscall::geteuid();
+    let libraries = super::steam_inventory::discover_steam_libraries(primary_steamapps, uid)
+        .map_err(|_| "ProtectedStateUnreadable")?;
+    let (game_steamapps, _) =
+        super::steam_inventory::discover_cyberpunk_installation(&libraries, uid)
+            .map_err(|_| "ProtectedStateUnreadable")?;
     let mut roots = vec![(
         "saves".to_owned(),
-        steamapps
+        game_steamapps
             .join("compatdata")
             .join(APP_ID.to_string())
             .join("pfx/drive_c/users/steamuser/Saved Games/CD Projekt Red/Cyberpunk 2077"),
     )];
-    if let Some(userdata) = steamapps.parent().map(|root| root.join("userdata"))
-        && let Ok(accounts) = std::fs::read_dir(&userdata)
-    {
-        let mut ids: Vec<String> = accounts
-            .flatten()
-            .filter_map(|entry| entry.file_name().into_string().ok())
-            .filter(|name| !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_digit()))
-            .collect();
-        ids.sort();
-        for id in ids {
-            roots.push((
-                format!("cloud-{id}"),
-                userdata.join(&id).join(APP_ID.to_string()).join("remote"),
-            ));
-        }
+    let userdata = primary_steamapps
+        .parent()
+        .ok_or("ProtectedStateUnreadable")?
+        .join("userdata");
+    let meta = std::fs::symlink_metadata(&userdata).map_err(|_| "ProtectedStateUnreadable")?;
+    if !meta.is_dir() {
+        return Err("ProtectedStateUnreadable");
     }
-    roots
+    crate::syscall::open_dir_no_symlinks(&userdata).map_err(|_| "ProtectedStateUnreadable")?;
+    let accounts = std::fs::read_dir(&userdata)
+        .map_err(|_| "ProtectedStateUnreadable")?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "ProtectedStateUnreadable")?;
+    let mut ids = Vec::new();
+    for account in accounts {
+        let id = account
+            .file_name()
+            .into_string()
+            .map_err(|_| "ProtectedStateUnreadable")?;
+        if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        if !std::fs::symlink_metadata(account.path())
+            .map_err(|_| "ProtectedStateUnreadable")?
+            .is_dir()
+        {
+            return Err("ProtectedStateUnreadable");
+        }
+        ids.push(id);
+    }
+    ids.sort();
+    for id in ids {
+        roots.push((
+            format!("cloud-{}", stutter_core::hash::sha256_hex(id.as_bytes())),
+            userdata.join(&id).join(APP_ID.to_string()).join("remote"),
+        ));
+    }
+    Ok(roots)
 }
 
 /// Walk a root, adding one line per entry to the digest. Links are recorded by their target text and
@@ -137,7 +162,7 @@ fn walk(
 pub fn capture(steamapps: &Path) -> Result<Snapshot, &'static str> {
     let mut budget = MAX_TOTAL_BYTES;
     let mut prints = Vec::new();
-    for (label, root) in roots(steamapps) {
+    for (label, root) in roots(steamapps)? {
         match std::fs::symlink_metadata(&root) {
             // A root that is absent is part of the state: its appearance later is a change.
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => prints.push(RootPrint {
@@ -149,6 +174,8 @@ pub fn capture(steamapps: &Path) -> Result<Snapshot, &'static str> {
             }),
             Err(_) => return Err("ProtectedStateUnreadable"),
             Ok(meta) if meta.is_dir() => {
+                crate::syscall::open_dir_no_symlinks(&root)
+                    .map_err(|_| "ProtectedStateUnreadable")?;
                 let (mut lines, mut bytes) = (BTreeMap::new(), 0u64);
                 walk(&root, "", &mut lines, &mut bytes, &mut budget)?;
                 let text: String = lines
@@ -191,8 +218,10 @@ pub fn record_baseline(
     steamapps: &Path,
     study_dir: &std::fs::File,
     uid: u32,
+    campaign: &str,
 ) -> anyhow::Result<()> {
-    match read_private(study_dir, FILE, uid) {
+    let file = super::report_store::baseline_name("protected-state", campaign)?;
+    match read_private(study_dir, &file, uid) {
         Ok(bytes) => {
             serde_json::from_slice::<Snapshot>(&bytes)?;
             return Ok(());
@@ -207,13 +236,20 @@ pub fn record_baseline(
         Err(_) => {}
     }
     let snapshot = capture(steamapps).map_err(|reason| anyhow::anyhow!(reason))?;
-    write_new(study_dir, FILE, &serde_json::to_vec_pretty(&snapshot)?)
+    write_new(study_dir, &file, &serde_json::to_vec_pretty(&snapshot)?)
 }
 
 /// The protected state now against the baseline recorded before the campaign: `Ok` when unchanged, the
 /// typed reason otherwise (`ProtectedStateNotRecorded` when no baseline exists).
-pub fn status(steamapps: &Path, study_dir: &std::fs::File, uid: u32) -> Result<(), &'static str> {
-    let before: Snapshot = read_private(study_dir, FILE, uid)
+pub fn status(
+    steamapps: &Path,
+    study_dir: &std::fs::File,
+    uid: u32,
+    campaign: &str,
+) -> Result<(), &'static str> {
+    let file = super::report_store::baseline_name("protected-state", campaign)
+        .map_err(|_| "CampaignIdentityInvalid")?;
+    let before: Snapshot = read_private(study_dir, &file, uid)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
         .ok_or("ProtectedStateNotRecorded")?;

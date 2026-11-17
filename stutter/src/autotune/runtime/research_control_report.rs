@@ -189,6 +189,7 @@ impl ResearchCoordinator {
                                     &crate::autotune::research::host_hardware::Roots::system(),
                                     &study,
                                     uid,
+                                    &report.intent_sha256,
                                 )
                             }),
                         protected_state: match (
@@ -199,7 +200,7 @@ impl ResearchCoordinator {
                         ) {
                             (Some(steamapps), Some(study)) => {
                                 crate::autotune::research::protected_state::status(
-                                    steamapps, &study, uid,
+                                    steamapps, &study, uid, &report.intent_sha256,
                                 )
                             }
                             _ => Err("ProtectedStateNotRecorded"),

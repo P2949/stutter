@@ -20,6 +20,19 @@ fn steam() -> Steam {
     for dir in [saves.join("ManualSave-1"), cloud.clone()] {
         std::fs::create_dir_all(dir).unwrap();
     }
+    let game = steamapps.join("common/Cyberpunk 2077/bin/x64");
+    std::fs::create_dir_all(&game).unwrap();
+    std::fs::write(game.join("Cyberpunk2077.exe"), b"MZfixture").unwrap();
+    std::fs::write(steamapps.join("appmanifest_1091500.acf"),
+        "\"AppState\" { \"appid\" \"1091500\" \"buildid\" \"42\" \"installdir\" \"Cyberpunk 2077\" \"StateFlags\" \"4\" }").unwrap();
+    std::fs::write(
+        steamapps.join("libraryfolders.vdf"),
+        format!(
+            "\"libraryfolders\" {{ \"0\" {{ \"path\" \"{}\" }} }}",
+            base.display()
+        ),
+    )
+    .unwrap();
     std::fs::write(saves.join("ManualSave-1/sav.dat"), b"the player's save").unwrap();
     std::fs::write(cloud.join("cloud.sav"), b"cloud copy").unwrap();
     Steam {
@@ -42,7 +55,13 @@ fn an_untouched_tree_has_the_same_fingerprint_and_covers_the_saves_and_each_clou
     let first = capture(&steam.steamapps).unwrap();
     assert_eq!(compare(&first, &capture(&steam.steamapps).unwrap()), Ok(()));
     let labels: Vec<_> = first.roots.iter().map(|r| r.label.as_str()).collect();
-    assert_eq!(labels, ["saves", "cloud-42"]);
+    assert_eq!(
+        labels,
+        [
+            "saves",
+            &format!("cloud-{}", stutter_core::hash::sha256_hex(b"42"))
+        ]
+    );
     assert!(
         first
             .roots
@@ -55,6 +74,60 @@ fn an_untouched_tree_has_the_same_fingerprint_and_covers_the_saves_and_each_clou
         !text.contains("Cyberpunk 2077") && !text.contains("Steam"),
         "{text}"
     );
+}
+
+#[test]
+fn secondary_game_library_uses_primary_userdata_and_rejects_unreadable_accounts() {
+    let steam = steam();
+    let primary = steam.steamapps.parent().unwrap();
+    let secondary = steam._root.path().join("secondary");
+    std::fs::create_dir_all(secondary.join("steamapps")).unwrap();
+    let secondary_apps = secondary.join("steamapps");
+    std::fs::rename(
+        steam.steamapps.join("common"),
+        secondary_apps.join("common"),
+    )
+    .unwrap();
+    std::fs::rename(
+        steam.steamapps.join("appmanifest_1091500.acf"),
+        secondary_apps.join("appmanifest_1091500.acf"),
+    )
+    .unwrap();
+    std::fs::rename(
+        steam.steamapps.join("compatdata"),
+        secondary_apps.join("compatdata"),
+    )
+    .unwrap();
+    std::fs::write(
+        steam.steamapps.join("libraryfolders.vdf"),
+        format!(
+            "\"libraryfolders\" {{ \"0\" {{ \"path\" \"{}\" }} \"1\" {{ \"path\" \"{}\" }} }}",
+            primary.display(),
+            secondary.display()
+        ),
+    )
+    .unwrap();
+    let before = capture(&steam.steamapps).unwrap();
+    assert!(before.roots.iter().all(|root| root.present));
+    let relocated_save = secondary_apps.join("compatdata/1091500/pfx/drive_c/users/steamuser/Saved Games/CD Projekt Red/Cyberpunk 2077/ManualSave-1/sav.dat");
+    std::fs::write(relocated_save, b"changed").unwrap();
+    assert_eq!(
+        compare(&before, &capture(&steam.steamapps).unwrap()),
+        Err("ProtectedStateChanged")
+    );
+    let userdata = primary.join("userdata");
+    std::fs::remove_dir_all(&userdata).unwrap();
+    assert_eq!(capture(&steam.steamapps), Err("ProtectedStateUnreadable"));
+}
+
+#[test]
+fn save_root_with_a_symlinked_ancestor_is_not_followed() {
+    let steam = steam();
+    let saved_games = steam.saves.ancestors().nth(2).unwrap();
+    let moved = saved_games.with_file_name("moved-saved-games");
+    std::fs::rename(saved_games, &moved).unwrap();
+    std::os::unix::fs::symlink(&moved, saved_games).unwrap();
+    assert_eq!(capture(&steam.steamapps), Err("ProtectedStateUnreadable"));
 }
 
 #[test]
@@ -145,22 +218,32 @@ fn the_baseline_is_taken_once_before_any_launch_and_later_state_is_compared_with
     let uid = crate::syscall::geteuid();
     // No baseline yet: nothing can be said to be unchanged.
     assert_eq!(
-        status(&steam.steamapps, &dir, uid),
+        status(&steam.steamapps, &dir, uid, &"a".repeat(64)),
         Err("ProtectedStateNotRecorded")
     );
-    record_baseline(&steam.steamapps, &dir, uid).unwrap();
-    assert_eq!(status(&steam.steamapps, &dir, uid), Ok(()));
+    record_baseline(&steam.steamapps, &dir, uid, &"a".repeat(64)).unwrap();
+    assert_eq!(status(&steam.steamapps, &dir, uid, &"a".repeat(64)), Ok(()));
     // The player's data changes after the baseline.
     std::fs::write(steam.saves.join("ManualSave-1/sav.dat"), b"overwritten").unwrap();
     assert_eq!(
-        status(&steam.steamapps, &dir, uid),
+        status(&steam.steamapps, &dir, uid, &"a".repeat(64)),
+        Err("ProtectedStateChanged")
+    );
+    assert_eq!(
+        status(&steam.steamapps, &dir, uid, &"b".repeat(64)),
+        Err("ProtectedStateNotRecorded")
+    );
+    record_baseline(&steam.steamapps, &dir, uid, &"b".repeat(64)).unwrap();
+    assert_eq!(status(&steam.steamapps, &dir, uid, &"b".repeat(64)), Ok(()));
+    assert_eq!(
+        status(&steam.steamapps, &dir, uid, &"a".repeat(64)),
         Err("ProtectedStateChanged")
     );
     // A restarted campaign keeps the original baseline rather than re-recording the changed state
     // (which would hide the change).
-    record_baseline(&steam.steamapps, &dir, uid).unwrap();
+    record_baseline(&steam.steamapps, &dir, uid, &"a".repeat(64)).unwrap();
     assert_eq!(
-        status(&steam.steamapps, &dir, uid),
+        status(&steam.steamapps, &dir, uid, &"a".repeat(64)),
         Err("ProtectedStateChanged")
     );
     // A baseline that cannot be made stops the campaign before it starts.
@@ -170,7 +253,7 @@ fn the_baseline_is_taken_once_before_any_launch_and_later_state_is_compared_with
     let other = tempfile::tempdir().unwrap();
     std::fs::set_permissions(other.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let other_dir = std::fs::File::open(other.path()).unwrap();
-    assert!(record_baseline(&broken.steamapps, &other_dir, uid).is_err());
+    assert!(record_baseline(&broken.steamapps, &other_dir, uid, &"a".repeat(64)).is_err());
 }
 
 /// Read-only fingerprint of a real Steam library, printing only counts:

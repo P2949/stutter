@@ -150,14 +150,34 @@ fn the_baseline_is_taken_once_and_later_hardware_is_compared_with_it() {
     std::fs::set_permissions(study.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let dir = File::open(study.path()).unwrap();
     let uid = crate::syscall::geteuid();
-    assert_eq!(status(&f.roots, &dir, uid), Err("HostHardwareNotRecorded"));
-    record_baseline(&f.roots, &dir, uid).unwrap();
-    assert_eq!(status(&f.roots, &dir, uid), Ok(()));
+    assert_eq!(
+        status(&f.roots, &dir, uid, &"a".repeat(64)),
+        Err("HostHardwareNotRecorded")
+    );
+    record_baseline(&f.roots, &dir, uid, &"a".repeat(64)).unwrap();
+    assert_eq!(status(&f.roots, &dir, uid, &"a".repeat(64)), Ok(()));
     write(&f.roots.proc.join("sys/kernel/osrelease"), "6.19.0\n");
-    assert_eq!(status(&f.roots, &dir, uid), Err("HostKernelChanged"));
+    assert_eq!(
+        status(&f.roots, &dir, uid, &"a".repeat(64)),
+        Err("HostKernelChanged")
+    );
     // A restarted campaign keeps its original baseline instead of re-recording the changed host.
-    record_baseline(&f.roots, &dir, uid).unwrap();
-    assert_eq!(status(&f.roots, &dir, uid), Err("HostKernelChanged"));
+    record_baseline(&f.roots, &dir, uid, &"a".repeat(64)).unwrap();
+    assert_eq!(
+        status(&f.roots, &dir, uid, &"a".repeat(64)),
+        Err("HostKernelChanged")
+    );
+    // A separate campaign gets its own baseline, without rewriting the first one's evidence.
+    assert_eq!(
+        status(&f.roots, &dir, uid, &"b".repeat(64)),
+        Err("HostHardwareNotRecorded")
+    );
+    record_baseline(&f.roots, &dir, uid, &"b".repeat(64)).unwrap();
+    assert_eq!(status(&f.roots, &dir, uid, &"b".repeat(64)), Ok(()));
+    assert_eq!(
+        status(&f.roots, &dir, uid, &"a".repeat(64)),
+        Err("HostKernelChanged")
+    );
 }
 
 /// Read-only capture of this machine, printing only the identity (no serials or paths):
