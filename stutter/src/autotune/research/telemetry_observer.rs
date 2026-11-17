@@ -70,6 +70,10 @@ pub struct AttemptTelemetry {
     /// healthy mean so in every one of them, from exactly one producer.
     pub snapshots: u64,
     pub source_epochs: u32,
+    /// Frames received per whole unix second `[second, count]`, for counting the ones that fall inside
+    /// the native benchmark window; absent buckets mean none.
+    pub frame_seconds: Vec<(u64, u32)>,
+    pub frame_seconds_truncated: bool,
     pub competing_targets: usize,
     pub clock_alignment_ns: Option<u64>,
     /// `Eligible` only when `quality::judge_frame_source` accepts the source; otherwise why not.
@@ -111,7 +115,15 @@ struct Running {
     unbound_seen: bool,
     /// Every distinct producer identity the source reported; more than one is a source change.
     producers: Vec<(Option<u32>, Option<u64>)>,
+    /// Frames received per whole unix second, so a verifier can count only the ones inside the
+    /// native benchmark window (a menu or loading screen is not a measurement).
+    frame_seconds: std::collections::BTreeMap<u64, u32>,
+    /// More distinct seconds were seen than are kept; the buckets then cannot show a window count.
+    seconds_truncated: bool,
 }
+
+/// An attempt long enough to fill this many distinct seconds is far past any research attempt.
+const MAX_FRAME_SECONDS: usize = 4096;
 
 impl Running {
     fn receipt(&self) -> AttemptTelemetry {
@@ -152,6 +164,12 @@ impl Running {
             source_healthy: healthy,
             snapshots: self.snapshots,
             source_epochs: self.producers.len() as u32,
+            frame_seconds: self
+                .frame_seconds
+                .iter()
+                .map(|(second, count)| (*second, *count))
+                .collect(),
+            frame_seconds_truncated: self.seconds_truncated,
             competing_targets: source.map_or(0, |source| source.competing_targets),
             clock_alignment_ns: clock,
             frame_verdict: verdict_name(judge_frame_source(&facts)),
@@ -190,13 +208,30 @@ impl TelemetryObserver {
             unhealthy_seen: false,
             unbound_seen: false,
             producers: Vec::new(),
+            frame_seconds: std::collections::BTreeMap::new(),
+            seconds_truncated: false,
         });
     }
 
     /// A frame event reached the runtime.
     pub fn count_frame(&mut self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        self.count_frame_at(now);
+    }
+
+    /// As `count_frame`, for a frame received during unix second `second`.
+    pub fn count_frame_at(&mut self, second: u64) {
         if let Some(running) = self.running.as_mut() {
             running.frames = running.frames.saturating_add(1);
+            if let Some(bucket) = running.frame_seconds.get_mut(&second) {
+                *bucket = bucket.saturating_add(1);
+            } else if running.frame_seconds.len() < MAX_FRAME_SECONDS {
+                running.frame_seconds.insert(second, 1);
+            } else {
+                running.seconds_truncated = true;
+            }
         }
     }
 

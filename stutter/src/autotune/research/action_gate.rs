@@ -86,6 +86,9 @@ pub type StateProbe = Box<dyn Fn(u32) -> Option<KernelState> + Send>;
 
 /// The state from `/proc`: the allowed-CPU list and the cgroup membership.
 pub fn procfs_state(pid: u32) -> Option<KernelState> {
+    // The same process (pid, start time, owner) must hold before and after the capture: a pid that was
+    // recycled while the threads were being read would otherwise yield a state of two processes.
+    let before = process_identity(pid);
     let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     let cpus = status
         .lines()
@@ -107,7 +110,7 @@ pub fn procfs_state(pid: u32) -> Option<KernelState> {
             .into_iter()
             .map(|(tid, path)| (tid, std::fs::read_to_string(path.join("status")))),
     )?;
-    let identity = process_identity(pid).map(|target| (target.start_ticks, target.uid));
+    let identity = steady_identity(before, process_identity(pid));
     Some(KernelState {
         cpus_allowed: cpus,
         cgroup: cgroup.trim().to_owned(),
@@ -139,6 +142,13 @@ fn task_entries(
         listed.push((name.to_str()?.parse::<u32>().ok()?, path));
     }
     Some(listed)
+}
+
+/// The identity of a process observed to be the same before and after a capture, `None` when either
+/// observation failed or they differ.
+fn steady_identity(before: Option<ChildTarget>, after: Option<ChildTarget>) -> Option<(u64, u32)> {
+    let (before, after) = (before?, after?);
+    (before == after).then_some((before.start_ticks, before.uid))
 }
 
 /// The allowed-CPU list of every thread from its status text. A thread whose status vanished (it

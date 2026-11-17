@@ -344,6 +344,8 @@ mod telemetry {
                     pid: stutter_core::ids::Pid::new(100 + slot),
                     start_ticks: 5000 + u64::from(*slot),
                     uid: 1000,
+                    started_unix: 10_000,
+                    completed_unix: 10_100,
                 })
                 .collect(),
         }
@@ -351,7 +353,8 @@ mod telemetry {
 
     fn eligible(attempt: u32) -> serde_json::Value {
         json!({ "attempt": attempt, "pid": 100 + attempt, "start_ticks": 5000 + attempt, "uid": 1000,
-                "frame_verdict": "Eligible", "source_bound_to_game": true })
+                "frame_verdict": "Eligible", "source_bound_to_game": true,
+                "frame_seconds": [[10_050, 3_000]], "frame_seconds_truncated": false })
     }
 
     fn summary(children: Vec<ChildVerification>) -> Option<(u32, u32)> {
@@ -404,6 +407,43 @@ mod telemetry {
                 child(&[0, 1], None)
             ]),
             Some((1, 3))
+        );
+    }
+
+    #[test]
+    fn only_frames_inside_the_native_benchmark_window_count_toward_the_floor() {
+        let at = |buckets: serde_json::Value, truncated: bool| {
+            let mut receipt = eligible(0);
+            receipt["frame_seconds"] = buckets;
+            receipt["frame_seconds_truncated"] = json!(truncated);
+            summary(vec![child(&[0], Some(json!([receipt])))])
+        };
+        // Enough frames inside the window (10 000 to 10 100).
+        assert_eq!(at(json!([[10_050, 3_000]]), false), Some((1, 1)));
+        // Frames split across the window edges still count while inside; those outside do not.
+        assert_eq!(
+            at(json!([[10_000, 1_200], [10_100, 1_200]]), false),
+            Some((1, 1))
+        );
+        // Menu and loading-screen frames before the benchmark began, or after it ended, are not a
+        // measurement however many there were.
+        assert_eq!(
+            at(json!([[9_000, 50_000], [10_050, 100]]), false),
+            Some((0, 1))
+        );
+        assert_eq!(at(json!([[10_101, 50_000]]), false), Some((0, 1)));
+        // A receipt that kept no buckets, or lost some, cannot show a window count.
+        assert_eq!(at(json!([]), false), Some((0, 1)));
+        assert_eq!(at(json!([[10_050, 3_000]]), true), Some((0, 1)));
+        let mut legacy = eligible(0);
+        legacy.as_object_mut().unwrap().remove("frame_seconds");
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("frame_seconds_truncated");
+        assert_eq!(
+            summary(vec![child(&[0], Some(json!([legacy])))]),
+            Some((0, 1))
         );
     }
 

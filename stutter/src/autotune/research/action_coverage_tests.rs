@@ -8,6 +8,8 @@ fn process(slot: u32) -> AttemptProcess {
         pid: stutter_core::ids::Pid::new(100 + slot),
         start_ticks: 5000 + u64::from(slot),
         uid: 1000,
+        started_unix: 10_000,
+        completed_unix: 10_100,
     }
 }
 

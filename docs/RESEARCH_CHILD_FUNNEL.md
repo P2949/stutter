@@ -212,3 +212,9 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   the feature in use while every Off attempt reported it off (`Observed`); otherwise the reason is
   `FeatureActivatedButNotFunctional`, `FeatureNotObservable` (no such report exists: Wayland, NTSync,
   VKD3D latency, AntiLag2, HDR) or `FeatureFunctionalUnproven`. No feature has been run in the game.
+- **Measurement window.** The observer buckets the frames it receives per unix second into each
+  receipt (`frame_seconds`), and the verifier counts only the frames inside the attempt's native
+  benchmark window (the sealed completion's start and end) toward the 2 400-frame floor, so menu and
+  loading-screen frames cannot satisfy it. A receipt with truncated or missing buckets counts none.
+- **Capture identity.** `procfs_state` requires the same process (pid, start time, owner) before and
+  after reading its threads; a recycled pid mid-capture leaves the state unknown.

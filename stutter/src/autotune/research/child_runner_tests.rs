@@ -517,3 +517,26 @@ fn a_rule_offered_by_a_study_that_did_not_qualify_is_never_recorded() {
             .all(|study| runner.ledger().rule_of(&study.study_sha256).is_none())
     );
 }
+
+#[test]
+fn only_halts_that_leave_a_process_transaction_or_settings_file_unproven_keep_ownership() {
+    for code in [
+        "SettlementUnproven",
+        "RecoveryUnproven",
+        "RestoreUnproven",
+        "ExecutorError",
+    ] {
+        assert!(leaves_ownership_unresolved(code), "{code}");
+    }
+    // Halts after which everything is proven settled end the campaign as an ordinary block.
+    for code in [
+        "BlockedGpuStability",
+        "InterruptedStudy",
+        "GpuReset",
+        "RawEvidenceUnverified",
+        "Halted",
+        "",
+    ] {
+        assert!(!leaves_ownership_unresolved(code), "{code}");
+    }
+}

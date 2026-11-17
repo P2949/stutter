@@ -54,6 +54,26 @@ pub struct ChildVerification {
     pub completed_processes: Vec<AttemptProcess>,
 }
 
+/// The frames a receipt counted inside the attempt's native benchmark window. A receipt whose frame
+/// buckets were truncated, or that has none, counts none: it cannot show how many were in the window.
+fn frames_in_window(receipt: &serde_json::Value, process: &AttemptProcess) -> u64 {
+    if receipt["frame_seconds_truncated"] != false {
+        return 0;
+    }
+    receipt["frame_seconds"]
+        .as_array()
+        .map(|buckets| {
+            buckets
+                .iter()
+                .filter_map(|bucket| Some((bucket[0].as_u64()?, bucket[1].as_u64()?)))
+                .filter(|(second, _)| {
+                    (process.started_unix..=process.completed_unix).contains(second)
+                })
+                .fold(0u64, |total, (_, count)| total.saturating_add(count))
+        })
+        .unwrap_or(0)
+}
+
 /// The identity of the game process of one completed attempt, from its sealed native completion.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttemptProcess {
@@ -61,6 +81,10 @@ pub struct AttemptProcess {
     pub pid: stutter_core::ids::Pid,
     pub start_ticks: u64,
     pub uid: u32,
+    /// The benchmark window the sealed native completion records, in whole unix seconds: the only
+    /// frames that count toward a measurement are the ones inside it (not menus or loading screens).
+    pub started_unix: u64,
+    pub completed_unix: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -133,6 +157,7 @@ impl ChildrenVerification {
                         only["pid"].as_u64() == Some(u64::from(process.pid.as_u32()))
                             && only["start_ticks"].as_u64() == Some(process.start_ticks)
                             && only["uid"].as_u64() == Some(u64::from(process.uid))
+                            && frames_in_window(only, process) >= super::quality::MIN_DIRECT_FRAMES
                     })
                 {
                     eligible = eligible.saturating_add(1);
@@ -403,12 +428,17 @@ fn completed_processes(studies: &File, name: &str, uid: u32) -> Vec<AttemptProce
             items
                 .into_iter()
                 .filter_map(|(slot, item)| {
-                    let process = &item.native_completion.as_ref()?.process;
+                    let native = item.native_completion.as_ref()?;
+                    let process = &native.process;
                     Some(AttemptProcess {
                         slot,
                         pid: process.pid,
                         start_ticks: process.start_ticks,
                         uid: process.uid,
+                        started_unix: u64::try_from(native.started_unix_nanos / 1_000_000_000)
+                            .unwrap_or(u64::MAX),
+                        completed_unix: u64::try_from(native.completed_unix_nanos / 1_000_000_000)
+                            .unwrap_or(u64::MAX),
                     })
                 })
                 .collect()

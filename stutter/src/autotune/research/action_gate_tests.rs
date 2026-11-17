@@ -541,3 +541,26 @@ fn a_truncated_or_failed_thread_listing_leaves_the_state_unknown() {
     let odd = Ok((OsString::from("zero"), PathBuf::from("/t/zero")));
     assert_eq!(task_entries([item(1), odd].into_iter(), 4), None);
 }
+
+#[test]
+fn a_process_that_changed_during_the_capture_has_no_identity() {
+    let target = |pid: u32, ticks: u64| ChildTarget {
+        pid: stutter_core::ids::Pid::new(pid),
+        start_ticks: ticks,
+        uid: 1000,
+    };
+    assert_eq!(
+        steady_identity(Some(target(7, 50)), Some(target(7, 50))),
+        Some((50, 1000))
+    );
+    // The pid was reused part-way (another start time), or either observation failed.
+    assert_eq!(
+        steady_identity(Some(target(7, 50)), Some(target(7, 51))),
+        None
+    );
+    assert_eq!(steady_identity(Some(target(7, 50)), None), None);
+    assert_eq!(steady_identity(None, Some(target(7, 50))), None);
+    // The live state of this very process is capturable, with an identity.
+    let own = procfs_state(std::process::id()).expect("own state");
+    assert!(own.identity.is_some() && !own.tasks.is_empty());
+}

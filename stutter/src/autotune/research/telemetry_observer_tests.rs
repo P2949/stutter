@@ -156,3 +156,27 @@ fn a_source_must_be_bound_and_healthy_across_the_whole_attempt_not_just_at_its_e
     assert!(!reborn.source_bound_to_game);
     assert_ne!(reborn.frame_verdict, "Eligible");
 }
+
+#[test]
+fn frames_are_bucketed_by_second_and_a_flood_of_distinct_seconds_is_flagged_not_dropped_silently() {
+    let mut observer = TelemetryObserver::default();
+    observer.arm(target(4242), Some(0));
+    for second in [100, 100, 100, 101, 105] {
+        observer.count_frame_at(second);
+    }
+    let receipt = observer.take_receipts().remove(0);
+    assert_eq!(receipt.frames, 5);
+    assert_eq!(receipt.frame_seconds, vec![(100, 3), (101, 1), (105, 1)]);
+    assert!(!receipt.frame_seconds_truncated);
+    // More distinct seconds than are kept: the total is still counted, and the buckets say they are
+    // incomplete.
+    let mut flood = TelemetryObserver::default();
+    flood.arm(target(4242), Some(0));
+    for second in 0..(MAX_FRAME_SECONDS as u64 + 5) {
+        flood.count_frame_at(second);
+    }
+    let receipt = flood.take_receipts().remove(0);
+    assert_eq!(receipt.frames, MAX_FRAME_SECONDS as u64 + 5);
+    assert_eq!(receipt.frame_seconds.len(), MAX_FRAME_SECONDS);
+    assert!(receipt.frame_seconds_truncated);
+}
