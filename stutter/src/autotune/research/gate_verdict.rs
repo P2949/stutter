@@ -20,6 +20,18 @@ pub struct GateVerdict {
     pub blockers: Vec<&'static str>,
 }
 
+/// What a read-only inspection of the campaign's lease found (G1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeaseFacts {
+    pub chain_valid: bool,
+    pub transitions_valid: bool,
+    pub header_matches_intent: bool,
+    /// The lease ended (completed, blocked or aborted) instead of stopping mid-way.
+    pub terminal: bool,
+    /// The lease was created for the campaign being verified (its intent digest).
+    pub for_this_campaign: bool,
+}
+
 /// What the gates are computed from.
 pub struct GateInputs<'a> {
     pub raw_files_verified: bool,
@@ -34,6 +46,8 @@ pub struct GateInputs<'a> {
     /// A deploy receipt names the very binary doing this verification, runs the expected pin and has
     /// every unit active (`deploy_receipt::deployment_attested`).
     pub deployment_attested: bool,
+    /// The lease inspection, `None` when the lease directory could not be inspected.
+    pub lease: Option<LeaseFacts>,
 }
 
 /// `Some(true)` when there is at least one study of the kind and every one is qualified, `Some(false)`
@@ -90,6 +104,32 @@ fn profile_blockers(
     blockers
 }
 
+/// G1 from the lease inspection: the sealed records hold together, end in a terminal phase and belong
+/// to this campaign. The authenticated-IPC and single-owner properties are tested elsewhere and are
+/// not claimed here.
+fn lease_blockers(lease: Option<LeaseFacts>) -> Vec<&'static str> {
+    let Some(lease) = lease else {
+        return vec!["LeaseNotInspected"];
+    };
+    let mut blockers = Vec::new();
+    if !lease.chain_valid {
+        blockers.push("LeaseChainBroken");
+    }
+    if !lease.transitions_valid {
+        blockers.push("LeaseTransitionsInvalid");
+    }
+    if !lease.header_matches_intent {
+        blockers.push("LeaseHeaderMismatch");
+    }
+    if !lease.for_this_campaign {
+        blockers.push("LeaseForAnotherCampaign");
+    }
+    if !lease.terminal {
+        blockers.push("LeaseNotSettled");
+    }
+    blockers
+}
+
 pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
     let studies = inputs.child_studies;
     let health = |mut blockers: Vec<&'static str>| {
@@ -98,6 +138,8 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
         }
         blockers
     };
+    // A lease is about records, not a running game: a health incident does not change it.
+    let health_free = |blockers: Vec<&'static str>| blockers;
     let screen = |stage: &Stage| matches!(stage, Stage::Screen);
     let comparison = |stage: &Stage| {
         matches!(
@@ -163,7 +205,7 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
 
     vec![
         not_attested("G0", "HostBaselineNotAttestedByVerification"),
-        not_attested("G1", "LeaseAndIpcReceiptsNotAttestedByVerification"),
+        gate("G1", health_free(lease_blockers(inputs.lease))),
         gate("G2", health(g2)),
         gate("G3", health(g3)),
         gate("G4", health(g4)),

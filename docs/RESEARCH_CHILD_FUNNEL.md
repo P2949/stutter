@@ -113,3 +113,15 @@ SHA-256 and the unit's active state, and writes `deploy-receipt-<unix>.json` int
 G8 is accepted only when the newest receipt says every unit is active and runs the expected pin **and**
 that binary is the one performing the verification (`/proc/self/exe`). A flake pin or a built store
 object is not a running service; a receipt about some other binary attests nothing about this one.
+
+## Lease inspection (G1)
+
+`research::lease_inspect::inspect` re-reads a campaign's lease directory read-only (no lock, nothing
+created or changed) and reports whether the sealed records hold together: the `intent.json` header's
+digest is its intent's digest, `event-NNNN.json` records are gapless and each names the SHA-256 of the
+record before it (the header for the first), every transition is one the state machine permits, and
+the lease ended (completed, blocked or aborted) for this campaign's intent. G1 reports each failure as
+its own blocker (`LeaseChainBroken`, `LeaseTransitionsInvalid`, `LeaseHeaderMismatch`,
+`LeaseForAnotherCampaign`, `LeaseNotSettled`, or `LeaseNotInspected`). Authenticated IPC and
+single-owner properties are tested elsewhere and are not claimed by this inspection. Run against the
+real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.

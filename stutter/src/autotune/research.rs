@@ -112,6 +112,7 @@ pub(crate) mod launch_ticket;
 )]
 pub(crate) mod launch_txn;
 mod lease;
+pub(crate) mod lease_inspect;
 pub(crate) mod loaded_runtime;
 pub(crate) mod long_session;
 mod mounts;

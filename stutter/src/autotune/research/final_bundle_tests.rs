@@ -172,6 +172,7 @@ fn real_campaign_bundle() {
         child_runtime_qualified: false,
         child_telemetry: None,
         deployment_attested: false,
+        lease: None,
         restoration_verified: false,
         health_blocked: false,
     });

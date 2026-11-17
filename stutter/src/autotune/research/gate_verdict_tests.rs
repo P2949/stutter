@@ -43,6 +43,7 @@ fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict
         health_blocked: health,
         telemetry: None,
         deployment_attested: false,
+        lease: None,
     })
 }
 
@@ -142,6 +143,7 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
             health_blocked: health,
             telemetry,
             deployment_attested: false,
+            lease: None,
         });
         of(&verdicts, "G3").clone()
     };
@@ -188,6 +190,7 @@ fn g8_is_accepted_only_on_an_attested_deployment_and_needs_no_game() {
             health_blocked: health,
             telemetry: None,
             deployment_attested: attested,
+            lease: None,
         });
         of(&verdicts, "G8").clone()
     };
@@ -195,4 +198,64 @@ fn g8_is_accepted_only_on_an_attested_deployment_and_needs_no_game() {
     assert!(with(true, false).accepted);
     // A GPU incident is about running a game; what is deployed is unaffected by it.
     assert!(with(true, true).accepted);
+}
+
+#[test]
+fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign() {
+    let studies = full(Some(StudyResult::Qualified));
+    let with = |lease: Option<LeaseFacts>| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: false,
+            telemetry: None,
+            deployment_attested: false,
+            lease,
+        });
+        of(&verdicts, "G1").clone()
+    };
+    let good = LeaseFacts {
+        chain_valid: true,
+        transitions_valid: true,
+        header_matches_intent: true,
+        terminal: true,
+        for_this_campaign: true,
+    };
+    assert_eq!(with(None).blockers, ["LeaseNotInspected"]);
+    assert!(with(Some(good)).accepted);
+    assert_eq!(
+        with(Some(LeaseFacts {
+            chain_valid: false,
+            ..good
+        }))
+        .blockers,
+        ["LeaseChainBroken"]
+    );
+    assert_eq!(
+        with(Some(LeaseFacts {
+            terminal: false,
+            ..good
+        }))
+        .blockers,
+        ["LeaseNotSettled"]
+    );
+    assert_eq!(
+        with(Some(LeaseFacts {
+            for_this_campaign: false,
+            ..good
+        }))
+        .blockers,
+        ["LeaseForAnotherCampaign"]
+    );
+    let broken = with(Some(LeaseFacts {
+        chain_valid: false,
+        transitions_valid: false,
+        header_matches_intent: false,
+        terminal: false,
+        for_this_campaign: false,
+    }));
+    assert_eq!(broken.blockers.len(), 5);
 }

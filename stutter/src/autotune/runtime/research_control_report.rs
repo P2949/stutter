@@ -56,6 +56,24 @@ impl ResearchCoordinator {
         }
     }
 
+    /// What a read-only inspection of this campaign's lease directory found (G1); `None` when there
+    /// is no lease directory or it cannot be inspected.
+    fn lease_facts(
+        &self,
+        intent_sha256: &str,
+        uid: u32,
+    ) -> Option<crate::autotune::research::gate_verdict::LeaseFacts> {
+        let dir = self.campaign_dir.as_deref()?;
+        let inspection = crate::autotune::research::lease_inspect::inspect(dir, uid).ok()?;
+        Some(crate::autotune::research::gate_verdict::LeaseFacts {
+            chain_valid: inspection.chain_valid,
+            transitions_valid: inspection.transitions_valid,
+            header_matches_intent: inspection.header_matches_intent,
+            terminal: inspection.terminal,
+            for_this_campaign: inspection.intent_sha256 == intent_sha256,
+        })
+    }
+
     pub(super) fn report_response(&self, verify: bool, uid: u32) -> String {
         let Some(dir) = self.open_campaign_study_dir() else {
             return super::response(
@@ -158,6 +176,7 @@ impl ResearchCoordinator {
                         child_telemetry: children.as_ref().and_then(|c| c.telemetry_summary()),
                         // G8 stands on a receipt of what is deployed, about the very binary
                         // doing this verification; none is inferred from the Nix pin.
+                        lease: self.lease_facts(&report.intent_sha256, uid),
                         deployment_attested: self.study_dir.as_deref().is_some_and(|study| {
                             crate::autotune::research::deploy_receipt::own_binary_sha256()
                                 .is_some_and(|own| {

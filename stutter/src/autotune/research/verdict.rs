@@ -49,6 +49,8 @@ pub struct VerdictInputs<'a> {
     pub child_telemetry: Option<(u32, u32)>,
     /// G8: the deployed binary is attested by a receipt (see `deploy_receipt`).
     pub deployment_attested: bool,
+    /// G1: what a read-only inspection of the campaign's lease found.
+    pub lease: Option<super::gate_verdict::LeaseFacts>,
     pub restoration_verified: bool,
     /// An unacknowledged GPU-health incident is on record.
     pub health_blocked: bool,
@@ -87,6 +89,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         health_blocked: inputs.health_blocked,
         telemetry: inputs.child_telemetry,
         deployment_attested: inputs.deployment_attested,
+        lease: inputs.lease,
     });
     // The overall result is the conjunction of the study-backed facts and every gate: a campaign
     // whose host baseline, lease receipts, telemetry, fault matrix or deployment receipt is not attested
