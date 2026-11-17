@@ -199,3 +199,16 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   of each arm is `ColdFirstUse`, every other run `Warm`. The screen ranking (`screen_fps`, used by both
   selection and its verification) averages warm runs only, so first-use compilation is never pooled
   with steady state. Shader-cache temperature is still inferred from the prefix, not measured.
+- **Diagnosis oracle producer.** `research::oracle_cases` maps the controller's own `Diagnosis` to the
+  oracle's causes (a cause that needs an attribution chain is reported only with an explicit one; the
+  unknown and the causes the oracle has no name for are an abstention), commits ground truth by
+  digest before any output is captured, and scores an `oracle-cases-*.json` file only if every capture
+  is dated at or after the commitment and the cases match one-to-one. The verification response and
+  `diagnosis-oracle.json` carry the scored evaluation, or `NoOracleCases`. Producing the cases (injecting
+  a cause and capturing the live controller's output for it) needs the real game and controller.
+- **Functional probes.** `research::functional_probe` reads a feature's state from the game's own
+  sealed native context: frame generation (`frameGenerationType`) and the upscaler (`upscalingType`).
+  A feature study is qualified only when its treatment reached the game and every On attempt reported
+  the feature in use while every Off attempt reported it off (`Observed`); otherwise the reason is
+  `FeatureActivatedButNotFunctional`, `FeatureNotObservable` (no such report exists: Wayland, NTSync,
+  VKD3D latency, AntiLag2, HDR) or `FeatureFunctionalUnproven`. No feature has been run in the game.

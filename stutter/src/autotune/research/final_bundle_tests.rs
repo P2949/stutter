@@ -368,3 +368,22 @@ fn a_bundle_that_cannot_be_written_is_reported_not_just_logged() {
     let handle = File::open(&file).unwrap();
     assert!(write_reporting(&handle, &json!({}), &response()).is_err());
 }
+
+#[test]
+fn the_diagnosis_oracle_file_carries_the_scored_cases_or_the_reason_there_are_none() {
+    let mut scored = response();
+    scored["diagnosis_oracle"] = json!({
+        "status": "scored",
+        "evaluation": { "positives": 3, "included": 3, "gate_passed": true }
+    });
+    let files: std::collections::BTreeMap<_, _> = build(&json!({}), &scored).into_iter().collect();
+    let oracle: Value = serde_json::from_slice(&files["diagnosis-oracle.json"]).unwrap();
+    assert_eq!(oracle["scored"]["status"], "scored");
+    assert_eq!(oracle["scored"]["evaluation"]["gate_passed"], true);
+    // With no case file the bundle says why rather than restating a study status.
+    let mut none = response();
+    none["diagnosis_oracle"] = json!({ "status": "not_scored", "reason": "NoOracleCases" });
+    let files: std::collections::BTreeMap<_, _> = build(&json!({}), &none).into_iter().collect();
+    let oracle: Value = serde_json::from_slice(&files["diagnosis-oracle.json"]).unwrap();
+    assert_eq!(oracle["scored"]["reason"], "NoOracleCases");
+}

@@ -77,6 +77,7 @@ pub(crate) mod fault_matrix;
 )]
 pub(crate) mod features;
 pub(crate) mod final_bundle;
+pub(crate) mod functional_probe;
 pub(crate) mod funnel_driver;
 #[cfg_attr(
     not(test),
@@ -154,6 +155,14 @@ pub(crate) mod native_source;
     )
 )]
 pub(crate) mod oracle;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged: cases need a live controller diagnosis for an injected cause"
+    )
+)]
+pub(crate) mod oracle_cases;
 pub(crate) mod owned_cleanup;
 pub(crate) mod owned_domain;
 pub(crate) mod pilot_rule;

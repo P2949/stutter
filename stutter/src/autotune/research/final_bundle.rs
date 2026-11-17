@@ -310,7 +310,12 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
             pretty(&json!({
                 "status": status_of(&long),
                 "studies": long,
-                "note": "the diagnosis is judged only by a qualified live CP-LONG study",
+                // The oracle's own scoring of frozen ground truth against the controller's captured
+                // diagnosis, or why none exists; it is not inferred from the long study's status.
+                "scored": response.get("diagnosis_oracle").cloned().unwrap_or(Value::Null),
+                "note": "the diagnosis is judged only by scored cases whose ground truth was frozen \
+                         before the output was captured (see `scored`) and by a qualified live \
+                         CP-LONG study",
             })),
         ),
         (

@@ -17,7 +17,7 @@ use super::{
     native_context::ProfileConformance,
     pilot_rule::FrozenConfirmationRule,
     raw_verify::verify_raw_evidence,
-    report::evidence_context_consistent,
+    report::{AttemptEvidenceV1, evidence_context_consistent},
     report_store::{read_evidence, write_new, write_report},
     study_executor::{AttemptsOutcome, StudyAttempts},
 };
@@ -209,6 +209,32 @@ impl DriverStudyAttempts {
             treatment == super::Treatment::On,
         );
         self.feature_observed.insert(index, (treatment, reached));
+    }
+
+    /// What the game itself reported of a feature study's factor across its completed attempts (frame
+    /// generation and the upscaler appear in the native context); `None` for any other study.
+    fn feature_functional(
+        &self,
+        study: &ChildStudy,
+        evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+    ) -> Option<super::functional_probe::Functional> {
+        let Stage::Feature(factor) = study.stage else {
+            return None;
+        };
+        let mut attempts = Vec::new();
+        for (slot, item) in evidence {
+            // Which treatment an attempt ran is known only where it was observed.
+            let Some((treatment, _)) = self.feature_observed.get(slot) else {
+                return Some(super::functional_probe::Functional::Unproven);
+            };
+            attempts.push((
+                *treatment,
+                item.native_completion
+                    .as_deref()
+                    .and_then(|native| native.context.as_ref()),
+            ));
+        }
+        Some(super::functional_probe::probe(factor, &attempts))
     }
 
     /// Whether every completed attempt of a feature study showed its own treatment in the game
@@ -420,6 +446,17 @@ impl DriverStudyAttempts {
                     .as_deref()
                     .is_some_and(|native| native.runtime_binding == Some(RuntimeBinding::Matched))
             });
+        let activation = self.feature_activation(study, u32::try_from(report.attempts_completed)?);
+        let functional = self.feature_functional(study, &evidence);
+        // A feature study is qualified only when its treatment reached the game and the game itself
+        // reported the feature working; an action study by its restored action.
+        let stage_evidence = match study.stage {
+            Stage::Feature(_) => Some(
+                activation == Some(true)
+                    && functional == Some(super::functional_probe::Functional::Observed),
+            ),
+            _ => self.stage_evidence(study),
+        };
         Ok(AttemptsOutcome {
             attempts_used: u32::try_from(report.attempts_sealed)?,
             completed: u32::try_from(report.attempts_completed)?,
@@ -430,8 +467,9 @@ impl DriverStudyAttempts {
             runtime_matched,
             // No runtime proof of a factor's activation, and no worker restoration evidence for an
             // action, is collected here yet: stage evidence is unproven.
-            stage_evidence: self.stage_evidence(study),
-            activation: self.feature_activation(study, u32::try_from(report.attempts_completed)?),
+            stage_evidence,
+            activation,
+            functional,
             run_fps: evidence
                 .values()
                 .filter_map(|item| item.native_completion.as_deref())

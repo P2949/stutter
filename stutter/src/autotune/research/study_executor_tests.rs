@@ -115,6 +115,7 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         runtime_matched: true,
         stage_evidence: None,
         activation: None,
+        functional: None,
         run_fps: (0..study.min_attempts)
             .map(|i| {
                 let arm = if i % 2 == 0 {
@@ -658,3 +659,6 @@ fn an_observed_activation_is_not_a_functional_proof_and_the_reasons_differ() {
         (StudyResult::Unqualified, "FeatureFunctionalUnproven")
     );
 }
+
+#[path = "study_executor_feature_tests.rs"]
+mod feature;

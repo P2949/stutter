@@ -233,6 +233,17 @@ impl ResearchCoordinator {
                     "child_studies": studies,
                     "child_reports": children,
                     "intent_sha256": report.intent_sha256,
+                    // The diagnosis oracle's own scored cases (frozen truth, captured output), or
+                    // exactly why there are none.
+                    "diagnosis_oracle": match self.study_dir.as_deref().map_or(
+                        Err("NoOracleCases"),
+                        crate::autotune::research::oracle_cases::evaluate_study,
+                    ) {
+                        Ok(evaluation) => serde_json::json!({
+                            "status": "scored", "evaluation": evaluation }),
+                        Err(reason) => serde_json::json!({
+                            "status": "not_scored", "reason": reason }),
+                    },
                 });
                 // The named final artifacts, once, beside the report. A verdict whose bundle could
                 // not be made durable is not a final one: the response says so and is blocked.

@@ -13,6 +13,7 @@ use super::{
     ProtonSource,
     child_runner::{StudyExecutor, StudyRun},
     child_study::{ChildStudy, Profile, Stage, StudyResult},
+    functional_probe::Functional,
     native_context::ProfileConformance,
     pilot_rule::FrozenConfirmationRule,
 };
@@ -79,6 +80,8 @@ pub struct AttemptsOutcome {
     /// the game process's environment. This is activation of the control, not proof that the feature
     /// works; `None` for any other study.
     pub activation: Option<bool>,
+    /// A feature study only: what the game itself reported of the factor (see `functional_probe`).
+    pub functional: Option<super::functional_probe::Functional>,
 }
 
 /// Runs a study's attempts (the real one drives the journalled `Driver` over the Steam host, one
@@ -200,7 +203,13 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
             // Activation (the treatment reached the game) and function (the feature works) are
             // separate: the first can be observed, the second needs a functional receipt.
             Stage::Feature(_) if outcome.activation == Some(true) => {
-                Some("FeatureFunctionalUnproven")
+                Some(match outcome.functional {
+                    // The game reported the feature off where it should be on (or on where off).
+                    Some(Functional::NotObserved) => "FeatureActivatedButNotFunctional",
+                    // The game's own result carries no report for this factor at all.
+                    Some(Functional::NotObservable) => "FeatureNotObservable",
+                    _ => "FeatureFunctionalUnproven",
+                })
             }
             Stage::Feature(_) => Some("FeatureActivationUnproven"),
             Stage::Action(_) => Some("ActionEvidenceMissing"),
