@@ -188,7 +188,12 @@ impl ResearchCoordinator {
                             crate::autotune::research::deploy_receipt::own_binary_sha256()
                                 .is_some_and(|own| {
                                     crate::autotune::research::deploy_receipt::deployment_attested(
-                                        study, &own,
+                                        study,
+                                        &own,
+                                        stutter_core::boot::current_boot_id().ok().as_deref(),
+                                        std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map_or(0, |elapsed| elapsed.as_secs()),
                                     )
                                 })
                         }),

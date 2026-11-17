@@ -119,12 +119,18 @@ fn deploy_receipt(
             unit,
             &text,
             std::path::Path::new("/nix/store"),
+            std::path::Path::new("/proc"),
         )?);
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
-    let result = deploy::receipt(receipts, expected, now);
+    let result = deploy::receipt(
+        receipts,
+        expected,
+        now,
+        stutter_core::boot::current_boot_id().ok(),
+    );
     let bytes = serde_json::to_vec_pretty(&result)?;
     let dir = std::fs::File::open(study_root)?;
     crate::autotune::research::report_store::write_new(
