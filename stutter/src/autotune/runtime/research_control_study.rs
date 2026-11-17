@@ -15,6 +15,11 @@ impl ResearchCoordinator {
     }
 
     /// The Proton installation manifest used to re-read the frozen Proton and Steam client identities.
+    /// The private directory of the resident controller's control socket, inspected read-only for G1.
+    pub(in crate::autotune::runtime) fn set_control_socket_dir(&mut self, path: Option<PathBuf>) {
+        self.host_sources.2 = path;
+    }
+
     pub(in crate::autotune::runtime) fn set_proton_manifest(&mut self, path: Option<PathBuf>) {
         self.host_sources.1 = path;
     }

@@ -18,6 +18,13 @@ fn on(profile: Profile, stage: Stage, result: Option<StudyResult>) -> Dispositio
     }
 }
 
+const SOCKET: crate::autotune::research::control_socket::ControlSocketFacts =
+    crate::autotune::research::control_socket::ControlSocketFacts {
+        directory_private: true,
+        socket_private: true,
+        controller_holds_directory: Some(true),
+    };
+
 const ADMITTED: crate::autotune::research::lease_inspect::Admission =
     crate::autotune::research::lease_inspect::Admission {
         peer_identified: true,
@@ -53,6 +60,7 @@ fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict
         fault_matrix: Err("NoFaultMatrixReceipt"),
         protected_state: Ok(()),
         hardware: Ok(()),
+        control_socket: Some(SOCKET),
         deployment_attested: false,
         lease: None,
         host: None,
@@ -158,6 +166,7 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
             hardware: Ok(()),
+            control_socket: Some(SOCKET),
             deployment_attested: false,
             lease: None,
             host: None,
@@ -210,6 +219,7 @@ fn g8_is_accepted_only_on_an_attested_deployment_and_needs_no_game() {
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
             hardware: Ok(()),
+            control_socket: Some(SOCKET),
             deployment_attested: attested,
             lease: None,
             host: None,
@@ -238,6 +248,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
             hardware: Ok(()),
+            control_socket: Some(SOCKET),
             deployment_attested: false,
             lease,
             host: None,
@@ -309,6 +320,7 @@ fn g0_stands_on_a_host_that_has_not_moved_from_what_the_campaign_froze() {
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
             hardware: Ok(()),
+            control_socket: Some(SOCKET),
             deployment_attested: false,
             lease: None,
             host,
@@ -395,6 +407,7 @@ fn g9_needs_the_holdout_to_reproduce_its_confirmation_not_merely_to_be_a_sound_r
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
             hardware: Ok(()),
+            control_socket: Some(SOCKET),
             deployment_attested: true,
             lease: None,
             host: None,
@@ -424,6 +437,7 @@ fn g6_is_accepted_only_from_a_physical_matrix_receipt_and_otherwise_says_why() {
             fault_matrix,
             protected_state: Ok(()),
             hardware: Ok(()),
+            control_socket: Some(SOCKET),
             deployment_attested: true,
             lease: None,
             host: None,
@@ -459,6 +473,7 @@ fn g1_names_each_part_of_the_admission_it_cannot_show() {
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
             hardware: Ok(()),
+            control_socket: Some(SOCKET),
             deployment_attested: true,
             lease: Some(LeaseFacts {
                 chain_valid: true,
@@ -507,6 +522,7 @@ fn g2_needs_the_players_original_data_to_be_intact() {
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state,
             hardware: Ok(()),
+            control_socket: Some(SOCKET),
             deployment_attested: true,
             lease: None,
             host: None,
@@ -541,6 +557,7 @@ fn g0_also_needs_the_same_kernel_cpu_topology_and_gpu_as_before_the_campaign() {
             fault_matrix: Err("NoFaultMatrixReceipt"),
             protected_state: Ok(()),
             hardware,
+            control_socket: Some(SOCKET),
             deployment_attested: true,
             lease: None,
             host: Some(HostFacts {
@@ -566,4 +583,58 @@ fn g0_also_needs_the_same_kernel_cpu_topology_and_gpu_as_before_the_campaign() {
     ] {
         assert_eq!(g0(Err(reason)), (false, vec![reason]));
     }
+}
+
+#[test]
+fn g1_also_needs_a_private_control_socket_held_by_a_live_controller() {
+    use crate::autotune::research::control_socket::ControlSocketFacts;
+    let studies = full(Some(StudyResult::Qualified));
+    let g1 = |control_socket: Option<ControlSocketFacts>| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: false,
+            telemetry: Some((8, 8)),
+            replication: Some(true),
+            fault_matrix: Err("NoFaultMatrixReceipt"),
+            protected_state: Ok(()),
+            hardware: Ok(()),
+            control_socket,
+            deployment_attested: true,
+            lease: Some(LeaseFacts {
+                chain_valid: true,
+                transitions_valid: true,
+                header_matches_intent: true,
+                terminal: true,
+                for_this_campaign: true,
+                owner_live: Some(false),
+                admission: ADMITTED,
+            }),
+            host: None,
+        });
+        of(&verdicts, "G1").blockers.clone()
+    };
+    assert!(g1(Some(SOCKET)).is_empty());
+    assert_eq!(g1(None), ["ControlSocketNotInspected"]);
+    assert_eq!(
+        g1(Some(ControlSocketFacts {
+            directory_private: false,
+            ..SOCKET
+        })),
+        ["ControlDirectoryNotPrivate"]
+    );
+    assert_eq!(
+        g1(Some(ControlSocketFacts {
+            socket_private: false,
+            controller_holds_directory: Some(false),
+            ..SOCKET
+        })),
+        [
+            "ControlSocketNotPrivate",
+            "NoControllerHoldsTheControlDirectory"
+        ]
+    );
 }

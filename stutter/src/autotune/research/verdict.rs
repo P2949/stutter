@@ -55,6 +55,8 @@ pub struct VerdictInputs<'a> {
     pub protected_state: Result<(), &'static str>,
     /// G0: the kernel, CPU topology and GPU are the ones recorded before the campaign (`host_hardware`).
     pub hardware: Result<(), &'static str>,
+    /// G1: the control socket and its directory as inspected read-only (`control_socket`).
+    pub control_socket: Option<super::control_socket::ControlSocketFacts>,
     /// G8: the deployed binary is attested by a receipt (see `deploy_receipt`).
     pub deployment_attested: bool,
     /// G1: what a read-only inspection of the campaign's lease found.
@@ -102,6 +104,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         fault_matrix: inputs.fault_matrix,
         protected_state: inputs.protected_state,
         hardware: inputs.hardware,
+        control_socket: inputs.control_socket,
         deployment_attested: inputs.deployment_attested,
         lease: inputs.lease,
         host: inputs.host,

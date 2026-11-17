@@ -44,6 +44,7 @@ pub(crate) mod child_runner;
 )]
 pub(crate) mod child_study;
 pub(crate) mod child_verify;
+pub(crate) mod control_socket;
 #[cfg_attr(
     not(test),
     expect(

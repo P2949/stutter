@@ -261,3 +261,15 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   tests (for example replayed tickets: `each_steam_verb_runs_once_and_replays...`; spoofed peer:
   `kernel_peer_is_bound_and_wrong_uid_is_rejected`; owner appearing mid-window:
   `an_owner_appearing_leaves_an_experiment_alone...`).
+- **G1 control socket.** The inspection also stats the resident controller's socket directory and socket
+  and reads the lock table (no connection, no change): the directory is private and owned by the user,
+  the socket is a real socket, owned by the user, mode 0600 with one link, and a live process holds the
+  directory lock. Blockers: `ControlDirectoryNotPrivate`, `ControlSocketNotPrivate`,
+  `NoControllerHoldsTheControlDirectory`, `ControlSocketNotInspected`. Observed on the live service
+  (`g1-live-ipc-2026-11-17.json`): the owning user's `research status` reached the controller and was
+  answered (`UnsafeToResume`, matching the interrupted 2026-11-15 lease); another user was refused by the
+  kernel (`Permission denied`) at the private directory.
+- **Why real diagnosis cases need the game.** The controller's diagnosis runs on spike clusters built
+  from live eBPF scheduler events of a selected target (`session/monitor_session/exporters.rs`), so it
+  has no input without a target generating them, and PLAN asks for the causes to be injected into the
+  real game. The oracle producer and its bridge test cover everything up to that input.

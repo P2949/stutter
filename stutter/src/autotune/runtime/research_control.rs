@@ -41,10 +41,8 @@ pub(in crate::autotune::runtime) use funnel::select_funnel_builder;
 
 use crate::autotune::research::{
     AuthenticatedRequest, CampaignBlockReason, CampaignFacts, CampaignLease, ResearchPhase,
-    ResearchRequest, receive_request,
+    ResearchRequest, control_socket::SOCKET_NAME, receive_request,
 };
-
-const SOCKET_NAME: &str = "research.sock";
 const MAX_CONNECTIONS: usize = 8;
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -71,7 +69,7 @@ struct TerminalCampaign {
 pub(super) struct ResearchCoordinator {
     campaign_dir: Option<PathBuf>,
     study_dir: Option<PathBuf>,
-    host_sources: (Option<PathBuf>, Option<PathBuf>),
+    host_sources: (Option<PathBuf>, Option<PathBuf>, Option<PathBuf>),
     storage_blocker: Option<&'static str>,
     facts: Option<CampaignFacts>,
     context_blocker: &'static str,
@@ -121,7 +119,7 @@ impl ResearchCoordinator {
         Self {
             campaign_dir,
             study_dir: None,
-            host_sources: (None, None),
+            host_sources: (None, None, None),
             storage_blocker,
             facts,
             context_blocker,

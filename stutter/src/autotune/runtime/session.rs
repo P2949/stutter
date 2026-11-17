@@ -65,6 +65,14 @@ pub async fn run_autotune_controller_session(
                 .research_steamapps_dir
                 .clone(),
         );
+        coordinator.set_control_socket_dir(
+            runtime
+                .config()
+                .daemon_config
+                .autotune
+                .research_socket_dir
+                .clone(),
+        );
         coordinator.set_proton_manifest(
             runtime
                 .config()

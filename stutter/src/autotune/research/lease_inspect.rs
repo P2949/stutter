@@ -123,7 +123,7 @@ fn locks_show_flock(text: &str, dev: u64, inode: u64) -> bool {
 }
 
 /// Whether some process holds a flock on the directory, `None` when the lock table cannot be read.
-fn flock_held(dir: &std::fs::Metadata) -> Option<bool> {
+pub(super) fn flock_held(dir: &std::fs::Metadata) -> Option<bool> {
     use std::os::unix::fs::MetadataExt;
     let text = std::fs::read_to_string("/proc/locks").ok()?;
     Some(locks_show_flock(&text, dir.dev(), dir.ino()))

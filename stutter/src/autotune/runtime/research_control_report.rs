@@ -177,6 +177,9 @@ impl ResearchCoordinator {
                             .is_some_and(|c| c.runtime_qualified()),
                         child_telemetry: children.as_ref().and_then(|c| c.telemetry_summary()),
                         child_replication: children.as_ref().and_then(|c| c.holdout_replication()),
+                        control_socket: self.host_sources.2.as_deref().and_then(|dir| {
+                            crate::autotune::research::control_socket::inspect(dir, uid)
+                        }),
                         hardware: self
                             .study_dir
                             .as_deref()

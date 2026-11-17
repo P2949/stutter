@@ -72,6 +72,8 @@ pub struct GateInputs<'a> {
     pub protected_state: Result<(), &'static str>,
     /// G0: the kernel, CPU topology and GPU are the ones recorded before the campaign (`host_hardware`).
     pub hardware: Result<(), &'static str>,
+    /// G1: the control socket and its directory as inspected read-only (`control_socket`).
+    pub control_socket: Option<super::control_socket::ControlSocketFacts>,
     /// A deploy receipt names the very binary doing this verification, runs the expected pin and has
     /// every unit active (`deploy_receipt::deployment_attested`).
     pub deployment_attested: bool,
@@ -293,7 +295,13 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
             blockers.extend(inputs.hardware.err());
             blockers
         }),
-        gate("G1", health_free(lease_blockers(inputs.lease))),
+        gate("G1", {
+            // The lease records, and the control socket that every request must pass through: private,
+            // owned by the user, and held by a live controller.
+            let mut blockers = lease_blockers(inputs.lease);
+            blockers.extend(super::control_socket::blockers(inputs.control_socket));
+            health_free(blockers)
+        }),
         gate("G2", health(g2)),
         gate("G3", health(g3)),
         gate("G4", health(g4)),

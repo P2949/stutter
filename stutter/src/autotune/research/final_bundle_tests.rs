@@ -175,6 +175,7 @@ fn real_campaign_bundle() {
         fault_matrix: Err("NoFaultMatrixReceipt"),
         protected_state: Ok(()),
         hardware: Ok(()),
+        control_socket: None,
         deployment_attested: false,
         lease: None,
         host: None,
