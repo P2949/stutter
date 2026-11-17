@@ -1,0 +1,146 @@
+//! One verdict per PLAN gate (G0-G9), each from its own evidence and each naming exactly what is
+//! missing. A campaign verification can only attest what a campaign contains: the gates whose
+//! evidence lives elsewhere (a host baseline, the lease and IPC test receipts, a resident telemetry
+//! receipt, a fault matrix, a deployment receipt) are reported `accepted: false` with a blocker that
+//! says so, never inferred from the studies. A health incident blocks every gate that needs a
+//! running game.
+
+use serde::Serialize;
+
+use super::{
+    child_ledger::Disposition,
+    child_study::{Stage, StudyResult},
+};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct GateVerdict {
+    pub gate: &'static str,
+    pub accepted: bool,
+    /// Why it is not accepted (empty exactly when it is).
+    pub blockers: Vec<&'static str>,
+}
+
+/// What the gates are computed from.
+pub struct GateInputs<'a> {
+    pub raw_files_verified: bool,
+    pub loaded_runtime_qualified: bool,
+    pub child_studies: &'a [Disposition],
+    pub child_reports_verified: bool,
+    pub restoration_verified: bool,
+    pub health_blocked: bool,
+}
+
+/// `Some(true)` when there is at least one study of the kind and every one is qualified, `Some(false)`
+/// when some is not, `None` when the plan has none.
+fn qualified(studies: &[Disposition], kind: fn(&Stage) -> bool) -> Option<bool> {
+    let mut matching = studies.iter().filter(|study| kind(&study.stage)).peekable();
+    matching.peek()?;
+    Some(matching.all(|study| study.result == Some(StudyResult::Qualified)))
+}
+
+fn gate(gate: &'static str, blockers: Vec<&'static str>) -> GateVerdict {
+    GateVerdict {
+        gate,
+        accepted: blockers.is_empty(),
+        blockers,
+    }
+}
+
+fn not_attested(gate_name: &'static str, blocker: &'static str) -> GateVerdict {
+    gate(gate_name, vec![blocker])
+}
+
+/// Study blockers for one stage kind: its absence from the plan, or its not being qualified.
+fn study_blockers(
+    studies: &[Disposition],
+    kind: fn(&Stage) -> bool,
+    missing: &'static str,
+    unqualified: &'static str,
+) -> Vec<&'static str> {
+    match qualified(studies, kind) {
+        None => vec![missing],
+        Some(false) => vec![unqualified],
+        Some(true) => Vec::new(),
+    }
+}
+
+pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
+    let studies = inputs.child_studies;
+    let health = |mut blockers: Vec<&'static str>| {
+        if inputs.health_blocked {
+            blockers.push("GpuHealthIncident");
+        }
+        blockers
+    };
+    let screen = |stage: &Stage| matches!(stage, Stage::Screen);
+    let comparison = |stage: &Stage| {
+        matches!(
+            stage,
+            Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout
+        )
+    };
+    let holdout = |stage: &Stage| matches!(stage, Stage::Holdout);
+    let action = |stage: &Stage| matches!(stage, Stage::Action(_));
+    let feature = |stage: &Stage| matches!(stage, Stage::Feature(_));
+
+    // G2: a genuine Steam launch of the game with raw native evidence that replays, run under each
+    // arm's own installation, across a qualified screen.
+    let mut g2 = study_blockers(studies, screen, "NoScreenStudy", "ScreenNotQualified");
+    if !inputs.raw_files_verified {
+        g2.push("RawFilesUnverified");
+    }
+    if !inputs.loaded_runtime_qualified {
+        g2.push("LoadedRuntimeUnproven");
+    }
+
+    // G4: the resident funnel's comparison stages all qualified, each child independently verified.
+    let mut g4 = study_blockers(
+        studies,
+        comparison,
+        "NoComparisonStudies",
+        "ComparisonNotQualified",
+    );
+    if !inputs.child_reports_verified {
+        g4.push("ChildReportsUnverified");
+    }
+
+    // G5: a real Supported action, with restoration proven by a verifier independent of its token.
+    let mut g5 = study_blockers(studies, action, "NoActionStudy", "ActionNotQualified");
+    if !inputs.restoration_verified {
+        g5.push("RestorationUnverified");
+    }
+
+    // G7: effective feature activation per factor (a qualified feature study carries that proof).
+    let g7 = study_blockers(studies, feature, "NoFeatureStudy", "FeatureNotQualified");
+
+    // G9: the held-out repetition qualified on top of everything a result rests on, with the
+    // system restored and no health incident.
+    let mut g9 = study_blockers(studies, holdout, "NoHoldoutStudy", "HoldoutNotQualified");
+    for (name, blockers) in [("G2", &g2), ("G4", &g4), ("G5", &g5), ("G7", &g7)] {
+        if !blockers.is_empty() {
+            g9.push(match name {
+                "G2" => "G2NotAccepted",
+                "G4" => "G4NotAccepted",
+                "G5" => "G5NotAccepted",
+                _ => "G7NotAccepted",
+            });
+        }
+    }
+
+    vec![
+        not_attested("G0", "HostBaselineNotAttestedByVerification"),
+        not_attested("G1", "LeaseAndIpcReceiptsNotAttestedByVerification"),
+        gate("G2", health(g2)),
+        not_attested("G3", "NoResidentTelemetryReceipt"),
+        gate("G4", health(g4)),
+        gate("G5", health(g5)),
+        not_attested("G6", "NoFaultMatrixReceipt"),
+        gate("G7", health(g7)),
+        not_attested("G8", "DeploymentReceiptNotInCampaign"),
+        gate("G9", health(g9)),
+    ]
+}
+
+#[cfg(test)]
+#[path = "gate_verdict_tests.rs"]
+mod tests;

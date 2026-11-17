@@ -111,6 +111,41 @@ fn summary(report: &Value, response: &Value) -> String {
         .iter()
         .filter(|study| result_of(study) != "undecided")
         .count();
+    let gates: String = verdict
+        .get("gates")
+        .and_then(Value::as_array)
+        .map(|gates| {
+            gates
+                .iter()
+                .map(|gate| {
+                    let blockers = gate["blockers"]
+                        .as_array()
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default();
+                    format!(
+                        "- {}: {}{}\n",
+                        gate["gate"].as_str().unwrap_or("?"),
+                        if gate["accepted"] == true {
+                            "accepted"
+                        } else {
+                            "not accepted"
+                        },
+                        if blockers.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ({blockers})")
+                        },
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     format!(
         "# Campaign summary\n\n\
          Disposition: {}\n\n\
@@ -120,6 +155,7 @@ fn summary(report: &Value, response: &Value) -> String {
          - final gate qualified: {}\n\n\
          Child studies decided: {decided} of {}.\n\
          Attempts completed: {}.\n\n\
+         Gates:\n{gates}\n\
          This summary restates verified statuses only; a false status means that evidence was not \
          established, not that it failed.\n",
         verdict

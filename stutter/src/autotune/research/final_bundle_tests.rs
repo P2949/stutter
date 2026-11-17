@@ -253,3 +253,20 @@ fn a_qualified_action_study_needs_its_receipts_to_be_a_qualified_action() {
     assert_eq!(with["status"], "Qualified");
     assert_eq!(with["receipts"][0][0]["pid"], 4242);
 }
+
+#[test]
+fn the_summary_lists_every_gate_with_its_blockers() {
+    let mut with_gates = response();
+    with_gates["verdict"]["gates"] = json!([
+        { "gate": "G2", "accepted": true, "blockers": [] },
+        { "gate": "G5", "accepted": false, "blockers": ["ActionNotQualified", "RestorationUnverified"] }
+    ]);
+    let files: std::collections::BTreeMap<_, _> =
+        build(&json!({}), &with_gates).into_iter().collect();
+    let text = String::from_utf8(files["campaign-summary.md"].clone()).unwrap();
+    assert!(text.contains("- G2: accepted\n"), "{text}");
+    assert!(
+        text.contains("- G5: not accepted (ActionNotQualified, RestorationUnverified)\n"),
+        "{text}"
+    );
+}

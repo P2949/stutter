@@ -29,6 +29,8 @@ pub struct Verdict {
     pub final_gate_qualified: bool,
     /// `AbortedHealth`, `Qualified`, `PartiallyQualified` or `Unverified`.
     pub disposition: &'static str,
+    /// One verdict per PLAN gate, each from its own evidence (`gate_verdict`).
+    pub gates: Vec<super::gate_verdict::GateVerdict>,
 }
 
 pub struct VerdictInputs<'a> {
@@ -87,6 +89,14 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
     } else {
         "Unverified"
     };
+    let gates = super::gate_verdict::gates(&super::gate_verdict::GateInputs {
+        raw_files_verified,
+        loaded_runtime_qualified,
+        child_studies: inputs.child_studies,
+        child_reports_verified: inputs.child_reports_verified,
+        restoration_verified: inputs.restoration_verified,
+        health_blocked: inputs.health_blocked,
+    });
     Verdict {
         reconstruction_passed: inputs.reconstruction_passed,
         raw_files_verified,
@@ -96,6 +106,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         restoration_verified: inputs.restoration_verified,
         final_gate_qualified,
         disposition,
+        gates,
     }
 }
 

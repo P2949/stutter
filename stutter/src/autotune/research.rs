@@ -81,6 +81,7 @@ pub(crate) mod funnel_driver;
     )
 )]
 pub(crate) mod game_facts;
+pub(crate) mod gate_verdict;
 pub(crate) mod gpu_health;
 pub(super) mod host;
 #[cfg_attr(
