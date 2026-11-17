@@ -43,6 +43,7 @@ fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict
         health_blocked: health,
         telemetry: None,
         replication: None,
+        fault_matrix: Err("NoFaultMatrixReceipt"),
         deployment_attested: false,
         lease: None,
         host: None,
@@ -145,6 +146,7 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
             health_blocked: health,
             telemetry,
             replication: None,
+            fault_matrix: Err("NoFaultMatrixReceipt"),
             deployment_attested: false,
             lease: None,
             host: None,
@@ -194,6 +196,7 @@ fn g8_is_accepted_only_on_an_attested_deployment_and_needs_no_game() {
             health_blocked: health,
             telemetry: None,
             replication: None,
+            fault_matrix: Err("NoFaultMatrixReceipt"),
             deployment_attested: attested,
             lease: None,
             host: None,
@@ -219,6 +222,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
             health_blocked: false,
             telemetry: None,
             replication: None,
+            fault_matrix: Err("NoFaultMatrixReceipt"),
             deployment_attested: false,
             lease,
             host: None,
@@ -281,6 +285,7 @@ fn g0_stands_on_a_host_that_has_not_moved_from_what_the_campaign_froze() {
             health_blocked: false,
             telemetry: None,
             replication: None,
+            fault_matrix: Err("NoFaultMatrixReceipt"),
             deployment_attested: false,
             lease: None,
             host,
@@ -335,6 +340,7 @@ fn g9_needs_the_holdout_to_reproduce_its_confirmation_not_merely_to_be_a_sound_r
             health_blocked: false,
             telemetry: Some((8, 8)),
             replication,
+            fault_matrix: Err("NoFaultMatrixReceipt"),
             deployment_attested: true,
             lease: None,
             host: None,
@@ -346,4 +352,36 @@ fn g9_needs_the_holdout_to_reproduce_its_confirmation_not_merely_to_be_a_sound_r
     assert!(!g9(Some(true)).contains(&"HoldoutDoesNotReplicate"));
     // No holdout judged at all is not a replication blocker of its own.
     assert!(!g9(None).contains(&"HoldoutDoesNotReplicate"));
+}
+
+#[test]
+fn g6_is_accepted_only_from_a_physical_matrix_receipt_and_otherwise_says_why() {
+    let studies = full(Some(StudyResult::Qualified));
+    let g6 = |fault_matrix: Result<(), &'static str>| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: false,
+            telemetry: Some((8, 8)),
+            replication: Some(true),
+            fault_matrix,
+            deployment_attested: true,
+            lease: None,
+            host: None,
+        });
+        let verdict = of(&verdicts, "G6");
+        (verdict.accepted, verdict.blockers.clone())
+    };
+    assert_eq!(g6(Ok(())), (true, vec![]));
+    assert_eq!(
+        g6(Err("FaultClassOnlyFixtureTested")),
+        (false, vec!["FaultClassOnlyFixtureTested"])
+    );
+    assert_eq!(
+        g6(Err("NoFaultMatrixReceipt")),
+        (false, vec!["NoFaultMatrixReceipt"])
+    );
 }

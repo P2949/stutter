@@ -175,6 +175,21 @@ impl ResearchCoordinator {
                             .is_some_and(|c| c.runtime_qualified()),
                         child_telemetry: children.as_ref().and_then(|c| c.telemetry_summary()),
                         child_replication: children.as_ref().and_then(|c| c.holdout_replication()),
+                        fault_matrix: match (
+                            self.study_dir.as_deref(),
+                            crate::autotune::research::deploy_receipt::own_binary_sha256(),
+                        ) {
+                            (Some(study), Some(own)) => {
+                                crate::autotune::research::fault_matrix::gate_status(
+                                    study,
+                                    &own,
+                                    std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map_or(0, |elapsed| elapsed.as_secs()),
+                                )
+                            }
+                            _ => Err("NoFaultMatrixReceipt"),
+                        },
                         // G8 stands on a receipt of what is deployed, about the very binary
                         // doing this verification; none is inferred from the Nix pin.
                         lease: self.lease_facts(&report.intent_sha256, uid),

@@ -55,6 +55,8 @@ pub struct GateInputs<'a> {
     pub telemetry: Option<(u32, u32)>,
     /// Whether every holdout reproduced its confirmation (`None`: no holdout was judged).
     pub replication: Option<bool>,
+    /// G6: whether a physical fault-matrix receipt for this binary attests (`fault_matrix`), or why not.
+    pub fault_matrix: Result<(), &'static str>,
     /// A deploy receipt names the very binary doing this verification, runs the expected pin and has
     /// every unit active (`deploy_receipt::deployment_attested`).
     pub deployment_attested: bool,
@@ -78,10 +80,6 @@ fn gate(gate: &'static str, blockers: Vec<&'static str>) -> GateVerdict {
         accepted: blockers.is_empty(),
         blockers,
     }
-}
-
-fn not_attested(gate_name: &'static str, blocker: &'static str) -> GateVerdict {
-    gate(gate_name, vec![blocker])
 }
 
 /// Study blockers for one stage kind: its absence from the plan, or its not being qualified.
@@ -251,7 +249,8 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
         gate("G3", health(g3)),
         gate("G4", health(g4)),
         gate("G5", health(g5)),
-        not_attested("G6", "NoFaultMatrixReceipt"),
+        // Only a physical matrix for this very binary stands for G6; fixtures never do.
+        gate("G6", inputs.fault_matrix.err().into_iter().collect()),
         gate("G7", health(g7)),
         gate(
             "G8",

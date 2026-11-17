@@ -172,6 +172,7 @@ fn real_campaign_bundle() {
         child_runtime_qualified: false,
         child_telemetry: None,
         child_replication: None,
+        fault_matrix: Err("NoFaultMatrixReceipt"),
         deployment_attested: false,
         lease: None,
         host: None,
