@@ -434,6 +434,20 @@ fn study_checks(
             let receipts = action_receipts(studies, name, uid)
                 .ok_or_else(|| anyhow::anyhow!("a qualified action study has no receipts"))?;
             receipts_valid(&receipts, action, parent.uid)?;
+            // Each receipt must be about a completed attempt the schedule treated On, and every such
+            // attempt must carry one: otherwise the comparison is of the controller's policy, not of
+            // an applied action, and it is not reported as a qualified action study.
+            let treatments = super::treatment::treatments_of(&child)?
+                .ok_or_else(|| anyhow::anyhow!("an action study has no treatment schedule"))?;
+            let processes = completed_processes(studies, name, uid);
+            let coverage = super::action_coverage::attribute(&receipts, &processes, &treatments)
+                .map_err(|reason| anyhow::anyhow!("{reason}"))?;
+            anyhow::ensure!(
+                coverage.applied_on_every_treated_attempt(),
+                "ActionNotAppliedOnEveryTreatedAttempt: {} of {} treated attempts",
+                coverage.on_applied,
+                coverage.on_completed
+            );
         }
         _ => {}
     }

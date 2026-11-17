@@ -519,3 +519,6 @@ mod restoration {
         assert!(pending_edit(&settings), "the snapshot alone is a trace");
     }
 }
+
+#[path = "child_verify_action_tests.rs"]
+mod action_attribution;
