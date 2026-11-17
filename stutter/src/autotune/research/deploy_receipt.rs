@@ -284,11 +284,30 @@ pub const MAX_RECEIPT_AGE_SECONDS: u64 = 24 * 60 * 60;
 /// Why a receipt does not attest the deployment, or `Ok` when it does. Nothing here trusts the
 /// receipt's stored summary booleans: everything is recomputed from its units, and the receipt must
 /// be about this very binary, in this boot, taken recently, covering every required unit once.
+/// What the receipt must be bound to besides time and boot: the campaign being verified. `revision` is the
+/// Git revision embedded in the verifying binary and `campaign_source_sha256` the source identity the
+/// campaign froze (a hash of the revision and binary of the build that submitted it).
+pub struct CampaignBinding<'a> {
+    pub revision: &'a str,
+    pub campaign_source_sha256: &'a str,
+}
+
+impl<'a> CampaignBinding<'a> {
+    /// The binding for a campaign that froze `campaign_source_sha256`, verified by this very build.
+    pub fn for_this_build(campaign_source_sha256: &'a str) -> Self {
+        Self {
+            revision: env!("STUTTER_GIT_REV"),
+            campaign_source_sha256,
+        }
+    }
+}
+
 pub fn attested(
     receipt: &DeployReceipt,
     own_binary_sha256: &str,
     current_boot: Option<&str>,
     now: u64,
+    campaign: Option<CampaignBinding<'_>>,
 ) -> Result<(), &'static str> {
     if receipt.schema < 2 {
         return Err("ReceiptSchemaTooOld");
@@ -328,7 +347,15 @@ pub fn attested(
     {
         return Err("ReceiptNotFresh");
     }
-    Ok(())
+    // The deployed binary must be the one that froze the campaign being verified: its identity,
+    // recomputed from this binary's revision and the pinned hash, is the campaign's frozen source.
+    let Some(campaign) = campaign else {
+        return Err("ReceiptNotBoundToACampaign");
+    };
+    match super::host::source_identity_of(campaign.revision, own_binary_sha256) {
+        Ok(identity) if identity == campaign.campaign_source_sha256 => Ok(()),
+        _ => Err("DeployedBinaryIsNotTheCampaignsBuild"),
+    }
 }
 
 /// G8's evidence: the newest receipt attests the deployment of the very binary doing this
@@ -338,9 +365,11 @@ pub fn deployment_attested(
     own_binary_sha256: &str,
     current_boot: Option<&str>,
     now: u64,
+    campaign: Option<CampaignBinding<'_>>,
 ) -> bool {
-    read_latest(study)
-        .is_some_and(|receipt| attested(&receipt, own_binary_sha256, current_boot, now).is_ok())
+    read_latest(study).is_some_and(|receipt| {
+        attested(&receipt, own_binary_sha256, current_boot, now, campaign).is_ok()
+    })
 }
 
 /// The hash of the running executable (`/proc/self/exe`), `None` when it cannot be read.

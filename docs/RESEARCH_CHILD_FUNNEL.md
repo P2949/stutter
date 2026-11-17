@@ -218,3 +218,14 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   loading-screen frames cannot satisfy it. A receipt with truncated or missing buckets counts none.
 - **Capture identity.** `procfs_state` requires the same process (pid, start time, owner) before and
   after reading its threads; a recycled pid mid-capture leaves the state unknown.
+- **G8 campaign binding.** A deployment receipt attests G8 only if the deployed binary is the build
+  that froze the campaign: the campaign's `source_sha256` is a hash of the embedded Git revision and
+  the binary's own hash, and the verifier recomputes it from its own revision and the pinned hash
+  (`DeployedBinaryIsNotTheCampaignsBuild`, `ReceiptNotBoundToACampaign`). A campaign frozen by an
+  older build therefore cannot be attested by a newer deployment.
+- **G1 single owner.** The inspection reports whether a live process holds the lease's exclusive
+  directory lock (`LeaseOwnerStillLive`; `LeaseOwnerUnknown` when the lock table cannot be read),
+  read from `/proc/locks` without taking any lock. On filesystems with anonymous device numbers
+  (btrfs) the table lists the filesystem's own device, so those are matched by inode. That the lease
+  ends only through `Restoring` is already enforced by the transition check. Authenticated IPC is
+  tested elsewhere and is still not attested by the inspection.

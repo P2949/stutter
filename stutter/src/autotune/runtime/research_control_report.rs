@@ -71,6 +71,7 @@ impl ResearchCoordinator {
             header_matches_intent: inspection.header_matches_intent,
             terminal: inspection.terminal,
             for_this_campaign: inspection.intent_sha256 == intent_sha256,
+            owner_live: inspection.owner_live,
         })
     }
 
@@ -214,6 +215,11 @@ impl ResearchCoordinator {
                                         std::time::SystemTime::now()
                                             .duration_since(std::time::UNIX_EPOCH)
                                             .map_or(0, |elapsed| elapsed.as_secs()),
+                                        intent.as_ref().map(|intent| {
+                                            crate::autotune::research::deploy_receipt::CampaignBinding::for_this_build(
+                                                &intent.source_sha256,
+                                            )
+                                        }),
                                     )
                                 })
                         }),

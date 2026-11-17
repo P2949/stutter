@@ -235,6 +235,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
         header_matches_intent: true,
         terminal: true,
         for_this_campaign: true,
+        owner_live: Some(false),
     };
     assert_eq!(with(None).blockers, ["LeaseNotInspected"]);
     assert!(with(Some(good)).accepted);
@@ -257,6 +258,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
     assert_eq!(
         with(Some(LeaseFacts {
             for_this_campaign: false,
+            owner_live: Some(false),
             ..good
         }))
         .blockers,
@@ -268,6 +270,7 @@ fn g1_stands_on_a_lease_that_holds_together_ended_and_belongs_to_this_campaign()
         header_matches_intent: false,
         terminal: false,
         for_this_campaign: false,
+        owner_live: Some(false),
     }));
     assert_eq!(broken.blockers.len(), 5);
 }

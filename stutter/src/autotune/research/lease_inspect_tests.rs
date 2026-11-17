@@ -192,3 +192,49 @@ fn a_record_that_is_present_but_unreadable_is_an_error_not_the_end_of_the_chain(
     std::fs::write(dir.path().join("event-0003.json"), b"not json").unwrap();
     assert!(inspect(dir.path(), uid).is_err());
 }
+
+#[test]
+fn the_lock_table_is_read_for_a_flock_on_exactly_this_directory() {
+    // /proc/locks: major and minor in hex, the inode in decimal; only FLOCK entries are leases' locks.
+    let table = "1: FLOCK  ADVISORY  WRITE 2043 00:19:7340 0 EOF\n\
+                 2: POSIX  ADVISORY  WRITE 2044 08:02:131 0 EOF\n\
+                 3: FLOCK  ADVISORY  WRITE 2045 fd:01:99 0 EOF\n";
+    // Device 0x19 = major 0, minor 25.
+    assert!(locks_show_flock(table, 25, 7340));
+    // Another inode and a POSIX lock on the right file fail; another anonymous device with the same inode
+    // matches by design (see `an_anonymous_device_filesystem_is_matched_by_inode...`).
+    assert!(!locks_show_flock(table, 25, 7341));
+    assert!(!locks_show_flock(table, 0x802, 131));
+    // A device with a major number above 255 (the high bits of `st_dev`) is decoded, not truncated.
+    let wide = "1: FLOCK  ADVISORY  WRITE 1 103:01:5 0 EOF\n";
+    assert!(locks_show_flock(wide, (0x103u64 << 8) | 1, 5));
+    assert!(!locks_show_flock("", 25, 7340));
+}
+
+#[test]
+fn a_live_owner_of_the_lease_is_seen_without_inspection_taking_any_lock() {
+    use std::os::fd::AsFd;
+    let (dir, uid) = settled();
+    // Nothing holds the lease: no live owner.
+    assert_eq!(inspect(dir.path(), uid).unwrap().owner_live, Some(false));
+    // A process that holds the lease's exclusive lock on the directory (what `CampaignLease` does).
+    let held = std::fs::File::open(dir.path()).unwrap();
+    assert!(crate::syscall::flock_exclusive_nonblocking(held.as_fd()));
+    assert_eq!(inspect(dir.path(), uid).unwrap().owner_live, Some(true));
+    // Inspecting twice changed nothing about who holds it: the owner still does, and releasing frees it.
+    assert_eq!(inspect(dir.path(), uid).unwrap().owner_live, Some(true));
+    drop(held);
+    assert_eq!(inspect(dir.path(), uid).unwrap().owner_live, Some(false));
+}
+
+#[test]
+fn an_anonymous_device_filesystem_is_matched_by_inode_and_a_real_device_is_not() {
+    // btrfs: `stat` says device 0x24 (anonymous, major 0) but the lock table names the filesystem's 0x20.
+    let table = "1: FLOCK  ADVISORY  WRITE 7 00:20:7449307 0 EOF\n";
+    assert!(locks_show_flock(table, 0x24, 7_449_307));
+    assert!(!locks_show_flock(table, 0x24, 7_449_308));
+    // A file on a real block device (major != 0) is never matched by inode alone.
+    let real = "1: FLOCK  ADVISORY  WRITE 7 08:02:131 0 EOF\n";
+    assert!(!locks_show_flock(real, (0x8u64 << 8) | 3, 131));
+    assert!(locks_show_flock(real, (0x8u64 << 8) | 2, 131));
+}

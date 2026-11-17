@@ -167,7 +167,7 @@ fn a_configured_binary_is_not_the_running_one() {
     );
     assert!(!made.binary_matches_pin);
     assert_eq!(
-        attested(&made, &sha(b"pinned"), Some("b1"), NOW),
+        attested(&made, &sha(b"pinned"), Some("b1"), NOW, bound()),
         Err("UnitNotRunningThisBinary")
     );
 }
@@ -176,12 +176,12 @@ fn a_configured_binary_is_not_the_running_one() {
 fn a_healthy_receipt_attests_and_every_way_it_can_be_wrong_is_its_own_refusal() {
     let me = sha(b"verifier");
     let (good, _store, _proc) = healthy(b"verifier");
-    assert_eq!(attested(&good, &me, Some("b1"), NOW), Ok(()));
+    assert_eq!(attested(&good, &me, Some("b1"), NOW, bound()), Ok(()));
 
     let refused = |edit: &dyn Fn(&mut DeployReceipt), expected: &'static str| {
         let mut bad = good.clone();
         edit(&mut bad);
-        assert_eq!(attested(&bad, &me, Some("b1"), NOW), Err(expected));
+        assert_eq!(attested(&bad, &me, Some("b1"), NOW, bound()), Err(expected));
     };
     refused(&|r| r.schema = 1, "ReceiptSchemaTooOld");
     refused(
@@ -223,16 +223,16 @@ fn a_healthy_receipt_attests_and_every_way_it_can_be_wrong_is_its_own_refusal() 
     refused(&|r| r.captured_unix = NOW + 3600, "ReceiptNotFresh");
     // Another boot as seen now, or an unreadable one.
     assert_eq!(
-        attested(&good, &me, Some("b2"), NOW),
+        attested(&good, &me, Some("b2"), NOW, bound()),
         Err("ReceiptFromAnotherBoot")
     );
     assert_eq!(
-        attested(&good, &me, None, NOW),
+        attested(&good, &me, None, NOW, bound()),
         Err("ReceiptFromAnotherBoot")
     );
     // A receipt about some other binary says nothing about the one doing the verifying.
     assert_eq!(
-        attested(&good, &"2".repeat(64), Some("b1"), NOW),
+        attested(&good, &"2".repeat(64), Some("b1"), NOW, bound()),
         Err("ReceiptPinIsNotThisBinary")
     );
 }
@@ -245,7 +245,7 @@ fn stored_summary_flags_are_never_trusted() {
     lying.binary_matches_pin = true;
     lying.units_active = true;
     assert_eq!(
-        attested(&lying, &me, Some("b1"), NOW),
+        attested(&lying, &me, Some("b1"), NOW, bound()),
         Err("RequiredUnitMissing"),
         "an empty unit list with both flags set true is not a deployment"
     );
@@ -262,15 +262,33 @@ fn g8_reads_the_newest_receipt_from_the_study_directory() {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     };
     // No receipt: nothing attested.
-    assert!(!deployment_attested(study.path(), &me, Some("b1"), NOW));
+    assert!(!deployment_attested(
+        study.path(),
+        &me,
+        Some("b1"),
+        NOW,
+        bound()
+    ));
     write("deploy-receipt-1.json", &good);
-    assert!(deployment_attested(study.path(), &me, Some("b1"), NOW));
+    assert!(deployment_attested(
+        study.path(),
+        &me,
+        Some("b1"),
+        NOW,
+        bound()
+    ));
     // The newest receipt decides: a later one that no longer attests withdraws it.
     let mut later = good.clone();
     later.captured_unix = NOW - 50;
     later.units[0].active_state = "inactive".into();
     write("deploy-receipt-2.json", &later);
-    assert!(!deployment_attested(study.path(), &me, Some("b1"), NOW));
+    assert!(!deployment_attested(
+        study.path(),
+        &me,
+        Some("b1"),
+        NOW,
+        bound()
+    ));
 }
 
 #[test]
@@ -288,31 +306,75 @@ fn where_the_executable_is_unreadable_the_process_must_report_the_units_own_stor
     for unit in &mut unprivileged.units {
         unit.running_binary_sha256 = None;
     }
-    assert_eq!(attested(&unprivileged, &me, Some("b1"), NOW), Ok(()));
+    assert_eq!(
+        attested(&unprivileged, &me, Some("b1"), NOW, bound()),
+        Ok(())
+    );
     // Then it must name this unit's own immutable path, and be an identified process.
     let mut elsewhere = unprivileged.clone();
     elsewhere.units[0].running_argv0 = Some("/nix/store/other-stutter".into());
     assert_eq!(
-        attested(&elsewhere, &me, Some("b1"), NOW),
+        attested(&elsewhere, &me, Some("b1"), NOW, bound()),
         Err("UnitNotRunningThisBinary")
     );
     let mut unnamed = unprivileged.clone();
     unnamed.units[1].running_argv0 = None;
     assert_eq!(
-        attested(&unnamed, &me, Some("b1"), NOW),
+        attested(&unnamed, &me, Some("b1"), NOW, bound()),
         Err("UnitNotRunningThisBinary")
     );
     let mut unidentified = unprivileged;
     unidentified.units[0].start_ticks = None;
     assert_eq!(
-        attested(&unidentified, &me, Some("b1"), NOW),
+        attested(&unidentified, &me, Some("b1"), NOW, bound()),
         Err("UnitNotRunningThisBinary")
     );
     // A readable executable that differs is refused whatever the process says about itself.
     let mut liar = good;
     liar.units[0].running_binary_sha256 = Some("3".repeat(64));
     assert_eq!(
-        attested(&liar, &me, Some("b1"), NOW),
+        attested(&liar, &me, Some("b1"), NOW, bound()),
         Err("UnitNotRunningThisBinary")
     );
+}
+
+/// The source identity of a campaign frozen by the "verifier" build at revision "rev".
+fn campaign() -> &'static str {
+    static IDENTITY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    IDENTITY.get_or_init(|| {
+        crate::autotune::research::host::source_identity_of("rev", &sha(b"verifier")).unwrap()
+    })
+}
+
+fn bound() -> Option<CampaignBinding<'static>> {
+    Some(CampaignBinding {
+        revision: "rev",
+        campaign_source_sha256: campaign(),
+    })
+}
+
+#[test]
+fn the_deployed_binary_must_be_the_build_that_froze_the_campaign() {
+    let me = sha(b"verifier");
+    let (good, _store, _proc) = healthy(b"verifier");
+    assert_eq!(attested(&good, &me, Some("b1"), NOW, bound()), Ok(()));
+    // No campaign to bind to: a deployment is not attested in the abstract.
+    assert_eq!(
+        attested(&good, &me, Some("b1"), NOW, None),
+        Err("ReceiptNotBoundToACampaign")
+    );
+    // A campaign frozen by another build (another binary, or another revision of the same one).
+    let other_binary =
+        crate::autotune::research::host::source_identity_of("rev", &sha(b"older build")).unwrap();
+    let other_revision = crate::autotune::research::host::source_identity_of("rev2", &me).unwrap();
+    for frozen in [other_binary.as_str(), other_revision.as_str(), "0000"] {
+        let binding = CampaignBinding {
+            revision: "rev",
+            campaign_source_sha256: frozen,
+        };
+        assert_eq!(
+            attested(&good, &me, Some("b1"), NOW, Some(binding)),
+            Err("DeployedBinaryIsNotTheCampaignsBuild")
+        );
+    }
 }

@@ -47,6 +47,8 @@ pub struct LeaseFacts {
     pub terminal: bool,
     /// The lease was created for the campaign being verified (its intent digest).
     pub for_this_campaign: bool,
+    /// A live process holds the lease's exclusive lock (`None`: the lock table could not be read).
+    pub owner_live: Option<bool>,
 }
 
 /// What the gates are computed from.
@@ -173,6 +175,11 @@ fn lease_blockers(lease: Option<LeaseFacts>) -> Vec<&'static str> {
     }
     if !lease.for_this_campaign {
         blockers.push("LeaseForAnotherCampaign");
+    }
+    match lease.owner_live {
+        Some(false) => {}
+        Some(true) => blockers.push("LeaseOwnerStillLive"),
+        None => blockers.push("LeaseOwnerUnknown"),
     }
     if !lease.terminal {
         blockers.push("LeaseNotSettled");

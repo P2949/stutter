@@ -37,6 +37,46 @@ pub struct LeaseInspection {
     pub final_phase: ResearchPhase,
     /// The campaign ended (completed, blocked or aborted) rather than stopping mid-way.
     pub terminal: bool,
+    /// Whether a live process holds the lease's own exclusive lock on its directory (the single-owner
+    /// property), read from `/proc/locks` without taking any lock. `None` when that cannot be read.
+    pub owner_live: Option<bool>,
+}
+
+/// Whether the text of `/proc/locks` shows a flock on the file with this device and inode. Each line
+/// is `<n>: FLOCK ADVISORY WRITE <pid> <major>:<minor>:<inode> <start> <end>`, with the device numbers
+/// in hexadecimal and the inode in decimal.
+fn locks_show_flock(text: &str, dev: u64, inode: u64) -> bool {
+    let major = ((dev >> 8) & 0xfff) | ((dev >> 32) & !0xfff);
+    let minor = (dev & 0xff) | ((dev >> 12) & !0xff);
+    let wanted = format!("{major:02x}:{minor:02x}:{inode}");
+    text.lines().any(|line| {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.get(1) != Some(&"FLOCK") {
+            return false;
+        }
+        let Some(file) = fields.get(5) else {
+            return false;
+        };
+        if *file == wanted {
+            return true;
+        }
+        // A filesystem with anonymous device numbers (btrfs subvolumes, overlayfs) is listed under the
+        // filesystem's own device while `stat` reports an anonymous one, so the devices differ for the
+        // same file. For those (major number 0) the inode alone is matched: a coincidence with another
+        // such file can only report a live owner that is not there, which refuses G1, never grants it.
+        let mut parts = file.split(':');
+        let (listed_major, _minor, listed_inode) = (parts.next(), parts.next(), parts.next());
+        major == 0
+            && listed_major == Some("00")
+            && listed_inode.and_then(|text| text.parse::<u64>().ok()) == Some(inode)
+    })
+}
+
+/// Whether some process holds a flock on the directory, `None` when the lock table cannot be read.
+fn flock_held(dir: &std::fs::Metadata) -> Option<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let text = std::fs::read_to_string("/proc/locks").ok()?;
+    Some(locks_show_flock(&text, dir.dev(), dir.ino()))
 }
 
 fn event_name(sequence: usize) -> String {
@@ -102,6 +142,7 @@ pub fn inspect(dir: &Path, uid: u32) -> anyhow::Result<LeaseInspection> {
         count += 1;
     }
     Ok(LeaseInspection {
+        owner_live: flock_held(&meta),
         events: count,
         chain_valid,
         transitions_valid,

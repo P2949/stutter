@@ -74,10 +74,16 @@ fn source_identity() -> anyhow::Result<String> {
             && before.mtime_nsec() == after.mtime_nsec(),
         "Stutter binary changed while its identity was read"
     );
+    source_identity_of(revision, &stutter_core::hash::sha256_hex(&bytes))
+}
+
+/// The source identity a campaign freezes: the embedded Git revision and the binary's own hash. The
+/// same function lets a verifier ask whether a given deployed binary is the one that froze a campaign.
+pub fn source_identity_of(revision: &str, binary_sha256: &str) -> anyhow::Result<String> {
     let material = serde_json::json!({
         "schema_version": 1,
         "git_revision": revision,
-        "binary_sha256": stutter_core::hash::sha256_hex(&bytes),
+        "binary_sha256": binary_sha256,
     });
     Ok(stutter_core::hash::sha256_hex(&serde_json::to_vec(
         &material,
