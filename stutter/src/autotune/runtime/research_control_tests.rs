@@ -163,6 +163,7 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         child_study_sha256: None,
         confirmation_rule: None,
         long_attempt_seconds: None,
+        prefix_cohort: None,
         treatment: None,
     };
     let facts = CampaignFacts {

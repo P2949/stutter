@@ -45,6 +45,7 @@ pub(super) fn intent() -> ResearchIntentV1 {
         child_study_sha256: None,
         confirmation_rule: None,
         long_attempt_seconds: None,
+        prefix_cohort: None,
         treatment: None,
     }
 }

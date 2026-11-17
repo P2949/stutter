@@ -215,6 +215,7 @@ pub(crate) fn derived_from(
         super::child_intent::attempt_seconds(parent, &study) == child.max_attempt_seconds;
     rebuilt.max_attempt_seconds = parent.max_attempt_seconds;
     rebuilt.child_study_sha256 = None;
+    rebuilt.prefix_cohort = None;
     rebuilt.confirmation_rule = None;
     rebuilt.treatment = None;
     // The treatment is exactly the planned study's own, and only a within-source study has one.
@@ -441,6 +442,16 @@ fn study_checks(
     };
     let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name)?);
     let child: ResearchIntentV1 = serde_json::from_slice(&read_private(&dir, "intent.json", uid)?)?;
+    // A qualified comparison must have run over warm prefixes: the first run in a prefix a game never
+    // used is a cold-cache run, and pooling it with later warm ones would mix two cohorts. Only the
+    // exploratory screen may be cold. The cohort is read from the child's sealed intent, and an
+    // unknown one is not treated as warm.
+    if decided.result == Some(StudyResult::Qualified) && !matches!(decided.stage, Stage::Screen) {
+        anyhow::ensure!(
+            child.prefix_cohort.as_deref() == Some("warm"),
+            "ColdOrUnknownCohortNotComparable"
+        );
+    }
     match decided.stage {
         Stage::Confirm | Stage::Holdout => {
             let planned = super::child_study::plan(parent)?

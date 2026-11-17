@@ -165,3 +165,46 @@ fn a_qualified_action_study_is_verified_only_when_every_treated_attempt_was_acte
     // A treated attempt whose sealed result names no process cannot be matched: not covered.
     assert!(check(&every, Some(on[0])).is_err());
 }
+
+#[test]
+fn a_qualified_comparison_over_a_cold_or_unknown_cohort_is_not_comparable_but_a_screen_may_be_cold()
+{
+    use crate::autotune::research::child_study::Stage;
+    let parent = parent();
+    let uid = crate::syscall::geteuid();
+    let plan = plan(&parent).unwrap();
+    let verdict = |stage_is: fn(&Stage) -> bool, cohort: Option<&str>| {
+        let study = plan.iter().find(|s| stage_is(&s.stage)).unwrap();
+        let mut child = built(&parent, study);
+        child.prefix_cohort = cohort.map(str::to_owned);
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(name(study));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let file = dir.join("intent.json");
+        std::fs::write(&file, serde_json::to_vec(&child).unwrap()).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let dispositions = vec![Disposition {
+            study_sha256: study.study_sha256.clone(),
+            profile: study.profile,
+            stage: study.stage,
+            result: Some(StudyResult::Qualified),
+            reason: String::new(),
+        }];
+        let rules = std::collections::BTreeMap::new();
+        let studies = File::open(root.path()).unwrap();
+        study_checks(&rules, &dispositions, &name(study), &studies, uid, &parent)
+            .map_err(|error| error.to_string())
+    };
+    // The exploratory screen may run cold.
+    assert!(verdict(|s| matches!(s, Stage::Screen), Some("cold")).is_ok());
+    // A pilot is a comparison: warm only, and an unrecorded cohort is not assumed warm.
+    assert!(verdict(|s| matches!(s, Stage::Pilot), Some("warm")).is_ok());
+    for cohort in [Some("cold"), None] {
+        let error = verdict(|s| matches!(s, Stage::Pilot), cohort).unwrap_err();
+        assert!(
+            error.contains("ColdOrUnknownCohortNotComparable"),
+            "{error}"
+        );
+    }
+}

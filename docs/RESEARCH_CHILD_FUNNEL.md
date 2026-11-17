@@ -188,3 +188,9 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   unit's duration and no longer than the authorized window, in an identified process, settled, with
   non-overlapping phases covering at least 90% of the session. This build's driver is
   `UnavailableDriver` (`BlockedNoLongSessionDriver`): nothing here can play a route in the game.
+- **Cache cohort.** A child's prefix cohort (cold or warm) is observed before the study exists and
+  sealed into its own intent (`prefix_cohort`), not left as an editable sidecar. A qualified
+  comparison stage (pilot, confirmation, holdout, action, feature) is verified only over a warm
+  cohort; a cold or unrecorded one is `ColdOrUnknownCohortNotComparable`, and only the exploratory
+  screen may be cold. Prefix state is still not shader-cache state: a warm Wine prefix does not prove
+  the Vulkan and game caches are warm, and per-attempt cache identity is not recorded.

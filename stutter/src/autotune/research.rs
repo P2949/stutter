@@ -469,6 +469,10 @@ pub struct ResearchIntentV1 {
     /// attempt. Absent unless the operator authorized a long window, so existing digests are unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub long_attempt_seconds: Option<u32>,
+    /// Only on a child study's intent: whether its arms ran over cold or warm prefixes, observed before
+    /// the study was created and sealed with it (a sidecar label could be edited after the fact).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_cohort: Option<String>,
 }
 
 impl ResearchIntentV1 {

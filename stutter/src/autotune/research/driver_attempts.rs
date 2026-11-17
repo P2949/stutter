@@ -321,12 +321,15 @@ impl DriverStudyAttempts {
 
     fn begin(&mut self, study: &ChildStudy) -> anyhow::Result<()> {
         let inputs = (self.select_arms)(study)?;
-        let intent = child_intent(&self.parent, study, &inputs.arms, inputs.rule.as_ref())?;
+        let mut intent = child_intent(&self.parent, study, &inputs.arms, inputs.rule.as_ref())?;
         // The arms must run over comparable prefixes before anything is created for the study.
         let cohort = self
             .host
             .check_prefixes(&inputs.arms)
             .map_err(|code| anyhow::anyhow!("the study's prefixes are not comparable: {code}"))?;
+        // The cohort is sealed into the child's own intent, so it is part of what the journal and the
+        // report are bound to and cannot be rewritten afterwards.
+        intent.prefix_cohort = cohort.map(|class| class.label().to_owned());
         let studies = match open_dir(&self.campaign, STUDIES_DIR) {
             Ok(dir) => dir,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

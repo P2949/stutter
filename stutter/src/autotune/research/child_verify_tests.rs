@@ -49,7 +49,9 @@ fn built(parent: &ResearchIntentV1, study: &ChildStudy) -> ResearchIntentV1 {
     };
     let rule = matches!(study.stage, Stage::Confirm | Stage::Holdout)
         .then(|| freeze(&[70.0, 73.0, 67.0]).unwrap());
-    child_intent(parent, study, &arms, rule.as_ref()).unwrap()
+    let mut child = child_intent(parent, study, &arms, rule.as_ref()).unwrap();
+    child.prefix_cohort = Some("warm".into());
+    child
 }
 
 fn name(study: &ChildStudy) -> String {
