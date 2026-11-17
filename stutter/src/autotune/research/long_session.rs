@@ -45,15 +45,43 @@ impl LongWorkUnit {
     }
 }
 
+/// Whether an intent's attempt time limits are a valid closed contract. A long window is authorized
+/// on its own: when set it is a bounded long session that fits the active budget, and only a child
+/// study (never the whole campaign) may run attempts of that length. Every other attempt keeps the
+/// short benchmark limit.
+pub fn attempt_limits_valid(intent: &super::ResearchIntentV1) -> bool {
+    let window_ok = intent.long_attempt_seconds.is_none_or(|seconds| {
+        (MIN_LONG_SESSION_SECONDS..=MAX_LONG_SESSION_SECONDS).contains(&seconds)
+            && seconds <= intent.max_active_seconds
+    });
+    let attempt_ok = (1..=720).contains(&intent.max_attempt_seconds)
+        || (intent.child_study_sha256.is_some()
+            && intent.long_attempt_seconds == Some(intent.max_attempt_seconds));
+    window_ok && attempt_ok && intent.max_attempt_seconds <= intent.max_active_seconds
+}
+
 /// Why a study on the long profile cannot run: no work unit is installed, or the installed one is
 /// not a valid long session. Every other study is unaffected.
-pub fn long_unit_blocker(study: &ChildStudy, unit: Option<&LongWorkUnit>) -> Option<&'static str> {
+pub fn long_unit_blocker(
+    study: &ChildStudy,
+    unit: Option<&LongWorkUnit>,
+    authorized_seconds: Option<u32>,
+) -> Option<&'static str> {
     if study.profile != Profile::Long {
         return None;
     }
-    match unit {
-        None => Some("BlockedNoComparableLongWorkUnit"),
-        Some(unit) => unit.validate().err(),
+    let Some(unit) = unit else {
+        return Some("BlockedNoComparableLongWorkUnit");
+    };
+    if let Err(reason) = unit.validate() {
+        return Some(reason);
+    }
+    // The session must fit the separately authorized long window, which is not the short benchmark
+    // limit: a work unit the driver would terminate before it ends cannot run.
+    match authorized_seconds {
+        Some(window) if unit.duration_seconds <= window => None,
+        Some(_) => Some("BlockedLongWorkUnitExceedsAuthorizedWindow"),
+        None => Some("BlockedNoLongAttemptAuthorization"),
     }
 }
 

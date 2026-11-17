@@ -167,6 +167,10 @@ pub(crate) fn derived_from(
     let mut rebuilt = child.clone();
     rebuilt.tools = parent.tools.clone();
     rebuilt.max_attempts = parent.max_attempts;
+    // The time limit is the study's own: the short limit, or the authorized long window.
+    let attempt_seconds_ok =
+        super::child_intent::attempt_seconds(parent, &study) == child.max_attempt_seconds;
+    rebuilt.max_attempt_seconds = parent.max_attempt_seconds;
     rebuilt.child_study_sha256 = None;
     rebuilt.confirmation_rule = None;
     rebuilt.treatment = None;
@@ -176,6 +180,7 @@ pub(crate) fn derived_from(
         && arms_ok
         && rule_ok
         && treatment_ok
+        && attempt_seconds_ok
         && child.max_attempts == study.min_attempts
         && rebuilt == *parent
 }

@@ -94,12 +94,27 @@ pub fn child_intent(
     );
     let mut child = parent.clone();
     child.tools = tools;
+    child.max_attempt_seconds = attempt_seconds(parent, study);
     child.max_attempts = study.min_attempts;
     child.child_study_sha256 = Some(study.study_sha256.clone());
     child.confirmation_rule = rule.cloned();
     child.treatment = study.treatment_spec();
     child.validate()?;
     Ok(child)
+}
+
+/// The attempt time limit a child study runs under: the campaign's short benchmark limit for every
+/// study, except that a long-profile study runs under the separately authorized long window. With no
+/// window authorized it keeps the short limit, and `long_unit_blocker` records such a study blocked
+/// before it can start, so a long session is never run under a limit that would cut it short.
+pub fn attempt_seconds(parent: &ResearchIntentV1, study: &ChildStudy) -> u32 {
+    if study.profile == super::child_study::Profile::Long {
+        parent
+            .long_attempt_seconds
+            .unwrap_or(parent.max_attempt_seconds)
+    } else {
+        parent.max_attempt_seconds
+    }
 }
 
 #[cfg(test)]

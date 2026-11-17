@@ -94,9 +94,10 @@ fn build(
     let screened = selection_blocker(campaign.try_clone()?, intent.clone(), rules.clone());
     // No CP-LONG work unit is installed in this build: a study on the long profile is recorded as
     // blocked, never run on the native benchmark and reported as a long session.
+    let long_window = intent.long_attempt_seconds;
     let selection: crate::autotune::research::funnel_driver::SelectionBlocker =
         Box::new(move |study| {
-            crate::autotune::research::long_session::long_unit_blocker(study, None)
+            crate::autotune::research::long_session::long_unit_blocker(study, None, long_window)
                 .or_else(|| screened(study))
         });
     Ok(FunnelDriver::new(
