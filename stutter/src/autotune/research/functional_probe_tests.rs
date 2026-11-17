@@ -106,3 +106,86 @@ fn missing_evidence_is_unproven_and_a_factor_the_game_never_reports_is_not_obser
         );
     }
 }
+
+/// The probe over the real, preserved native results (read-only):
+/// `STUTTER_REAL_RESULTS=<benchmarkResults dir> cargo test real_feature_probe -- --ignored --nocapture`.
+/// These runs all used one configuration, so they cannot show a feature working: that needs runs with
+/// the factor off and on, which only new launches produce.
+#[test]
+#[ignore = "needs the preserved real native results"]
+fn real_feature_probe() {
+    let root = std::env::var_os("STUTTER_REAL_RESULTS").expect("set STUTTER_REAL_RESULTS");
+    let mut contexts = Vec::new();
+    for entry in std::fs::read_dir(&root).unwrap().flatten() {
+        let (summary, frames) = (
+            std::fs::read(entry.path().join("summary.json")),
+            std::fs::read(entry.path().join("frames.csv")),
+        );
+        let (Ok(summary), Ok(frames)) = (summary, frames) else {
+            continue;
+        };
+        contexts.push(
+            crate::autotune::research::native_context::verify_frames(&summary, &frames).unwrap(),
+        );
+    }
+    println!("real results parsed: {}", contexts.len());
+    let first = &contexts[0];
+    println!(
+        "upscaling_type={:?} frame_generation_type={:?} ray_tracing={:?} gpu={:?}",
+        first.upscaling_type,
+        first.frame_generation_type,
+        first.ray_tracing_enabled,
+        first.gpu_name
+    );
+    // Every real result reports the same state, so no treatment pairing can show a difference.
+    assert!(
+        contexts
+            .iter()
+            .all(|c| c.upscaling_type == first.upscaling_type
+                && c.frame_generation_type == first.frame_generation_type)
+    );
+    let on_only: Vec<_> = contexts.iter().map(|c| (Treatment::On, Some(c))).collect();
+    let off_only: Vec<_> = contexts.iter().map(|c| (Treatment::Off, Some(c))).collect();
+    // The upscaler really is on in these runs: treated "On" they show it in use but there is no Off run.
+    println!(
+        "upscaler as On only : {:?}",
+        probe(ResearchFactor::Fsr4, &on_only)
+    );
+    println!(
+        "upscaler as Off only: {:?}",
+        probe(ResearchFactor::Fsr4, &off_only)
+    );
+    println!(
+        "frame generation as On only: {:?}",
+        probe(ResearchFactor::FrameGeneration, &on_only)
+    );
+    assert_eq!(probe(ResearchFactor::Fsr4, &on_only), Functional::Unproven);
+    assert_eq!(
+        probe(ResearchFactor::Fsr4, &off_only),
+        Functional::NotObserved
+    );
+    assert_eq!(
+        probe(ResearchFactor::FrameGeneration, &on_only),
+        Functional::NotObserved
+    );
+    // A mixed schedule over the real results would need runs that differ; none exist.
+    let mixed: Vec<_> = contexts
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            (
+                if i % 2 == 0 {
+                    Treatment::On
+                } else {
+                    Treatment::Off
+                },
+                Some(c),
+            )
+        })
+        .collect();
+    println!(
+        "upscaler, alternating labels on identical runs: {:?}",
+        probe(ResearchFactor::Fsr4, &mixed)
+    );
+    assert_eq!(probe(ResearchFactor::Fsr4, &mixed), Functional::NotObserved);
+}

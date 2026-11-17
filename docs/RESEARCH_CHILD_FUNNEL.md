@@ -273,3 +273,11 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   from live eBPF scheduler events of a selected target (`session/monitor_session/exporters.rs`), so it
   has no input without a target generating them, and PLAN asks for the causes to be injected into the
   real game. The oracle producer and its bridge test cover everything up to that input.
+- **Real-data check of the functional probe.** Run on the 9 preserved native results of the 2026-11-15
+  campaign (parsed by the product's own verifier), every result reports the same state: an upscaler on
+  (`upscalingType` 2), frame generation off, ray tracing on, on the RX 9070 XT. The probe correctly
+  returns `Unproven` (no Off run) or `NotObserved` (state contradicts the label) for every labelling,
+  so a feature can be shown working only by runs where the factor differs, which only new launches
+  produce. `docs/validation` holds summaries and markers and `testdata` planner fixtures: no raw
+  scheduler-event recording exists for the diagnosis engine; capturing one needs an eBPF load as root on
+  the live desktop, which is a decision, not an offline task.
