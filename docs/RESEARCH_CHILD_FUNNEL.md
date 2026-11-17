@@ -173,3 +173,12 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   own factor only.
 - **G0** also re-reads the frozen Proton identities, the Steam client and the account's launch
   record (`ProtonIdentityChanged`, `SteamClientChanged`, `EntitlementNotVerified`).
+- **Prefix initialization.** `research::prefix_init` is the separate stage a cold arm needs before any
+  profile or comparison (the screen applies a profile before launching, and a cold prefix has no
+  settings file). It is a bounded (15 minute), hash-chained journal per arm of immutable records
+  (`prefix-init-<arm>-NNNN.json`): `Planned -> Launched -> Settled -> Verified`, or `Abandoned`.
+  Verification needs a warm prefix with its settings file; a profile is never allowed while a launch is
+  in flight or unverified; a forged, gapped, reordered or time-reversed journal is an error. The
+  supervised launch itself is a live action and is not run; the module is staged until it is. The
+  per-attempt cache-state contract (a first run in a freshly initialized prefix is cold-cache and is
+  never pooled with warm runs) is not implemented.

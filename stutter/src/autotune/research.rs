@@ -148,6 +148,14 @@ pub(crate) mod oracle;
 pub(crate) mod owned_cleanup;
 pub(crate) mod owned_domain;
 pub(crate) mod pilot_rule;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged: the supervised initialization launch is a live action, not yet run"
+    )
+)]
+pub(crate) mod prefix_init;
 pub(crate) mod profile_mappings;
 pub(crate) mod replication;
 pub(crate) mod telemetry_observer;
