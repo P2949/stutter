@@ -116,6 +116,24 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         self.factors = factors.to_vec();
     }
 
+    fn check_prefixes(&mut self, arms: &[super::ProtonSource]) -> Result<(), &'static str> {
+        let mut inputs = Vec::new();
+        for arm in arms {
+            let slot = AttemptSlot {
+                study_sha256: String::new(),
+                context_sha256: String::new(),
+                index: 0,
+                arm: *arm,
+            };
+            let tool = self
+                .port
+                .tool_dir(&slot)
+                .map_err(|_| "PrefixToolUnavailable")?;
+            inputs.push((self.port.study_compat_data().join(arm.dir_name()), tool));
+        }
+        super::prefix_identity::check(&inputs)
+    }
+
     fn set_treatments(&mut self, treatments: Option<Vec<super::Treatment>>) {
         self.treatments = treatments;
     }

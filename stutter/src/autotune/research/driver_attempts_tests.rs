@@ -21,6 +21,7 @@ struct Host {
     process: Option<crate::autotune::research::action_child::ChildTarget>,
     abort_fails: bool,
     treatment: Option<crate::autotune::research::Treatment>,
+    prefix_refusal: Option<&'static str>,
     /// Every factor set the driver enabled before a study, shared so a test can read it back.
     seen_factors:
         std::sync::Arc<std::sync::Mutex<Vec<Vec<crate::autotune::research::ResearchFactor>>>>,
@@ -39,6 +40,7 @@ impl Host {
             process: None,
             abort_fails: false,
             treatment: None,
+            prefix_refusal: None,
         }
     }
 }
@@ -52,6 +54,9 @@ impl AttemptHost for Host {
     }
     fn attempt_treatment(&mut self) -> Option<crate::autotune::research::Treatment> {
         self.treatment
+    }
+    fn check_prefixes(&mut self, _: &[ProtonSource]) -> Result<(), &'static str> {
+        self.prefix_refusal.map_or(Ok(()), Err)
     }
     fn set_enabled_factors(&mut self, factors: &[crate::autotune::research::ResearchFactor]) {
         self.seen_factors.lock().unwrap().push(factors.to_vec());

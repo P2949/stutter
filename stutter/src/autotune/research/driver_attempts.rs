@@ -201,6 +201,10 @@ impl DriverStudyAttempts {
     fn begin(&mut self, study: &ChildStudy) -> anyhow::Result<()> {
         let inputs = (self.select_arms)(study)?;
         let intent = child_intent(&self.parent, study, &inputs.arms, inputs.rule.as_ref())?;
+        // The arms must run over comparable prefixes before anything is created for the study.
+        self.host
+            .check_prefixes(&inputs.arms)
+            .map_err(|code| anyhow::anyhow!("the study's prefixes are not comparable: {code}"))?;
         let studies = match open_dir(&self.campaign, STUDIES_DIR) {
             Ok(dir) => dir,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

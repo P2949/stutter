@@ -64,6 +64,11 @@ pub trait AttemptHost {
     fn attempt_treatment(&mut self) -> Option<super::Treatment> {
         None
     }
+    /// Whether the arms of a study run over comparable prefixes (all cold, or all warm and stamped by
+    /// their own build); the study is refused otherwise. Observation only.
+    fn check_prefixes(&mut self, _arms: &[super::ProtonSource]) -> Result<(), &'static str> {
+        Ok(())
+    }
     /// The sighted game process of the current attempt, once attested; an action child arms its
     /// gate on exactly this process.
     fn game_process(&mut self) -> Option<super::action_child::ChildTarget> {

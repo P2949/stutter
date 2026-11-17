@@ -19,3 +19,14 @@ fn a_proven_abort_releases_the_running_attempt() {
     assert_eq!(runner.abort(), Ok(()));
     assert!(!runner.has_running());
 }
+
+#[test]
+fn a_study_over_incomparable_prefixes_is_refused_before_anything_is_created() {
+    let mut host = Host::finishing();
+    host.prefix_refusal = Some("PrefixMixedColdAndWarm");
+    let (root, mut runner, study, _) = attempts(host);
+    let error = runner.poll(&study, 100).unwrap_err().to_string();
+    assert!(error.contains("PrefixMixedColdAndWarm"), "{error}");
+    assert!(!root.path().join("studies").exists(), "nothing was created");
+    assert!(!runner.has_running());
+}

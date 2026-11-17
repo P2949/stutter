@@ -102,6 +102,47 @@ pub fn comparable(arms: &[(PrefixObservation, &str)]) -> Result<PrefixClass, Inc
     Ok(first.class)
 }
 
+/// The stamp a Proton build writes into a prefix it has used: the `CURRENT_PREFIX_VERSION` its own
+/// `proton` script declares (for example `11.0-100` or `CachyOS-11.0-100`). `None` when the script
+/// cannot be read or declares none, so a prefix can then not be shown to belong to this build.
+pub fn own_stamp(tool_dir: &Path) -> Option<String> {
+    let mut script = String::new();
+    std::fs::File::open(tool_dir.join("proton"))
+        .ok()?
+        .take(4 * 1024 * 1024)
+        .read_to_string(&mut script)
+        .ok()?;
+    script.lines().find_map(|line| {
+        let value = line.strip_prefix("CURRENT_PREFIX_VERSION")?.trim_start();
+        let value = value.strip_prefix('=')?.trim();
+        let value = value.trim_matches(|c| c == '"' || c == '\'');
+        (!value.is_empty() && value.len() <= 256).then(|| value.to_owned())
+    })
+}
+
+/// The comparability policy over the arms a study runs, each as (its compat directory, its Proton
+/// installation): every prefix cold, or every prefix warm and stamped by its own build. The reason
+/// is a stable code; nothing is changed or created.
+pub fn check(arms: &[(PathBuf, PathBuf)]) -> Result<(), &'static str> {
+    let stamps: Vec<String> = arms
+        .iter()
+        .map(|(_, tool)| own_stamp(tool).ok_or("PrefixOwnStampUnknown"))
+        .collect::<Result<_, _>>()?;
+    let observed: Vec<(PrefixObservation, &str)> = arms
+        .iter()
+        .zip(&stamps)
+        .map(|((compat, _), stamp)| (observe(compat), stamp.as_str()))
+        .collect();
+    comparable(&observed)
+        .map(|_| ())
+        .map_err(|refusal| match refusal {
+            Incomparable::Indeterminate(_) => "PrefixIndeterminate",
+            Incomparable::MixedColdAndWarm => "PrefixMixedColdAndWarm",
+            Incomparable::UnstampedWarm(_) => "PrefixUnstamped",
+            Incomparable::ForeignStamp(_) => "PrefixForeignStamp",
+        })
+}
+
 #[cfg(test)]
 #[path = "prefix_identity_tests.rs"]
 mod tests;
