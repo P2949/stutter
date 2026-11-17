@@ -124,15 +124,20 @@ pub fn screen_fps(
         dir.as_fd(),
         "evidence",
     )?);
-    let mut fps: BTreeMap<ProtonSource, Vec<f64>> = BTreeMap::new();
-    for item in read_evidence(&evidence, uid)?.into_values() {
-        if let Some(native) = item.native_completion.as_deref() {
-            fps.entry(native.proton_source)
-                .or_default()
-                .push(native.metrics.average_fps);
-        }
-    }
-    Ok(fps)
+    // The screen's cohort is read from its own sealed intent. In a cold cohort each arm's first run is a
+    // cold-cache run and is set aside, so the ranking compares steady state and not first use.
+    let cohort = serde_json::from_slice::<super::ResearchIntentV1>(
+        &super::report_store::read_private(&dir, "intent.json", uid)?,
+    )?
+    .prefix_cohort;
+    let runs: Vec<_> = read_evidence(&evidence, uid)?
+        .into_iter()
+        .filter_map(|(slot, item)| {
+            let native = item.native_completion.as_deref()?;
+            Some((slot, native.proton_source, native.metrics.average_fps))
+        })
+        .collect();
+    Ok(super::cache_state::warm_fps(cohort.as_deref(), &runs))
 }
 
 #[cfg(test)]

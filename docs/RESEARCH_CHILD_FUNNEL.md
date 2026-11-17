@@ -194,3 +194,8 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   cohort; a cold or unrecorded one is `ColdOrUnknownCohortNotComparable`, and only the exploratory
   screen may be cold. Prefix state is still not shader-cache state: a warm Wine prefix does not prove
   the Vulkan and game caches are warm, and per-attempt cache identity is not recorded.
+- **Per-attempt cache state.** `research::cache_state` classifies each completed run from the study's
+  sealed cohort and sealed evidence (nothing to trust): in a cold-cohort study the first completed run
+  of each arm is `ColdFirstUse`, every other run `Warm`. The screen ranking (`screen_fps`, used by both
+  selection and its verification) averages warm runs only, so first-use compilation is never pooled
+  with steady state. Shader-cache temperature is still inferred from the prefix, not measured.
