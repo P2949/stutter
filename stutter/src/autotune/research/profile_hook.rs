@@ -76,7 +76,21 @@ impl ProfileHook for FileProfileHook {
             return Ok(false);
         };
         if !self.unavailable.is_empty() {
-            return Err(ProfileFailure::Failed("SettingsFileUnavailable"));
+            // A settings file that simply does not exist yet belongs to a prefix no game run has
+            // initialized (cold). That is not a failure of the study: it cannot take a profile until
+            // the prefix has been initialized, which needs its own supervised launch, and the study is
+            // blocked with that reason. A file that exists but cannot be opened safely is a failure.
+            let cold = self.unavailable.iter().all(|path| {
+                matches!(
+                    std::fs::symlink_metadata(path),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound
+                )
+            });
+            return Err(if cold {
+                ProfileFailure::Blocked("BlockedPrefixNotInitialized")
+            } else {
+                ProfileFailure::Failed("SettingsFileUnavailable")
+            });
         }
         let running = (self.game_running)();
         for (index, file) in self.files.iter().enumerate() {

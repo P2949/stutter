@@ -125,3 +125,41 @@ its own blocker (`LeaseChainBroken`, `LeaseTransitionsInvalid`, `LeaseHeaderMism
 `LeaseForAnotherCampaign`, `LeaseNotSettled`, or `LeaseNotInspected`). Authenticated IPC and
 single-owner properties are tested elsewhere and are not claimed by this inspection. Run against the
 real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
+
+## Production-path contracts added after the fifth audit
+
+- **Treatments.** A within-source study runs each factor's own catalog environment for both arms
+  (`features::arm_env(source, factors, on)`): the NTSync control is `PROTON_NO_NTSYNC=1`, the Wayland
+  control is `PROTON_ENABLE_WAYLAND=0`, never an empty environment that could equal the study arm.
+- **Unresolved ownership.** A halt whose settlement or restoration is unproven
+  (`child_runner::leaves_ownership_unresolved`: `SettlementUnproven`, `RecoveryUnproven`,
+  `RestoreUnproven`, `ExecutorError`) keeps the campaign lease and the action slot and sets
+  `UnsafeToResume`, as a driver error does; it is never settled as an ordinary blocked campaign.
+- **Campaign budgets.** The active-time and evidence-byte budgets belong to the campaign. A finished
+  child records `budget.json` beside its study; the next child's driver starts from the sum, and a
+  child with no record is charged the whole active budget.
+- **CP-LONG window.** `long_attempt_seconds` (20-60 minutes, within the active budget) is authorized
+  separately from the 720 s benchmark limit and applies only to a long-profile child; the work unit
+  must fit it (`BlockedNoLongAttemptAuthorization`, `BlockedLongWorkUnitExceedsAuthorizedWindow`).
+  The child verifier binds each child's limit to its study. No producer for a long session exists.
+- **Cold prefixes.** A settings file that does not exist (a never-initialized prefix) blocks the
+  profile as `BlockedPrefixNotInitialized` instead of failing the study. Initializing a prefix needs a
+  supervised launch and is not implemented here. Each child records `prefix-cohort.json`.
+- **G8** recomputes everything from the units: both required units exactly once, an identified main
+  process (MainPID, start ticks, argv[0], and the executable hash where readable), the same boot, a
+  fresh receipt, this very binary. Stored summary flags are ignored. The user cannot read the service
+  processes' `/proc/<pid>/exe`, so argv[0] naming the unit's own immutable store path is the
+  unprivileged tier; a readable executable that differs always refuses.
+- **G1** lists the lease directory and requires a gapless chain with no stray `event-` entry; an
+  unreadable record is an error, not the end of the chain.
+- **G3** joins each receipt to the sealed native completion's pid, start ticks and uid, and the
+  observer requires the source bound, healthy and from one producer across the whole attempt.
+- **G5** joins each action receipt to a completed attempt the schedule treated On and requires every
+  treated attempt to carry one (`ActionNotAppliedOnEveryTreatedAttempt` otherwise): a policy-only
+  comparison is not reported as an applied-action study.
+- **G6** consumes a typed `fault-matrix-*.json` receipt: every required class must have a physical
+  pass for this binary; fixtures never count. No physical matrix has been run.
+- **G9** also requires each holdout to reproduce its confirmation (`replication`): a sound holdout
+  that reaches another conclusion, or an inconclusive one, blocks with `HoldoutDoesNotReplicate`.
+- **Bundle.** Child rows carry telemetry receipts and process identities, and a bundle that cannot be
+  written turns the verification response into `BundleNotWritten`.

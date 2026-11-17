@@ -242,19 +242,34 @@ fn cold_path(a: &Arms) -> PathBuf {
 }
 
 #[test]
-fn an_unavailable_arm_refuses_the_profile_without_changing_any_arm() {
+fn a_cold_prefix_blocks_the_profile_as_not_initialized_without_changing_any_arm() {
     let a = arms(1, &[]);
     let original = bytes(&a);
+    // No settings file at all: the prefix was never initialized by a game run.
     let missing = cold_path(&a);
     let paths = a.paths.clone();
     let mut hook = FileProfileHook::new(a.files, index_free, idle).with_unavailable(vec![missing]);
     assert_eq!(
         hook.apply(Profile::Cpu),
-        Err(ProfileFailure::Failed("SettingsFileUnavailable"))
+        Err(ProfileFailure::Blocked("BlockedPrefixNotInitialized"))
     );
     assert_eq!(bytes(&a_paths(&paths)), original, "no arm was edited");
     // A study that needs no graphics profile still runs.
     assert_eq!(hook.apply(Profile::Long), Ok(false));
+}
+
+#[test]
+fn an_arm_whose_settings_exist_but_cannot_be_opened_safely_is_a_failure_not_a_cold_prefix() {
+    let a = arms(1, &[]);
+    // The path exists but is not a settings file the applier may take (a directory here).
+    let unsafe_path = cold_path(&a);
+    std::fs::create_dir_all(&unsafe_path).unwrap();
+    let mut hook =
+        FileProfileHook::new(a.files, index_free, idle).with_unavailable(vec![unsafe_path]);
+    assert_eq!(
+        hook.apply(Profile::Cpu),
+        Err(ProfileFailure::Failed("SettingsFileUnavailable"))
+    );
 }
 
 #[test]
