@@ -11,7 +11,12 @@ impl ResearchCoordinator {
 
     /// The Steam library directory used to re-read the host (read-only) when a campaign is verified.
     pub(in crate::autotune::runtime) fn set_steamapps_dir(&mut self, path: Option<PathBuf>) {
-        self.steamapps_dir = path;
+        self.host_sources.0 = path;
+    }
+
+    /// The Proton installation manifest used to re-read the frozen Proton and Steam client identities.
+    pub(in crate::autotune::runtime) fn set_proton_manifest(&mut self, path: Option<PathBuf>) {
+        self.host_sources.1 = path;
     }
 
     pub(super) fn study_root_matches(&self, facts: &CampaignFacts) -> bool {

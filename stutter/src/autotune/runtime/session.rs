@@ -65,6 +65,14 @@ pub async fn run_autotune_controller_session(
                 .research_steamapps_dir
                 .clone(),
         );
+        coordinator.set_proton_manifest(
+            runtime
+                .config()
+                .daemon_config
+                .autotune
+                .research_proton_manifest
+                .clone(),
+        );
         coordinator.set_host_factory(Some(super::research_control::select_host_factory(
             &runtime.config().daemon_config.autotune,
         )));

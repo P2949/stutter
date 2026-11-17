@@ -193,13 +193,17 @@ impl ResearchCoordinator {
                         // G8 stands on a receipt of what is deployed, about the very binary
                         // doing this verification; none is inferred from the Nix pin.
                         lease: self.lease_facts(&report.intent_sha256, uid),
-                        host: intent.as_ref().zip(self.steamapps_dir.as_deref()).and_then(
-                            |(intent, steamapps)| {
+                        host: intent
+                            .as_ref()
+                            .zip(self.host_sources.0.as_deref())
+                            .and_then(|(intent, steamapps)| {
                                 crate::autotune::research::host_baseline::inspect(
-                                    intent, steamapps, uid,
+                                    intent,
+                                    steamapps,
+                                    self.host_sources.1.as_deref(),
+                                    uid,
                                 )
-                            },
-                        ),
+                            }),
                         deployment_attested: self.study_dir.as_deref().is_some_and(|study| {
                             crate::autotune::research::deploy_receipt::own_binary_sha256()
                                 .is_some_and(|own| {

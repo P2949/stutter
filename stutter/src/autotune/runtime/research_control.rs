@@ -71,7 +71,7 @@ struct TerminalCampaign {
 pub(super) struct ResearchCoordinator {
     campaign_dir: Option<PathBuf>,
     study_dir: Option<PathBuf>,
-    steamapps_dir: Option<PathBuf>,
+    host_sources: (Option<PathBuf>, Option<PathBuf>),
     storage_blocker: Option<&'static str>,
     facts: Option<CampaignFacts>,
     context_blocker: &'static str,
@@ -121,7 +121,7 @@ impl ResearchCoordinator {
         Self {
             campaign_dir,
             study_dir: None,
-            steamapps_dir: None,
+            host_sources: (None, None),
             storage_blocker,
             facts,
             context_blocker,

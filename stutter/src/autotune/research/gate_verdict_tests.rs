@@ -297,9 +297,38 @@ fn g0_stands_on_a_host_that_has_not_moved_from_what_the_campaign_froze() {
         build_id_matches: true,
         game_executable_matches: true,
         installation_settled: true,
+        proton_identities_match: true,
+        steam_client_matches: true,
+        entitlement_verified: true,
     };
     assert_eq!(with(None).blockers, ["HostNotInspected"]);
     assert!(with(Some(steady)).accepted);
+    // The Proton builds, the Steam client and the launch record are each their own blocker.
+    for (moved, blocker) in [
+        (
+            HostFacts {
+                proton_identities_match: false,
+                ..steady
+            },
+            "ProtonIdentityChanged",
+        ),
+        (
+            HostFacts {
+                steam_client_matches: false,
+                ..steady
+            },
+            "SteamClientChanged",
+        ),
+        (
+            HostFacts {
+                entitlement_verified: false,
+                ..steady
+            },
+            "EntitlementNotVerified",
+        ),
+    ] {
+        assert_eq!(with(Some(moved)).blockers, [blocker]);
+    }
     assert_eq!(
         with(Some(HostFacts {
             same_boot: false,

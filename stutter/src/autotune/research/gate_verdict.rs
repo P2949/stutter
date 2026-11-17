@@ -28,6 +28,13 @@ pub struct HostFacts {
     pub game_executable_matches: bool,
     /// Steam indicates no pending update of the installation.
     pub installation_settled: bool,
+    /// Every Proton identity the campaign froze is still installed, eligible and unchanged.
+    pub proton_identities_match: bool,
+    /// The Steam client is the one the campaign froze (branch and runtime identity).
+    pub steam_client_matches: bool,
+    /// The signed-in account still has a launch record for the game (the same evidence the
+    /// production host requires before it will launch).
+    pub entitlement_verified: bool,
 }
 
 /// What a read-only inspection of the campaign's lease found (G1).
@@ -134,6 +141,15 @@ fn host_blockers(host: Option<HostFacts>) -> Vec<&'static str> {
     }
     if !host.installation_settled {
         blockers.push("InstallationNotSettled");
+    }
+    if !host.proton_identities_match {
+        blockers.push("ProtonIdentityChanged");
+    }
+    if !host.steam_client_matches {
+        blockers.push("SteamClientChanged");
+    }
+    if !host.entitlement_verified {
+        blockers.push("EntitlementNotVerified");
     }
     blockers
 }
