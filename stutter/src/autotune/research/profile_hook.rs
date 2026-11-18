@@ -22,6 +22,8 @@ pub fn production_spec(profile: Profile) -> Result<Option<ProfileSpec>, ProfileF
     }
 }
 
+type MappingLoader = Box<dyn Fn(&[StudySettingsFile]) -> super::profile_mappings::Mappings + Send>;
+
 pub struct FileProfileHook {
     files: Vec<StudySettingsFile>,
     /// Settings paths that could not be opened safely (no file yet, or an unsafe one). They cannot
@@ -32,6 +34,7 @@ pub struct FileProfileHook {
     applied: Vec<(usize, AppliedProfile)>,
     /// Observed list mappings the profiles are resolved against before they are applied.
     mappings: super::profile_mappings::Mappings,
+    mapping_loader: Option<MappingLoader>,
 }
 
 impl FileProfileHook {
@@ -47,6 +50,7 @@ impl FileProfileHook {
             game_running,
             applied: Vec::new(),
             mappings: super::profile_mappings::Mappings::default(),
+            mapping_loader: None,
         }
     }
 
@@ -54,6 +58,12 @@ impl FileProfileHook {
     /// list index is blocked as `BlockedProfileMapping`.
     pub fn with_mappings(mut self, mappings: super::profile_mappings::Mappings) -> Self {
         self.mappings = mappings;
+        self
+    }
+
+    /// Load mappings from recovered settings immediately before applying the profile.
+    pub fn with_mapping_loader(mut self, loader: MappingLoader) -> Self {
+        self.mapping_loader = Some(loader);
         self
     }
 
@@ -85,6 +95,9 @@ impl ProfileHook for FileProfileHook {
         let Some(spec) = (self.spec_for)(profile)? else {
             return Ok(false);
         };
+        if let Some(loader) = &self.mapping_loader {
+            self.mappings = loader(&self.files);
+        }
         let spec = self.mappings.resolve(spec);
         if !self.unavailable.is_empty() {
             // A settings file that simply does not exist yet belongs to a prefix no game run has

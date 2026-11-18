@@ -15,7 +15,7 @@ use crate::{
         profile_applier::StudySettingsFile,
         profile_hook::{FileProfileHook, cyberpunk_running, production_spec},
         session_host::arm_prefix_paths,
-        study_executor::ProfileHook,
+        study_executor::{ProfileFailure, ProfileHook},
         telemetry_observer::SharedTelemetry,
     },
     daemon::privilege::UnixSocketPrivilegedActionService,
@@ -77,12 +77,79 @@ fn profiles(study_dir: &std::path::Path, intent: &ResearchIntentV1) -> Box<dyn P
     }
     // The list mappings observed so far (remembered beside the study) and any the arms' current
     // settings now show. A profile is resolved against them; a value never observed keeps it blocked.
-    let mappings = observed_mappings(study_dir, intent.uid, &files);
+    let mapping_dir = study_dir.to_path_buf();
+    let uid = intent.uid;
     Box::new(
         FileProfileHook::new(files, production_spec, cyberpunk_running)
             .with_unavailable(unavailable)
-            .with_mappings(mappings),
+            .with_mapping_loader(Box::new(move |files| {
+                observed_mappings(&mapping_dir, uid, files)
+            })),
     )
+}
+
+/// Rediscover prefix settings and their observed mappings immediately before each profile.
+/// The active hook is retained until restoration is proven; replacing it earlier would lose
+/// in-memory rollback state. Both the old and freshly discovered settings are recovered before use.
+struct RefreshingProfiles {
+    make: Box<dyn Fn() -> Box<dyn ProfileHook + Send> + Send>,
+    current: Box<dyn ProfileHook + Send>,
+    active: bool,
+    unresolved: bool,
+}
+
+impl RefreshingProfiles {
+    fn new(make: Box<dyn Fn() -> Box<dyn ProfileHook + Send> + Send>) -> Self {
+        let current = make();
+        Self {
+            make,
+            current,
+            active: false,
+            unresolved: false,
+        }
+    }
+
+    fn recover_current(&mut self) -> Result<(), &'static str> {
+        if self.active || self.unresolved {
+            return Err("ProfileOwnershipUnresolved");
+        }
+        if let Err(reason) = self.current.recover() {
+            self.unresolved = true;
+            return Err(reason);
+        }
+        Ok(())
+    }
+}
+
+impl ProfileHook for RefreshingProfiles {
+    fn apply(
+        &mut self,
+        profile: crate::autotune::research::child_study::Profile,
+    ) -> Result<bool, ProfileFailure> {
+        self.recover_current().map_err(ProfileFailure::Unrestored)?;
+        self.current = (self.make)();
+        self.recover_current().map_err(ProfileFailure::Unrestored)?;
+        let result = self.current.apply(profile);
+        self.active = matches!(result, Ok(true));
+        self.unresolved = matches!(result, Err(ProfileFailure::Unrestored(_)));
+        result
+    }
+
+    fn recover(&mut self) -> Result<(), &'static str> {
+        self.recover_current()
+    }
+
+    fn restore(&mut self) -> Result<(), &'static str> {
+        if self.unresolved {
+            return Err("ProfileOwnershipUnresolved");
+        }
+        if let Err(reason) = self.current.restore() {
+            self.unresolved = true;
+            return Err(reason);
+        }
+        self.active = false;
+        Ok(())
+    }
 }
 
 fn build(
@@ -146,7 +213,11 @@ fn build(
     Ok(FunnelDriver::new(
         campaign,
         intent,
-        profiles(study_dir, intent),
+        Box::new(RefreshingProfiles::new(Box::new({
+            let study_dir = study_dir.to_path_buf();
+            let intent = intent.clone();
+            move || profiles(&study_dir, &intent)
+        }))),
         attempts,
         |_| None,
         rules,
@@ -180,6 +251,192 @@ mod tests {
 
     fn config() -> crate::daemon::config::autotune::DaemonAutotuneConfig {
         crate::daemon::config::autotune::DaemonAutotuneConfig::default()
+    }
+
+    #[derive(Default)]
+    struct RefreshState {
+        settings_exist: bool,
+        fail_recovery: bool,
+        fail_restore: bool,
+        generations: usize,
+        applications: Vec<(usize, bool)>,
+        restores: Vec<usize>,
+    }
+
+    struct FakeProfile {
+        state: std::sync::Arc<std::sync::Mutex<RefreshState>>,
+        generation: usize,
+        settings_exist: bool,
+    }
+
+    impl ProfileHook for FakeProfile {
+        fn apply(
+            &mut self,
+            _: crate::autotune::research::child_study::Profile,
+        ) -> Result<bool, ProfileFailure> {
+            let mut state = self.state.lock().unwrap();
+            state
+                .applications
+                .push((self.generation, self.settings_exist));
+            if self.settings_exist {
+                Ok(true)
+            } else {
+                Err(ProfileFailure::Blocked("BlockedPrefixNotInitialized"))
+            }
+        }
+        fn recover(&mut self) -> Result<(), &'static str> {
+            if self.state.lock().unwrap().fail_recovery {
+                Err("RecoveryUnproven")
+            } else {
+                Ok(())
+            }
+        }
+        fn restore(&mut self) -> Result<(), &'static str> {
+            let mut state = self.state.lock().unwrap();
+            state.restores.push(self.generation);
+            if state.fail_restore {
+                Err("RestoreUnproven")
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn refreshing(state: std::sync::Arc<std::sync::Mutex<RefreshState>>) -> RefreshingProfiles {
+        RefreshingProfiles::new(Box::new(move || {
+            let mut locked = state.lock().unwrap();
+            locked.generations += 1;
+            Box::new(FakeProfile {
+                state: state.clone(),
+                generation: locked.generations,
+                settings_exist: locked.settings_exist,
+            })
+        }))
+    }
+
+    #[test]
+    fn profile_refresh_observes_new_settings_and_preserves_the_applied_hook_until_restore() {
+        use crate::autotune::research::child_study::Profile;
+        let state = std::sync::Arc::new(std::sync::Mutex::new(RefreshState::default()));
+        let mut hook = refreshing(state.clone());
+        hook.recover().unwrap();
+        state.lock().unwrap().settings_exist = true;
+        assert_eq!(hook.apply(Profile::Cpu), Ok(true));
+        assert_eq!(state.lock().unwrap().applications, vec![(2, true)]);
+        assert!(matches!(
+            hook.apply(Profile::Cpu),
+            Err(ProfileFailure::Unrestored(_))
+        ));
+        assert_eq!(state.lock().unwrap().generations, 2);
+        hook.restore().unwrap();
+        assert_eq!(state.lock().unwrap().restores, vec![2]);
+        assert_eq!(hook.apply(Profile::Cpu), Ok(true));
+        assert_eq!(state.lock().unwrap().generations, 3);
+    }
+
+    #[test]
+    fn unproven_recovery_latches_the_profile_hook_and_prevents_rediscovery() {
+        use crate::autotune::research::child_study::Profile;
+        let state = std::sync::Arc::new(std::sync::Mutex::new(RefreshState::default()));
+        let mut hook = refreshing(state.clone());
+        state.lock().unwrap().fail_recovery = true;
+        assert_eq!(
+            hook.apply(Profile::Cpu),
+            Err(ProfileFailure::Unrestored("RecoveryUnproven"))
+        );
+        state.lock().unwrap().fail_recovery = false;
+        assert!(matches!(
+            hook.apply(Profile::Cpu),
+            Err(ProfileFailure::Unrestored(_))
+        ));
+        assert!(hook.restore().is_err());
+        assert_eq!(state.lock().unwrap().generations, 1);
+        assert!(state.lock().unwrap().applications.is_empty());
+    }
+
+    #[test]
+    fn unproven_restoration_does_not_replace_or_reapply_the_hook() {
+        use crate::autotune::research::child_study::Profile;
+        let state = std::sync::Arc::new(std::sync::Mutex::new(RefreshState {
+            settings_exist: true,
+            ..Default::default()
+        }));
+        let mut hook = refreshing(state.clone());
+        assert_eq!(hook.apply(Profile::Cpu), Ok(true));
+        state.lock().unwrap().fail_restore = true;
+        assert_eq!(hook.restore(), Err("RestoreUnproven"));
+        state.lock().unwrap().fail_restore = false;
+        assert!(matches!(
+            hook.apply(Profile::Cpu),
+            Err(ProfileFailure::Unrestored(_))
+        ));
+        assert!(hook.restore().is_err());
+        assert_eq!(state.lock().unwrap().generations, 2);
+    }
+
+    #[test]
+    fn profile_refresh_reopens_settings_created_after_funnel_construction() {
+        use crate::autotune::research::{
+            child_study::Profile,
+            profile_applier::{ProfileSpec, ray_tracing_off},
+        };
+        fn spec(_: Profile) -> Result<Option<ProfileSpec>, ProfileFailure> {
+            Ok(Some(ray_tracing_off()))
+        }
+        fn idle() -> bool {
+            false
+        }
+        let root = tempfile::tempdir().unwrap();
+        let root_path = std::fs::canonicalize(root.path()).unwrap();
+        let settings = root_path.join("UserSettings.json");
+        let observations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut hook = RefreshingProfiles::new(Box::new({
+            let root_path = root_path.clone();
+            let settings = settings.clone();
+            let observations = observations.clone();
+            move || {
+                let file =
+                    StudySettingsFile::new(&root_path, settings.clone(), crate::syscall::geteuid());
+                match file {
+                    Ok(file) => Box::new(
+                        FileProfileHook::new(vec![file], spec, idle).with_mapping_loader(Box::new(
+                            {
+                                let observations = observations.clone();
+                                move |files| {
+                                    observations.lock().unwrap().push(files[0].read().unwrap());
+                                    Default::default()
+                                }
+                            },
+                        )),
+                    ),
+                    Err(_) => Box::new(
+                        FileProfileHook::new(Vec::new(), spec, idle)
+                            .with_unavailable(vec![settings.clone()]),
+                    ),
+                }
+            }
+        }));
+        hook.recover().unwrap();
+        let original = br#"{"version":1,"data":[{"group_name":"/graphics/raytracing","options":[{"name":"RayTracing","type":"bool","value":true},{"name":"RayTracedReflections","type":"bool","value":true},{"name":"RayTracedSunShadows","type":"bool","value":true},{"name":"RayTracedLocalShadows","type":"bool","value":true},{"name":"RayTracedPathTracing","type":"bool","value":false}]}]}"#;
+        std::fs::write(&settings, original).unwrap();
+        assert_eq!(hook.apply(Profile::Cpu), Ok(true));
+        assert_ne!(std::fs::read(&settings).unwrap(), original);
+        hook.restore().unwrap();
+        assert_eq!(std::fs::read(&settings).unwrap(), original);
+        // Simulate an interrupted earlier edit. Rediscovery must recover the durable snapshot
+        // before asking the mapping loader to observe the file.
+        let file = StudySettingsFile::new(&root_path, settings.clone(), crate::syscall::geteuid())
+            .unwrap();
+        let mut interrupted = FileProfileHook::new(vec![file], spec, idle);
+        assert_eq!(interrupted.apply(Profile::Cpu), Ok(true));
+        drop(interrupted);
+        assert_eq!(hook.apply(Profile::Cpu), Ok(true));
+        assert_eq!(
+            observations.lock().unwrap().as_slice(),
+            &[original.to_vec(), original.to_vec()]
+        );
+        hook.restore().unwrap();
+        assert_eq!(std::fs::read(&settings).unwrap(), original);
     }
 
     #[test]
