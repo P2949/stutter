@@ -261,6 +261,10 @@ impl FunnelDriver {
         self.runner.ledger().dispositions()
     }
 
+    pub(crate) fn is_quiescent(&self) -> bool {
+        self.executor.is_quiescent()
+    }
+
     /// Request cancellation: the next tick settles the running attempt, restores the profile and
     /// ends the funnel without deciding what it prevented.
     pub fn cancel(&mut self) {

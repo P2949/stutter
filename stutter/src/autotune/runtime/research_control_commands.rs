@@ -16,6 +16,12 @@ impl ResearchCoordinator {
         if active.lease.phase() != ResearchPhase::AwaitSafeWindow {
             return response("blocked", "CannotPauseActiveStage");
         }
+        if !self.driver_is_quiescent() {
+            return response("blocked", "CannotPauseOwnedResources");
+        }
+        let Some(active) = self.active.as_mut() else {
+            return response("denied", "NoCampaign");
+        };
         if active.lease.advance(ResearchPhase::Paused, now).is_err() {
             return response("blocked", "PausePersistenceFailed");
         }

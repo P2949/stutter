@@ -318,6 +318,11 @@ impl Driver {
         build_from_dirs(&self.intent, &self.journal, &self.evidence)
     }
 
+    /// Whether this driver may still own an attempt, dispatch or unresolved launch.
+    pub(crate) fn has_owned_attempt(&self) -> bool {
+        self.active.is_some() || self.dispatch_may_exist || self.unresolved_launch.is_some()
+    }
+
     pub fn cancel(&mut self) {
         self.cancel = true;
     }

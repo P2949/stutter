@@ -366,6 +366,40 @@ impl ResearchCoordinator {
         }
     }
 
+    /// Prove that an attached driver has settled its attempt and any profile it owns.
+    /// A lease phase alone is not proof: a funnel can apply a profile before a launch window.
+    pub(super) fn settle_owned_driver(&mut self, now: u64) -> anyhow::Result<()> {
+        if self.launch_unresolved || self.storage_blocker == Some("UnsafeToResume") {
+            anyhow::bail!("research ownership requires independent recovery");
+        }
+        let Some(state) = self.driver.as_mut() else {
+            return Ok(());
+        };
+        if let Some(funnel) = state.funnel.as_mut() {
+            funnel
+                .shutdown()
+                .map_err(|reason| anyhow::anyhow!("funnel settlement unproven: {reason}"))?;
+        } else {
+            state.driver.cancel();
+            match state
+                .driver
+                .tick_with_launch_fence(state.host.as_mut(), now, || {
+                    anyhow::bail!("settlement must not launch an attempt")
+                })? {
+                Step::Sealed(_) | Step::Cancelled | Step::Halted(_) | Step::Stopped(_) => {}
+                _ => anyhow::bail!("research attempt settlement unproven"),
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn driver_is_quiescent(&self) -> bool {
+        self.driver.as_ref().is_none_or(|state| {
+            !state.driver.has_owned_attempt()
+                && state.funnel.as_ref().is_none_or(FunnelDriver::is_quiescent)
+        })
+    }
+
     /// Settle an in-process attempt before the controller and worker shut down. An unsealed or
     /// previously uncertain attempt remains recoverable only through the existing safety gate.
     pub(in crate::autotune::runtime) fn shutdown_driver(&mut self, now: u64) -> anyhow::Result<()> {

@@ -133,7 +133,7 @@ fn open_campaign(
 /// A lease can still say AwaitSafeWindow after the driver has journalled and launched an attempt.
 /// The separate study journal must therefore independently prove that no attempt was started.
 fn verify_no_attempts(lease: &CampaignLease, study_path: Option<&Path>) -> anyhow::Result<()> {
-    let Some((campaign, _)) = open_campaign(lease, study_path)? else {
+    let Some((campaign, intent)) = open_campaign(lease, study_path)? else {
         return Ok(());
     };
     for name in ["journal", "dispatch"] {
@@ -154,25 +154,29 @@ fn verify_no_attempts(lease: &CampaignLease, study_path: Option<&Path>) -> anyho
     // A child that only began (its directories exist) and never started an attempt is fine; one whose
     // journal or dispatch holds anything needs settlement verification.
     let studies = match crate::syscall::openat_dir_nofollow(campaign.as_fd(), "studies") {
-        Ok(dir) => File::from(dir),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Ok(dir) => Some(File::from(dir)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-    for entry in std::fs::read_dir(format!("/proc/self/fd/{}", studies.as_raw_fd()))? {
-        let study = File::from(crate::syscall::openat_dir_nofollow(
-            studies.as_fd(),
-            &entry?.file_name().to_string_lossy(),
-        )?);
-        for name in ["journal", "dispatch"] {
-            let dir = File::from(crate::syscall::openat_dir_nofollow(study.as_fd(), name)?);
-            anyhow::ensure!(
-                std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))?
-                    .next()
-                    .is_none(),
-                "UnsafeToResume: child study records require settlement verification"
-            );
+    if let Some(studies) = studies {
+        for entry in std::fs::read_dir(format!("/proc/self/fd/{}", studies.as_raw_fd()))? {
+            let study = File::from(crate::syscall::openat_dir_nofollow(
+                studies.as_fd(),
+                &entry?.file_name().to_string_lossy(),
+            )?);
+            for name in ["journal", "dispatch"] {
+                let dir = File::from(crate::syscall::openat_dir_nofollow(study.as_fd(), name)?);
+                anyhow::ensure!(
+                    std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))?
+                        .next()
+                        .is_none(),
+                    "UnsafeToResume: child study records require settlement verification"
+                );
+            }
         }
     }
+    // Even without a launch, a funnel may have applied a profile while awaiting a safe window.
+    restore_profiles(study_path, &intent)?;
     Ok(())
 }
 

@@ -141,6 +141,11 @@ pub struct HostStudyExecutor<P: ProfileHook, A: StudyAttempts> {
 }
 
 impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
+    /// Idle is the only state that proves no profile or attempt is retained.
+    pub(crate) fn is_quiescent(&self) -> bool {
+        matches!(self.state, State::Idle)
+    }
+
     pub fn new(profiles: P, attempts: A) -> Self {
         Self {
             profiles,

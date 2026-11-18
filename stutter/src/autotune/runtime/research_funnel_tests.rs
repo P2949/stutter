@@ -358,3 +358,94 @@ fn an_integrity_failure_in_a_child_stops_the_resident_funnel_after_settlement() 
     assert_eq!(terminal.code, "AbortedIntegrity");
     assert_eq!(s.script.lock().unwrap().launches, 1);
 }
+
+fn builder_with_file_profile(
+    root: std::path::PathBuf,
+    settings: std::path::PathBuf,
+) -> FunnelBuilder {
+    use crate::autotune::research::{
+        profile_applier::{ProfileSpec, StudySettingsFile, ray_tracing_off},
+        profile_hook::FileProfileHook,
+    };
+    fn spec(_: Profile) -> Result<Option<ProfileSpec>, ProfileFailure> {
+        Ok(Some(ray_tracing_off()))
+    }
+    fn idle() -> bool {
+        false
+    }
+    Box::new(move |intent, campaign, host| {
+        let parent = intent.clone();
+        let attempts = DriverStudyAttempts::new(
+            campaign.try_clone()?,
+            intent.clone(),
+            host,
+            Box::new(|| 0),
+            Box::new(|| Ok(())),
+            Box::new(|_| std::path::PathBuf::from("/nonexistent")),
+            Box::new(move |study| inputs_for_study(&parent, study, &BTreeMap::new(), None)),
+        );
+        let file = StudySettingsFile::new(&root, settings.clone(), crate::syscall::geteuid())
+            .map_err(|error| anyhow::anyhow!("fixture settings: {error:?}"))?;
+        FunnelDriver::new(
+            campaign,
+            intent,
+            Box::new(FileProfileHook::new(vec![file], spec, idle)),
+            attempts,
+            |_| None,
+            Default::default(),
+        )
+    })
+}
+
+#[test]
+fn waiting_window_cancel_deadline_and_pause_preserve_profile_ownership() {
+    for operation in ["cancel", "deadline", "pause", "shutdown", "failed_restore"] {
+        let profile = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(profile.path()).unwrap();
+        let settings = root.join("UserSettings.json");
+        let original = br#"{"version":1,"data":[{"group_name":"/graphics/raytracing","options":[{"name":"RayTracing","type":"bool","value":true},{"name":"RayTracedReflections","type":"bool","value":true},{"name":"RayTracedSunShadows","type":"bool","value":true},{"name":"RayTracedLocalShadows","type":"bool","value":true},{"name":"RayTracedPathTracing","type":"bool","value":false}]}]}"#;
+        std::fs::write(&settings, original).unwrap();
+        let mut s = setup_with_builder(
+            Script {
+                safe: false,
+                ..Default::default()
+            },
+            40,
+            Some(builder_with_file_profile(root, settings.clone())),
+        );
+        s.coordinator.drive_attempts(101);
+        assert_eq!(phase(&s.coordinator), Some(ResearchPhase::AwaitSafeWindow));
+        assert_eq!(s.script.lock().unwrap().launches, 0);
+        assert_ne!(std::fs::read(&settings).unwrap(), original);
+        assert!(crate::autotune::research::profile_applier::pending_snapshot(&settings));
+        match operation {
+            "cancel" => {
+                send(&mut s.coordinator, ResearchRequest::Cancel {}, 102);
+            }
+            "deadline" => s.coordinator.on_deadline(3610),
+            "shutdown" => s.coordinator.shutdown_driver(102).unwrap(),
+            "pause" => {
+                let reply = send(&mut s.coordinator, ResearchRequest::Pause {}, 102);
+                assert!(reply.contains("CannotPauseOwnedResources"), "{reply}");
+                assert!(s.coordinator.owns_action_slot());
+                assert!(crate::autotune::research::profile_applier::pending_snapshot(&settings));
+                send(&mut s.coordinator, ResearchRequest::Cancel {}, 103);
+            }
+            "failed_restore" => {
+                std::fs::write(&settings, b"external change").unwrap();
+                let reply = send(&mut s.coordinator, ResearchRequest::Cancel {}, 102);
+                assert!(reply.contains("UnsafeToResume"), "{reply}");
+                assert!(s.coordinator.owns_action_slot());
+                assert!(s.coordinator.terminal.is_none());
+                assert!(crate::autotune::research::profile_applier::pending_snapshot(&settings));
+                continue;
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(std::fs::read(&settings).unwrap(), original, "{operation}");
+        assert!(!crate::autotune::research::profile_applier::pending_edit(
+            &settings
+        ));
+        assert!(!s.coordinator.owns_action_slot());
+    }
+}
