@@ -529,6 +529,13 @@ fn a_port_without_a_transient_launcher_blocks_instead_of_spawning_steam() {
         },
     };
     let error = port.launch(&slot, &context).unwrap_err();
+    assert_eq!(
+        error
+            .downcast_ref::<super::super::driver_failure::LaunchFailure>()
+            .unwrap()
+            .class,
+        super::super::driver_failure::FailureClass::Environment
+    );
     assert!(
         error
             .to_string()

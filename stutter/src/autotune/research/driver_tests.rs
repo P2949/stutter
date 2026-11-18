@@ -7,6 +7,7 @@ struct Fake {
     safe: bool,
     polls: VecDeque<Progress>,
     launch_fails: bool,
+    launch_class: Option<FailureClass>,
     launch_unresolved: bool,
     launches: u32,
     aborts: u32,
@@ -52,6 +53,13 @@ impl AttemptHost for Fake {
         if self.launch_unresolved {
             return Err(LaunchUnresolved("lost acknowledgement").into());
         }
+        if let Some(class) = self.launch_class {
+            return Err(super::super::driver_failure::LaunchFailure {
+                class,
+                code: "TestLaunchFailure",
+            }
+            .into());
+        }
         anyhow::ensure!(!self.launch_fails, "steam refused");
         Ok(())
     }
@@ -78,6 +86,7 @@ fn fake() -> Fake {
         safe: true,
         polls: VecDeque::new(),
         launch_fails: false,
+        launch_class: None,
         launch_unresolved: false,
         launches: 0,
         aborts: 0,
@@ -104,7 +113,8 @@ fn deadline_expiring_during_preparation_never_starts_steam() {
     };
     assert_eq!(
         record.outcome,
-        AttemptOutcome::Failed {
+        AttemptOutcome::ClassifiedFailure {
+            class: FailureClass::Resource,
             code: "AuthorizationExpiredBeforeLaunch".into()
         }
     );
@@ -125,7 +135,8 @@ fn deadline_expiring_during_safe_window_check_never_starts_steam() {
     };
     assert_eq!(
         record.outcome,
-        AttemptOutcome::Failed {
+        AttemptOutcome::ClassifiedFailure {
+            class: FailureClass::Resource,
             code: "AuthorizationExpiredBeforeLaunch".into()
         }
     );
@@ -264,48 +275,6 @@ fn an_unresolved_launch_is_never_sealed_aborted_or_retried() {
     driver.cancel();
     assert!(driver.tick(&mut host, now + 2).is_err());
     assert_eq!(host.launches, 1);
-}
-
-#[test]
-fn launch_refusal_timeout_and_cancel_seal_failed_without_replay() {
-    let (_dir, mut driver, intent) = setup(4);
-    let mut host = fake();
-    host.launch_fails = true;
-    let now = intent.issued_unix_seconds + 1;
-    let Step::Sealed(record) = driver.tick(&mut host, now).unwrap() else {
-        panic!("launch refusal must seal")
-    };
-    assert_eq!(
-        record.outcome,
-        AttemptOutcome::Failed {
-            code: "LaunchRefused".into()
-        }
-    );
-    assert_eq!(host.aborts, 1);
-    host.launch_fails = false;
-    assert_eq!(driver.tick(&mut host, now + 1).unwrap(), Step::Running(1));
-    let Step::Sealed(record) = driver.tick(&mut host, now + 1 + 100).unwrap() else {
-        panic!("timeout must seal")
-    };
-    assert_eq!(
-        record.outcome,
-        AttemptOutcome::Failed {
-            code: "AttemptTimeout".into()
-        }
-    );
-    assert_eq!(driver.tick(&mut host, now + 200).unwrap(), Step::Running(2));
-    driver.cancel();
-    let Step::Sealed(record) = driver.tick(&mut host, now + 201).unwrap() else {
-        panic!("cancel must seal")
-    };
-    assert_eq!(
-        record.outcome,
-        AttemptOutcome::Failed {
-            code: "Cancelled".into()
-        }
-    );
-    assert_eq!(driver.tick(&mut host, now + 202).unwrap(), Step::Cancelled);
-    assert_eq!(host.launches, 3);
 }
 
 #[test]

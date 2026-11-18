@@ -593,7 +593,6 @@ impl Driver {
                 }
             };
         }
-        // A GPU reset is an unconditional stop: nothing launches again, whatever budget remains.
         if host.health_blocked() {
             return Ok(Step::Halted("BlockedGpuStability"));
         }
@@ -666,30 +665,31 @@ impl Driver {
             });
         match launched {
             Ok(()) => Ok(Step::Running(slot.index)),
-            // A request that may already have reached Steam is neither a refusal nor abortable:
-            // a successful no-op abort would not show it cannot start later.
+            // A request that may have reached Steam cannot be safely aborted as a refusal.
             Err(error) if error.downcast_ref::<LaunchUnresolved>().is_some() => {
                 self.unresolved_launch = Some(slot.index);
                 Err(error)
             }
             Err(error) => {
                 log::warn!("launch refused for slot {}: {error:#}", slot.index);
+                let (class, code) =
+                    super::driver_failure::LaunchFailure::classify(&error, authorization_expired);
+                if class == FailureClass::OwnershipUnresolved {
+                    self.unresolved_launch = Some(slot.index);
+                    return Ok(Step::OwnershipUnresolved("SettlementUnproven"));
+                }
                 host.abort()?;
-                // Arming can fail before or after creating the directory. Until its identity
-                // is established by recovery, do not alter or seal potentially foreign state.
                 anyhow::ensure!(!arm_failed, "attempt arming needs independent recovery");
-                self.seal(
+                let sealed = self.seal(
                     slot,
-                    AttemptOutcome::Failed {
-                        code: if authorization_expired {
-                            "AuthorizationExpiredBeforeLaunch"
-                        } else {
-                            "LaunchRefused"
-                        }
-                        .into(),
+                    AttemptOutcome::ClassifiedFailure {
+                        class,
+                        code: code.into(),
                     },
                     now,
-                )
+                )?;
+                self.terminal_failure = Some(class);
+                Ok(sealed)
             }
         }
     }

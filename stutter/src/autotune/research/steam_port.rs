@@ -568,40 +568,7 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
     }
 
     fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()> {
-        // Production launches go only through the authenticated user manager. A missing
-        // launcher blocks; it never selects another launch method.
-        anyhow::ensure!(self.transient.is_some(), "BlockedTransientLauncherRequired");
-        anyhow::ensure!(!self.unsettled, "a launch remains unsettled");
-        anyhow::ensure!(launcher_is_unprivileged(), "BlockedPrivilegedSteamLauncher");
-        anyhow::ensure!(
-            launch_window_open(&context.intent, std::time::SystemTime::now()),
-            "campaign authorization expired before Steam launch"
-        );
-        // Re-check at the last moment: the window can close between admission and launch.
-        anyhow::ensure!(
-            self.idle_is_fresh() && self.steam_and_prefilter_clear(),
-            "safe window closed before launch"
-        );
-        let dispatch = self.open_dispatch(slot, context)?;
-        if let Some(guard) = self.gpu.as_mut() {
-            guard.begin_attempt();
-        }
-        self.probe.begin(slot.arm)?;
-        anyhow::ensure!(
-            self.idle_is_fresh(),
-            "desktop idle observation expired before launch"
-        );
-        anyhow::ensure!(
-            self.steam_session_paths_verified() && self.idle_is_fresh(),
-            "BlockedSteamSessionEnvironment"
-        );
-        anyhow::ensure!(self.disk_reserve_ok(), "BlockedDiskReserve");
-        // The cached admission can be seconds old; health is read again right before the send.
-        anyhow::ensure!(
-            self.gpu.as_mut().is_none_or(GpuGuard::admit_now),
-            "BlockedGpuStability"
-        );
-        self.start_unit(dispatch, slot, context)
+        self.launch_checked(slot, context)
     }
 
     fn state(&mut self) -> GameState {
@@ -663,6 +630,9 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
         Ok(())
     }
 }
+
+#[path = "steam_port_launch.rs"]
+mod launch;
 
 impl<R: ResultProbe> ProductionSteamPort<R> {
     /// One cleanup and witness pass; it clears `unsettled` only when the witness proves settlement.

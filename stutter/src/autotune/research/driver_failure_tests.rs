@@ -108,3 +108,86 @@ fn a_restarted_driver_reconstructs_a_terminal_class_from_the_sealed_journal() {
         assert_eq!(host.launches, 1);
     }
 }
+#[test]
+fn typed_launch_failures_stop_after_settlement_and_unresolved_ownership_is_retained() {
+    for class in [
+        FailureClass::Environment,
+        FailureClass::Resource,
+        FailureClass::Integrity,
+        FailureClass::Health,
+        FailureClass::OwnershipUnresolved,
+    ] {
+        let (_dir, mut driver, intent) = setup(4);
+        let mut host = fake();
+        host.launch_class = Some(class);
+        let now = intent.issued_unix_seconds + 1;
+        let first = driver.tick(&mut host, now).unwrap();
+        if class == FailureClass::OwnershipUnresolved {
+            assert_eq!(first, Step::OwnershipUnresolved("SettlementUnproven"));
+            assert_eq!(host.aborts, 0);
+            assert!(driver.tick(&mut host, now + 1).is_err());
+        } else {
+            assert!(
+                matches!(first, Step::Sealed(ref record) if matches!(record.outcome, AttemptOutcome::ClassifiedFailure { class: found, .. } if found == class))
+            );
+            let next = driver.tick(&mut host, now + 1).unwrap();
+            assert_eq!(
+                next,
+                if class == FailureClass::Health {
+                    Step::Halted("BlockedGpuStability")
+                } else {
+                    Step::Stopped(class)
+                }
+            );
+            assert_eq!(host.aborts, 1);
+        }
+        assert_eq!(host.launches, 1);
+    }
+}
+#[test]
+fn launch_refusal_timeout_and_cancel_seal_failed_without_replay() {
+    let (_dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.launch_fails = true;
+    let now = intent.issued_unix_seconds + 1;
+    let Step::Sealed(record) = driver.tick(&mut host, now).unwrap() else {
+        panic!("launch refusal must seal")
+    };
+    assert_eq!(
+        record.outcome,
+        AttemptOutcome::ClassifiedFailure {
+            class: FailureClass::Environment,
+            code: "LaunchRefused".into()
+        }
+    );
+    assert_eq!(host.aborts, 1);
+    host.launch_fails = false;
+    assert_eq!(
+        driver.tick(&mut host, now + 1).unwrap(),
+        Step::Stopped(FailureClass::Environment)
+    );
+    let (_other_dir, mut driver, _) = setup(4);
+    assert_eq!(driver.tick(&mut host, now + 1).unwrap(), Step::Running(0));
+    let Step::Sealed(record) = driver.tick(&mut host, now + 1 + 100).unwrap() else {
+        panic!("timeout must seal")
+    };
+    assert_eq!(
+        record.outcome,
+        AttemptOutcome::Failed {
+            code: "AttemptTimeout".into()
+        }
+    );
+    assert_eq!(driver.tick(&mut host, now + 200).unwrap(), Step::Running(1));
+    driver.cancel();
+    let Step::Sealed(record) = driver.tick(&mut host, now + 201).unwrap() else {
+        panic!("cancel must seal")
+    };
+    assert_eq!(
+        record.outcome,
+        AttemptOutcome::Failed {
+            code: "Cancelled".into()
+        }
+    );
+    assert_eq!(driver.tick(&mut host, now + 202).unwrap(), Step::Cancelled);
+    assert_eq!(host.launches, 3);
+}
