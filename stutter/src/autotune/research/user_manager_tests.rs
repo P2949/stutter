@@ -6,6 +6,24 @@ use super::*;
 use crate::integrations::dbus::fake::{Reply, serve};
 
 #[test]
+fn manager_executable_must_be_observable_and_exact() {
+    use std::os::unix::fs::symlink;
+    let root = tempfile::tempdir().unwrap();
+    let expected = root.path().join("systemd");
+    let other = root.path().join("impostor");
+    let proc_exe = root.path().join("exe");
+    std::fs::write(&expected, b"expected").unwrap();
+    std::fs::write(&other, b"other").unwrap();
+    let expected = std::fs::canonicalize(expected).unwrap();
+    assert!(verify_manager_executable(&proc_exe, &expected).is_err());
+    symlink(&other, &proc_exe).unwrap();
+    assert!(verify_manager_executable(&proc_exe, &expected).is_err());
+    std::fs::remove_file(&proc_exe).unwrap();
+    symlink(&expected, &proc_exe).unwrap();
+    assert!(verify_manager_executable(&proc_exe, &expected).is_ok());
+}
+
+#[test]
 fn broker_candidate_requires_a_unique_stable_owner_of_the_peer_endpoint() {
     use std::os::unix::fs::symlink;
     let proc = tempfile::tempdir().unwrap();

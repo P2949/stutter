@@ -5,10 +5,7 @@
 use std::{
     fs::File,
     io::Read,
-    os::unix::{
-        ffi::OsStrExt,
-        fs::{FileTypeExt, MetadataExt},
-    },
+    os::unix::fs::{FileTypeExt, MetadataExt},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -93,6 +90,14 @@ fn bus_cgroup(cgroup: &str, uid: u32) -> bool {
         })
 }
 
+fn verify_manager_executable(proc_exe: &Path, expected: &Path) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        std::fs::canonicalize(proc_exe)? == expected,
+        "user manager executable mismatch"
+    );
+    Ok(())
+}
+
 fn inspect_manager_process(pid: Pid, uid: u32) -> anyhow::Result<u64> {
     let proc = Path::new("/proc");
     let raw = pid.as_u32();
@@ -113,21 +118,8 @@ fn inspect_manager_process(pid: Pid, uid: u32) -> anyhow::Result<u64> {
     );
     let dir = proc.join(raw.to_string());
     let cmdline = read_bounded(&dir.join("cmdline"))?;
-    match std::fs::canonicalize(dir.join("exe")) {
-        Ok(path) => anyhow::ensure!(path == expected, "user manager executable mismatch"),
-        // A manager holding any capability is not dumpable, so its exe link is unreadable to the
-        // unprivileged controller. Only that case falls back to the exact argv[0]; the cgroup and
-        // owner checks below still apply, and an impostor would need to be this same user.
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
-            let argv0 = cmdline.split(|byte| *byte == 0).next().unwrap_or_default();
-            let argv0 = Path::new(std::ffi::OsStr::from_bytes(argv0));
-            anyhow::ensure!(
-                argv0.is_absolute() && std::fs::canonicalize(argv0)? == expected,
-                "user manager executable mismatch"
-            );
-        }
-        Err(error) => return Err(error.into()),
-    }
+    // argv[0] is process-controlled and cannot attest the executable when procfs denies access.
+    verify_manager_executable(&dir.join("exe"), &expected)?;
     anyhow::ensure!(manager_command_line(&cmdline), "not a user manager");
     let cgroup = read_bounded(&dir.join("cgroup"))?;
     let cgroup = std::str::from_utf8(&cgroup)?;
