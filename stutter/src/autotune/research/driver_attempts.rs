@@ -496,7 +496,10 @@ impl DriverStudyAttempts {
                 })
                 .collect(),
             health_halt,
-            context_consistent: evidence_context_consistent(&evidence),
+            context_consistent: evidence_context_consistent(
+                &evidence,
+                driver.intent().treatment.as_ref(),
+            ),
             conformance,
             raw_verified: raw.passed(),
             runtime_matched,

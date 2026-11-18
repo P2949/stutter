@@ -246,6 +246,31 @@ fn native_completions_decide_consistent_or_drifted_context() {
     };
     let mut evidence: BTreeMap<u32, _> = schedule.iter().map(|s| (s.index, make(s))).collect();
     assert_eq!(context_state(&evidence), ContextState::Consistent);
+    let mut feature = evidence.clone();
+    feature
+        .get_mut(&3)
+        .unwrap()
+        .native_completion
+        .as_mut()
+        .unwrap()
+        .context
+        .as_mut()
+        .unwrap()
+        .frame_generation_type = Some(1);
+    let factor = super::super::TreatmentSpec::Factor(super::super::ResearchFactor::FrameGeneration);
+    assert!(evidence_context_consistent(&feature, Some(&factor)));
+    assert!(!evidence_context_consistent(&feature, None));
+    feature
+        .get_mut(&3)
+        .unwrap()
+        .native_completion
+        .as_mut()
+        .unwrap()
+        .context
+        .as_mut()
+        .unwrap()
+        .ray_tracing_enabled = Some(false);
+    assert!(!evidence_context_consistent(&feature, Some(&factor)));
     evidence
         .get_mut(&3)
         .unwrap()

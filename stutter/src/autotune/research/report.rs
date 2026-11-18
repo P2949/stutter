@@ -330,7 +330,7 @@ fn treatment_result(
         fps.get(&schedule[index].index).copied()
     };
     // Every attempt is the same build, so the context must agree across all of them.
-    let context = context_state(evidence);
+    let context = context_state_with_treatment(evidence, intent.treatment.as_ref());
     let (mut left, mut right) = (Vec::new(), Vec::new());
     for block in 0..blocks {
         if let (Some(off), Some(on)) = (value(block, Off), value(block, On)) {
@@ -407,11 +407,24 @@ enum ContextState {
 /// Cross-attempt context check from the sealed native completions themselves. Unknown is never
 /// treated as stable, and an inconsistent context withholds the numeric comparison.
 fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
+    context_state_with_treatment(evidence, None)
+}
+
+fn context_state_with_treatment(
+    evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+    treatment: Option<&super::TreatmentSpec>,
+) -> ContextState {
     /// Two reported values disagree only when both were reported; a hole is not a disagreement but
     /// it is not agreement either (see `is_complete`).
     fn differs<T: PartialEq>(a: &Option<T>, b: &Option<T>) -> bool {
         matches!((a, b), (Some(x), Some(y)) if x != y)
     }
+    // For a factor study, the field that IS the factor is intentionally different between arms.
+    // Differences in that field are legal; differences in any other field are Drifted.
+    let factor = match treatment {
+        Some(super::TreatmentSpec::Factor(f)) => Some(*f),
+        _ => None,
+    };
     let mut natives = evidence
         .values()
         .map(|item| item.native_completion.as_deref());
@@ -454,9 +467,11 @@ fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
             && (differs(&a.game_version, &b.game_version)
                 || differs(&a.preset_name, &b.preset_name)
                 || differs(&a.gpu_name, &b.gpu_name)
-                || differs(&a.upscaling_type, &b.upscaling_type)
+                || (factor != Some(super::ResearchFactor::Fsr4)
+                    && differs(&a.upscaling_type, &b.upscaling_type))
                 || differs(&a.ray_tracing_enabled, &b.ray_tracing_enabled)
-                || differs(&a.frame_generation_type, &b.frame_generation_type))
+                || (factor != Some(super::ResearchFactor::FrameGeneration)
+                    && differs(&a.frame_generation_type, &b.frame_generation_type)))
         {
             return ContextState::Drifted;
         }
@@ -470,6 +485,9 @@ fn context_state(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> ContextState {
 
 /// Whether the sealed native completions prove one consistent comparison context (identity,
 /// settings, graphics context and matched runtime). Used by child studies to qualify their result.
-pub(super) fn evidence_context_consistent(evidence: &BTreeMap<u32, AttemptEvidenceV1>) -> bool {
-    context_state(evidence) == ContextState::Consistent
+pub(super) fn evidence_context_consistent(
+    evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+    treatment: Option<&super::TreatmentSpec>,
+) -> bool {
+    context_state_with_treatment(evidence, treatment) == ContextState::Consistent
 }
