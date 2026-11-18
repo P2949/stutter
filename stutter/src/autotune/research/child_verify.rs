@@ -507,10 +507,7 @@ fn study_checks(
             let failures: Vec<_> = journal
                 .verify()?
                 .into_iter()
-                .filter_map(|record| match record.outcome {
-                    super::journal::AttemptOutcome::Failed { code } => Some(code),
-                    super::journal::AttemptOutcome::Completed { .. } => None,
-                })
+                .filter_map(|record| record.outcome.compatibility_failure().map(str::to_owned))
                 .collect();
             let evidence = File::from(crate::syscall::openat_dir_nofollow(
                 dir.as_fd(),

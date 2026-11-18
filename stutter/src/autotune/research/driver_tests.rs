@@ -566,6 +566,7 @@ fn a_host_reported_failure_aborts_and_seals_with_its_code() {
     let now = intent.issued_unix_seconds + 1;
     assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
     host.polls.push_back(Progress::Failed {
+        class: crate::autotune::research::driver::FailureClass::Environment,
         code: "GameCrashed".into(),
     });
     let Step::Sealed(record) = driver.tick(&mut host, now + 1).unwrap() else {
@@ -573,7 +574,8 @@ fn a_host_reported_failure_aborts_and_seals_with_its_code() {
     };
     assert_eq!(
         record.outcome,
-        AttemptOutcome::Failed {
+        AttemptOutcome::ClassifiedFailure {
+            class: FailureClass::Environment,
             code: "GameCrashed".into()
         }
     );
@@ -692,5 +694,7 @@ fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
     ));
 }
 
+#[path = "driver_failure_tests.rs"]
+mod failure_tests;
 #[path = "driver_health_tests.rs"]
 mod health;

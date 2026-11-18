@@ -15,18 +15,13 @@ use super::{
 
 const ARM_LIFETIME_SECONDS: u64 = 120;
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the real Steam host reports these once launching is qualified"
-    )
-)]
+pub use super::driver_failure::FailureClass;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Progress {
     Running,
     Finished { evidence: AttemptEvidenceV1 },
-    Failed { code: String },
+    Failed { class: FailureClass, code: String },
 }
 
 /// Effects on the real world. Implementations must be idempotent for `abort`.
@@ -121,6 +116,8 @@ pub enum Step {
     Cancelled,
     /// A durable health stop ended the campaign; the remaining schedule is left unexecuted.
     Halted(&'static str),
+    /// An independently settled failure that terminates the campaign.
+    Stopped(FailureClass),
     /// A child operation could not prove settlement or restoration; retain campaign ownership.
     OwnershipUnresolved(&'static str),
 }
@@ -147,6 +144,7 @@ pub struct Driver {
     /// Set when a launch request may have reached Steam and its effect is unknown. The driver
     /// then refuses every further tick, keeping the attempt, tickets and lease as they are.
     unresolved_launch: Option<u32>,
+    terminal_failure: Option<FailureClass>,
     cancel: bool,
 }
 
@@ -214,6 +212,7 @@ impl Driver {
             last_tick_seconds: None,
             fresh_journal_checked: false,
             unresolved_launch: None,
+            terminal_failure: None,
             cancel: false,
         }
     }
@@ -419,6 +418,13 @@ impl Driver {
             .into());
         }
         self.last_tick_seconds = Some(now);
+        if let Some(class) = self.terminal_failure {
+            return Ok(if class == FailureClass::Health {
+                Step::Halted("BlockedGpuStability")
+            } else {
+                Step::Stopped(class)
+            });
+        }
         if !self.fresh_journal_checked {
             anyhow::ensure!(
                 self.journal.verify()?.is_empty(),
@@ -448,10 +454,22 @@ impl Driver {
                 return self.seal(slot, AttemptOutcome::Failed { code: code.into() }, now);
             }
             let progress = host.poll();
-            if now
-                .saturating_add(tick_started.elapsed().as_secs())
-                .saturating_add(1)
-                >= self.intent.deadline_unix_seconds
+            // Integrity, health and unresolved-ownership observations outrank a simultaneous
+            // deadline or budget boundary; the latter must not erase the real terminal cause.
+            let urgent = matches!(
+                &progress,
+                Progress::Failed {
+                    class: FailureClass::Integrity
+                        | FailureClass::Health
+                        | FailureClass::OwnershipUnresolved,
+                    ..
+                }
+            );
+            if !urgent
+                && now
+                    .saturating_add(tick_started.elapsed().as_secs())
+                    .saturating_add(1)
+                    >= self.intent.deadline_unix_seconds
             {
                 host.abort()?;
                 return self.seal(
@@ -462,11 +480,12 @@ impl Driver {
                     now,
                 );
             }
-            if self.active_seconds.saturating_add(
-                now.saturating_sub(started)
-                    .max(monotonic_start.elapsed().as_secs())
-                    .saturating_add(1),
-            ) >= u64::from(self.intent.max_active_seconds)
+            if !urgent
+                && self.active_seconds.saturating_add(
+                    now.saturating_sub(started)
+                        .max(monotonic_start.elapsed().as_secs())
+                        .saturating_add(1),
+                ) >= u64::from(self.intent.max_active_seconds)
             {
                 host.abort()?;
                 return self.seal(
@@ -477,10 +496,11 @@ impl Driver {
                     now,
                 );
             }
-            if now
-                .saturating_sub(started)
-                .max(monotonic_start.elapsed().as_secs())
-                >= u64::from(self.intent.max_attempt_seconds)
+            if !urgent
+                && now
+                    .saturating_sub(started)
+                    .max(monotonic_start.elapsed().as_secs())
+                    >= u64::from(self.intent.max_attempt_seconds)
             {
                 host.abort()?;
                 return self.seal(
@@ -494,8 +514,9 @@ impl Driver {
             return match progress {
                 Progress::Running => Ok(Step::Running(slot.index)),
                 Progress::Finished { evidence } => {
-                    match evidence
+                    let checked = evidence
                         .validate_for(&slot, &self.intent)
+                        .map_err(|_| (FailureClass::Integrity, "EvidenceRejected"))
                         .and_then(|()| {
                             ensure_evidence_budget(
                                 &self.evidence,
@@ -505,27 +526,52 @@ impl Driver {
                                     .saturating_sub(self.prior_evidence_bytes),
                                 &evidence,
                             )
+                            .map_err(|error| {
+                                if error
+                                    .downcast_ref::<super::report_store::EvidenceBudgetExceeded>()
+                                    .is_some()
+                                {
+                                    (FailureClass::Resource, "EvidenceBudgetExceeded")
+                                } else {
+                                    (FailureClass::Integrity, "EvidenceBudgetUnreadable")
+                                }
+                            })
                         })
-                        .and_then(|()| write_evidence(&self.evidence, &slot, &evidence))
-                    {
+                        .and_then(|()| {
+                            write_evidence(&self.evidence, &slot, &evidence)
+                                .map_err(|_| (FailureClass::Integrity, "EvidencePersistenceFailed"))
+                        });
+                    match checked {
                         Ok(evidence_sha256) => {
                             self.seal(slot, AttemptOutcome::Completed { evidence_sha256 }, now)
                         }
-                        Err(_) => {
+                        Err((class, code)) => {
                             host.abort()?;
-                            self.seal(
+                            let sealed = self.seal(
                                 slot,
-                                AttemptOutcome::Failed {
-                                    code: "EvidenceRejected".into(),
+                                AttemptOutcome::ClassifiedFailure {
+                                    class,
+                                    code: code.into(),
                                 },
                                 now,
-                            )
+                            )?;
+                            self.terminal_failure = Some(class);
+                            Ok(sealed)
                         }
                     }
                 }
-                Progress::Failed { code } => {
+                Progress::Failed { class, code } => {
+                    if class == FailureClass::OwnershipUnresolved {
+                        self.unresolved_launch = Some(slot.index);
+                        return Ok(Step::OwnershipUnresolved("SettlementUnproven"));
+                    }
                     host.abort()?;
-                    self.seal(slot, AttemptOutcome::Failed { code }, now)
+                    let sealed =
+                        self.seal(slot, AttemptOutcome::ClassifiedFailure { class, code }, now)?;
+                    if class != FailureClass::Incompatible {
+                        self.terminal_failure = Some(class);
+                    }
+                    Ok(sealed)
                 }
             };
         }

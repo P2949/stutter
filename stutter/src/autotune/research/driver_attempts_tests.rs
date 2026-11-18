@@ -301,6 +301,7 @@ fn a_child_study_runs_its_own_attempts_through_the_driver_and_reports_what_was_s
 fn a_failed_attempt_is_sealed_failed_and_the_study_is_incomplete() {
     let mut host = Host::finishing();
     host.polls.push_back(Progress::Failed {
+        class: crate::autotune::research::driver::FailureClass::Incompatible,
         code: "ExitedWithoutNativeResult".into(),
     });
     let (_root, mut runner, study, _) = attempts(host);
@@ -314,6 +315,7 @@ fn a_failed_attempt_is_sealed_failed_and_the_study_is_incomplete() {
 fn a_gpu_reset_halts_the_study_and_no_further_attempt_runs() {
     let mut host = Host::finishing();
     host.polls.push_back(Progress::Failed {
+        class: crate::autotune::research::driver::FailureClass::Health,
         code: "GpuReset".into(),
     });
     let (_root, mut runner, study, _) = attempts(host);

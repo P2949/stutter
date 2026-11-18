@@ -333,3 +333,28 @@ fn controller_shutdown_settles_a_funnel_attempt_or_refuses_when_settlement_is_un
         }
     }
 }
+
+#[test]
+fn an_integrity_failure_in_a_child_stops_the_resident_funnel_after_settlement() {
+    use crate::autotune::research::driver::FailureClass;
+    let mut script = Script {
+        safe: true,
+        ..Default::default()
+    };
+    script.polls.push_back(Progress::Failed {
+        class: FailureClass::Integrity,
+        code: "SameDiagnostic".into(),
+    });
+    let mut s = setup(script, 40, true);
+    s.coordinator.drive_attempts(101);
+    s.coordinator.drive_attempts(102);
+    s.coordinator.drive_attempts(103);
+    let terminal = s
+        .coordinator
+        .terminal
+        .as_ref()
+        .expect("integrity failure must terminate");
+    assert_eq!(terminal.phase, ResearchPhase::Aborted);
+    assert_eq!(terminal.code, "AbortedIntegrity");
+    assert_eq!(s.script.lock().unwrap().launches, 1);
+}

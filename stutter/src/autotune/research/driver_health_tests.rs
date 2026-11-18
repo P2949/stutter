@@ -7,6 +7,7 @@ fn a_gpu_reset_stops_the_whole_campaign_and_nothing_launches_again() {
     let now = intent.issued_unix_seconds + 1;
     assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
     host.polls.push_back(Progress::Failed {
+        class: crate::autotune::research::driver::FailureClass::Health,
         code: "GpuReset".into(),
     });
     let Step::Sealed(record) = driver.tick(&mut host, now + 1).unwrap() else {
@@ -14,7 +15,8 @@ fn a_gpu_reset_stops_the_whole_campaign_and_nothing_launches_again() {
     };
     assert_eq!(
         record.outcome,
-        AttemptOutcome::Failed {
+        AttemptOutcome::ClassifiedFailure {
+            class: FailureClass::Health,
             code: "GpuReset".into()
         }
     );
@@ -88,6 +90,7 @@ mod production_like {
             self.guard.last_poll = None;
             if self.guard.reset_during_attempt() {
                 return Progress::Failed {
+                    class: crate::autotune::research::driver::FailureClass::Health,
                     code: "GpuReset".into(),
                 };
             }
@@ -120,7 +123,8 @@ mod production_like {
         };
         assert_eq!(
             record.outcome,
-            AttemptOutcome::Failed {
+            AttemptOutcome::ClassifiedFailure {
+                class: FailureClass::Health,
                 code: "GpuReset".into()
             }
         );

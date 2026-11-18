@@ -435,6 +435,7 @@ impl DriverStudyAttempts {
         study: &ChildStudy,
         driver: &Driver,
         health_halt: bool,
+        terminal_failure: Option<super::driver::FailureClass>,
     ) -> anyhow::Result<AttemptsOutcome> {
         let report = driver.finalize()?;
         self.record_telemetry(study)?;
@@ -490,12 +491,10 @@ impl DriverStudyAttempts {
             failures: driver
                 .records()?
                 .into_iter()
-                .filter_map(|record| match record.outcome {
-                    super::journal::AttemptOutcome::Failed { code } => Some(code),
-                    super::journal::AttemptOutcome::Completed { .. } => None,
-                })
+                .filter_map(|record| record.outcome.compatibility_failure().map(str::to_owned))
                 .collect(),
             health_halt,
+            terminal_failure,
             context_consistent: evidence_context_consistent(
                 &evidence,
                 driver.intent().treatment.as_ref(),
@@ -549,7 +548,8 @@ impl StudyAttempts for DriverStudyAttempts {
             match driver.tick_with_launch_fence(self.host.as_mut(), now, || {
                 anyhow::bail!("cancellation must not launch an attempt")
             }) {
-                Ok(Step::Sealed(_)) | Ok(Step::Cancelled) => {}
+                Ok(Step::Sealed(_)) | Ok(Step::Cancelled) | Ok(Step::Stopped(_))
+                | Ok(Step::Halted(_)) => {}
                 _ => return Err("SettlementUnproven"),
             }
         } else {
@@ -601,6 +601,10 @@ impl StudyAttempts for DriverStudyAttempts {
         self.observe_feature(study);
         self.arm_telemetry();
         let halted = matches!(step, Step::Halted(_));
+        let terminal_failure = match step {
+            Step::Stopped(class) => Some(class),
+            _ => None,
+        };
         match step {
             Step::Waiting | Step::Running(_) | Step::Sealed(_) => Ok(None),
             Step::OwnershipUnresolved(reason) => {
@@ -610,14 +614,20 @@ impl StudyAttempts for DriverStudyAttempts {
             | Step::Expired
             | Step::ActiveBudgetExhausted
             | Step::Cancelled
-            | Step::Halted(_) => {
+            | Step::Halted(_)
+            | Step::Stopped(_) => {
                 let Some((_, driver)) = self.running.take() else {
                     return Ok(None);
                 };
                 // What this child used is recorded before anything else is decided about it, so
                 // the next child starts from the campaign's true spend; unrecorded fails closed.
                 self.record_budget(study, &driver)?;
-                Ok(Some(self.outcome(study, &driver, halted)?))
+                Ok(Some(self.outcome(
+                    study,
+                    &driver,
+                    halted,
+                    terminal_failure,
+                )?))
             }
         }
     }

@@ -310,7 +310,10 @@ impl FunnelDriver {
                 .step_fenced(&mut self.executor, &combined, &mut || blocked, fence)?;
         let inner = self.executor.take_step();
         Ok(match step {
-            RunnerStep::Halted(code) => Step::Halted(code),
+            RunnerStep::Halted(code) => match inner {
+                Some(Step::Stopped(class)) => Step::Stopped(class),
+                _ => Step::Halted(code),
+            },
             RunnerStep::OwnershipUnresolved(code) => Step::OwnershipUnresolved(code),
             RunnerStep::Done => Step::Done,
             // While a study runs, and on the tick that finishes one, the inner driver's step moves
@@ -322,6 +325,7 @@ impl FunnelDriver {
                     | Step::ActiveBudgetExhausted
                     | Step::Cancelled
                     | Step::Halted(_)
+                    | Step::Stopped(_)
                     | Step::OwnershipUnresolved(_)),
                 ) => ended,
                 Some(Step::Done) | None => Step::Waiting,

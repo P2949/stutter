@@ -31,8 +31,31 @@ pub struct AttemptSlot {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum AttemptOutcome {
-    Completed { evidence_sha256: String },
-    Failed { code: String },
+    Completed {
+        evidence_sha256: String,
+    },
+    Failed {
+        code: String,
+    },
+    ClassifiedFailure {
+        class: super::driver_failure::FailureClass,
+        code: String,
+    },
+}
+
+impl AttemptOutcome {
+    /// Only typed incompatibility is eligible for a compatibility exclusion. Legacy failures have
+    /// no independently recorded class and remain unqualified, regardless of their message.
+    pub(super) fn compatibility_failure(&self) -> Option<&str> {
+        match self {
+            Self::Completed { .. } => None,
+            Self::ClassifiedFailure {
+                class: super::driver_failure::FailureClass::Incompatible,
+                ..
+            } => Some("ExitedWithoutNativeResult"),
+            Self::Failed { .. } | Self::ClassifiedFailure { .. } => Some("UnqualifiedFailure"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,13 +99,25 @@ fn validate_outcome(outcome: &AttemptOutcome) -> anyhow::Result<()> {
         AttemptOutcome::Completed { evidence_sha256 } => {
             anyhow::ensure!(digest_ok(evidence_sha256), "invalid evidence digest")
         }
-        AttemptOutcome::Failed { code } => anyhow::ensure!(
-            !code.is_empty()
-                && code.len() <= 80
-                && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'),
-            "invalid failure code"
-        ),
+        AttemptOutcome::Failed { code } | AttemptOutcome::ClassifiedFailure { code, .. } => {
+            anyhow::ensure!(
+                !code.is_empty()
+                    && code.len() <= 80
+                    && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+                "invalid failure code"
+            )
+        }
     }
+    anyhow::ensure!(
+        !matches!(
+            outcome,
+            AttemptOutcome::ClassifiedFailure {
+                class: super::driver_failure::FailureClass::OwnershipUnresolved,
+                ..
+            }
+        ),
+        "unresolved ownership cannot be sealed"
+    );
     Ok(())
 }
 
@@ -323,6 +358,33 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn compatibility_is_derived_from_the_recorded_class_and_unresolved_cannot_be_sealed() {
+        use super::super::driver_failure::FailureClass;
+        let failure = |class, code: &str| AttemptOutcome::ClassifiedFailure {
+            class,
+            code: code.into(),
+        };
+        assert_eq!(
+            failure(FailureClass::Incompatible, "OtherDiagnostic").compatibility_failure(),
+            Some("ExitedWithoutNativeResult")
+        );
+        assert_eq!(
+            failure(FailureClass::Integrity, "ExitedWithoutNativeResult").compatibility_failure(),
+            Some("UnqualifiedFailure")
+        );
+        assert_eq!(
+            AttemptOutcome::Failed {
+                code: "ExitedWithoutNativeResult".into()
+            }
+            .compatibility_failure(),
+            Some("UnqualifiedFailure")
+        );
+        assert!(
+            validate_outcome(&failure(FailureClass::OwnershipUnresolved, "Unsettled")).is_err()
+        );
+    }
 
     fn schedule() -> Vec<AttemptSlot> {
         [ProtonSource::Ge, ProtonSource::Em]

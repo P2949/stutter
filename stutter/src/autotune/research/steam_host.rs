@@ -181,6 +181,7 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
     fn poll(&mut self) -> Progress {
         let Some(index) = self.current else {
             return Progress::Failed {
+                class: crate::autotune::research::driver::FailureClass::Integrity,
                 code: "NoLaunchedAttempt".into(),
             };
         };
@@ -189,6 +190,7 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
             GameState::Result { mut completion } => {
                 if self.port.stop().is_err() {
                     return Progress::Failed {
+                        class: crate::autotune::research::driver::FailureClass::OwnershipUnresolved,
                         code: "SettlementUnverified".into(),
                     };
                 }
@@ -202,6 +204,14 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
                             runtime.bind_to(dir)
                         })
                 });
+                if completion.runtime_binding
+                    == Some(super::loaded_runtime::RuntimeBinding::Mismatched)
+                {
+                    return Progress::Failed {
+                        class: super::driver::FailureClass::Integrity,
+                        code: "RuntimeIdentityMismatch".into(),
+                    };
+                }
                 Progress::Finished {
                     evidence: AttemptEvidenceV1 {
                         schema_version: 1,
@@ -212,33 +222,40 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
                 }
             }
             GameState::InvalidNativeResult => Progress::Failed {
+                class: crate::autotune::research::driver::FailureClass::Integrity,
                 code: "InvalidNativeResult".into(),
             },
             GameState::DesktopInterrupted => Progress::Failed {
+                class: crate::autotune::research::driver::FailureClass::Environment,
                 code: "DesktopInterrupted".into(),
             },
             GameState::GpuReset => Progress::Failed {
+                class: crate::autotune::research::driver::FailureClass::Health,
                 code: "GpuReset".into(),
             },
             GameState::ExitedWithoutResult => {
                 if self.port.stop().is_err() {
                     return Progress::Failed {
+                        class: crate::autotune::research::driver::FailureClass::OwnershipUnresolved,
                         code: "SettlementUnverified".into(),
                     };
                 }
                 self.current = None;
                 Progress::Failed {
+                    class: crate::autotune::research::driver::FailureClass::Incompatible,
                     code: "ExitedWithoutNativeResult".into(),
                 }
             }
             GameState::IdentityMismatch => {
                 if self.port.stop().is_err() {
                     return Progress::Failed {
+                        class: crate::autotune::research::driver::FailureClass::OwnershipUnresolved,
                         code: "SettlementUnverified".into(),
                     };
                 }
                 self.current = None;
                 Progress::Failed {
+                    class: crate::autotune::research::driver::FailureClass::Integrity,
                     code: "IdentityMismatch".into(),
                 }
             }
@@ -408,6 +425,7 @@ mod tests {
         assert_eq!(
             host.poll(),
             Progress::Failed {
+                class: crate::autotune::research::driver::FailureClass::Incompatible,
                 code: "ExitedWithoutNativeResult".into()
             }
         );
@@ -416,6 +434,7 @@ mod tests {
         assert_eq!(
             host.poll(),
             Progress::Failed {
+                class: crate::autotune::research::driver::FailureClass::Integrity,
                 code: "IdentityMismatch".into()
             }
         );
@@ -429,6 +448,7 @@ mod tests {
         assert_eq!(
             host.poll(),
             Progress::Failed {
+                class: crate::autotune::research::driver::FailureClass::Environment,
                 code: "DesktopInterrupted".into()
             }
         );
@@ -450,6 +470,7 @@ mod tests {
         assert_eq!(
             host.poll(),
             Progress::Failed {
+                class: crate::autotune::research::driver::FailureClass::Integrity,
                 code: "NoLaunchedAttempt".into()
             }
         );
@@ -473,26 +494,30 @@ mod tests {
                 completion: Box::new(result),
             }]);
             launch(&mut host);
-            let Progress::Finished { evidence } = host.poll() else {
-                panic!("a verified result finishes the attempt")
-            };
-            evidence.native_completion.unwrap().runtime_binding
+            host.poll()
+        };
+        let binding = |progress| match progress {
+            Progress::Finished { evidence } => evidence.native_completion.unwrap().runtime_binding,
+            other => panic!("expected a completed result, got {other:?}"),
         };
         // The arm's installation is /tools/GE.
         assert_eq!(
-            binding_for(Some(runtime("/tools/GE/files"))),
+            binding(binding_for(Some(runtime("/tools/GE/files")))),
             Some(RuntimeBinding::Matched)
         );
         assert_eq!(
-            binding_for(Some(runtime("/run/host/tools/GE/files"))),
+            binding(binding_for(Some(runtime("/run/host/tools/GE/files")))),
             Some(RuntimeBinding::Matched)
         );
-        assert_eq!(
+        assert!(matches!(
             binding_for(Some(runtime("/tools/CachyOS/files"))),
-            Some(RuntimeBinding::Mismatched)
-        );
+            Progress::Failed {
+                class: crate::autotune::research::driver::FailureClass::Integrity,
+                ..
+            }
+        ));
         // Nothing captured proves nothing and records no binding.
-        assert_eq!(binding_for(None), None);
+        assert_eq!(binding(binding_for(None)), None);
     }
 
     #[test]

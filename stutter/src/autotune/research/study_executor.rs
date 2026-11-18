@@ -68,6 +68,8 @@ pub struct AttemptsOutcome {
     pub failures: Vec<String>,
     /// A GPU reset or any health stop ended the study early.
     pub health_halt: bool,
+    /// A typed, settled terminal failure from the resident attempt driver.
+    pub terminal_failure: Option<super::driver::FailureClass>,
     /// The comparison context was proven consistent across the study's arms.
     pub context_consistent: bool,
     /// How each completed result's reported context conforms to the study's frozen profile.
@@ -237,7 +239,9 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
     /// study is qualified only by independently verified evidence, never by counts alone.
     fn judge(study: &ChildStudy, outcome: &AttemptsOutcome) -> StudyRun {
         let used = outcome.attempts_used;
-        if outcome.health_halt {
+        if let Some(class) = outcome.terminal_failure {
+            run(StudyResult::Failed, used, class.terminal_code(), true)
+        } else if outcome.health_halt {
             run(StudyResult::Failed, used, "GpuReset", true)
         } else if if matches!(study.stage, Stage::Screen) {
             !screen_sufficient(

@@ -223,7 +223,7 @@ fn independent_screen_replay_accepts_compatibility_failures_but_not_integrity_fa
         journal::{AttemptOutcome, AttemptRecord},
         report_store::{build_from_dirs, write_report},
     };
-    let check = |failure: &str| {
+    let check = |class: Option<crate::autotune::research::driver::FailureClass>, failure: &str| {
         let mut parent = parent();
         parent.uid = crate::syscall::geteuid();
         let study = plan(&parent).unwrap().remove(0);
@@ -287,8 +287,14 @@ fn independent_screen_replay_accepts_compatibility_failures_but_not_integrity_fa
                     evidence_sha256: write_evidence(&evidence, &slot, &item).unwrap(),
                 }
             } else {
-                AttemptOutcome::Failed {
-                    code: failure.into(),
+                match class {
+                    Some(class) => AttemptOutcome::ClassifiedFailure {
+                        class,
+                        code: failure.into(),
+                    },
+                    None => AttemptOutcome::Failed {
+                        code: failure.into(),
+                    },
                 }
             };
             journal.seal(AttemptRecord { slot, outcome }).unwrap();
@@ -338,10 +344,11 @@ fn independent_screen_replay_accepts_compatibility_failures_but_not_integrity_fa
         }
         checked
     };
-    assert!(check("ExitedWithoutNativeResult").is_ok());
-    for failure in ["IdentityMismatch", "InvalidNativeResult"] {
+    use crate::autotune::research::driver::FailureClass;
+    assert!(check(Some(FailureClass::Incompatible), "AnyDiagnostic").is_ok());
+    for class in [Some(FailureClass::Integrity), None] {
         assert!(
-            check(failure)
+            check(class, "ExitedWithoutNativeResult")
                 .unwrap_err()
                 .contains("ScreenOrPilotViabilityUnproven")
         );

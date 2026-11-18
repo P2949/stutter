@@ -67,6 +67,7 @@ pub(crate) mod dispatcher;
 pub(crate) mod driver;
 #[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod driver_attempts;
+mod driver_failure;
 pub(crate) mod entitlement;
 pub(crate) mod fault_matrix;
 #[cfg_attr(

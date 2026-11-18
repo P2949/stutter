@@ -286,6 +286,21 @@ impl ResearchCoordinator {
                 self.storage_blocker = Some("UnsafeToResume");
                 return;
             }
+            Step::Stopped(class) => {
+                use crate::autotune::research::driver::FailureClass;
+                let code = if self.persist_report() {
+                    class.terminal_code()
+                } else {
+                    "ReportPersistenceFailed"
+                };
+                let terminal = if class == FailureClass::Integrity {
+                    ResearchPhase::Aborted
+                } else {
+                    ResearchPhase::Blocked
+                };
+                self.settle(now, terminal, code);
+                true
+            }
             Step::Halted(code) => {
                 let code = if self.persist_report() {
                     code
@@ -378,7 +393,7 @@ impl ResearchCoordinator {
                 .tick_with_launch_fence(state.host.as_mut(), now, || {
                     anyhow::bail!("shutdown must not start an attempt")
                 })? {
-                Step::Sealed(_) | Step::Cancelled | Step::Halted(_) => {}
+                Step::Sealed(_) | Step::Cancelled | Step::Halted(_) | Step::Stopped(_) => {}
                 Step::OwnershipUnresolved(reason) => {
                     anyhow::bail!("research ownership remains unresolved: {reason}")
                 }
@@ -517,6 +532,7 @@ impl AttemptHost for UnqualifiedSteamHost {
     }
     fn poll(&mut self) -> crate::autotune::research::driver::Progress {
         crate::autotune::research::driver::Progress::Failed {
+            class: crate::autotune::research::driver::FailureClass::Environment,
             code: "BlockedSteamAutomation".into(),
         }
     }

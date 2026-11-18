@@ -116,6 +116,7 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         completed: study.min_attempts,
         failures: Vec::new(),
         health_halt: false,
+        terminal_failure: None,
         context_consistent: true,
         conformance: vec![ProfileConformance::Conforms; study.min_attempts as usize],
         raw_verified: true,

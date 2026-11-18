@@ -566,3 +566,58 @@ mod launched_recovery;
 
 #[path = "research_funnel_tests.rs"]
 pub(super) mod funnel_mode;
+
+#[test]
+fn an_integrity_failure_settles_then_aborts_without_another_launch() {
+    use crate::autotune::research::driver::FailureClass;
+    let campaign = tempfile::tempdir().unwrap();
+    let study = tempfile::tempdir().unwrap();
+    for dir in [&campaign, &study] {
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let meta = std::fs::metadata(study.path()).unwrap();
+    let root = crate::autotune::research::StudyRootIdentity {
+        device: std::os::unix::fs::MetadataExt::dev(&meta),
+        inode: std::os::unix::fs::MetadataExt::ino(&meta),
+    };
+    let (mut intent, mut facts) = fixture();
+    facts.study_root = Some(root);
+    intent.study_root = Some(root);
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::ValveStable,
+        identity_sha256: "b".repeat(64),
+    });
+    facts.tools = intent.tools.clone();
+    intent.max_attempts = 4;
+    let script = Arc::new(Mutex::new(Script {
+        safe: true,
+        ..Default::default()
+    }));
+    script.lock().unwrap().polls.push_back(Progress::Failed {
+        class: FailureClass::Integrity,
+        code: "SameDiagnostic".into(),
+    });
+    let mut coordinator = ResearchCoordinator::new(
+        Some(campaign.path().to_path_buf()),
+        Some(facts),
+        "BlockedHostIdentity",
+    );
+    coordinator.set_study_dir(Some(study.path().to_path_buf()));
+    let handle = script.clone();
+    coordinator.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
+    let reply = send(
+        &mut coordinator,
+        ResearchRequest::Submit {
+            intent: Box::new(intent),
+        },
+        100,
+    );
+    assert!(reply.contains("await_safe_window"), "{reply}");
+    coordinator.drive_attempts(101);
+    coordinator.drive_attempts(102);
+    coordinator.drive_attempts(103);
+    let terminal = coordinator.terminal.as_ref().unwrap();
+    assert_eq!(terminal.phase, ResearchPhase::Aborted);
+    assert_eq!(terminal.code, "AbortedIntegrity");
+    assert_eq!(script.lock().unwrap().launches, 1);
+}

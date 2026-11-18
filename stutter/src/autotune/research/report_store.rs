@@ -168,6 +168,25 @@ pub fn evidence_cost(item: &AttemptEvidenceV1) -> anyhow::Result<u64> {
         .ok_or_else(|| anyhow::anyhow!("evidence cost overflows the evidence budget"))
 }
 
+/// A valid evidence set would exceed the frozen byte limit.
+#[derive(Debug)]
+pub struct EvidenceBudgetExceeded {
+    pub total: u64,
+    pub limit: u64,
+}
+
+impl std::fmt::Display for EvidenceBudgetExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "campaign evidence would use {} bytes, over the {} byte budget",
+            self.total, self.limit
+        )
+    }
+}
+
+impl std::error::Error for EvidenceBudgetExceeded {}
+
 /// Refuse evidence that would take the campaign over `max_evidence_bytes`. The cost of every
 /// evidence record already written counts, so the limit is campaign-wide, not per attempt.
 pub fn ensure_evidence_budget(
@@ -184,10 +203,13 @@ pub fn ensure_evidence_budget(
                 .ok_or_else(|| anyhow::anyhow!("campaign evidence cost overflows"))?;
         }
     }
-    anyhow::ensure!(
-        total <= max_evidence_bytes,
-        "campaign evidence would use {total} bytes, over the {max_evidence_bytes} byte budget"
-    );
+    if total > max_evidence_bytes {
+        return Err(EvidenceBudgetExceeded {
+            total,
+            limit: max_evidence_bytes,
+        }
+        .into());
+    }
     Ok(())
 }
 
