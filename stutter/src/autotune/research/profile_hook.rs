@@ -22,7 +22,10 @@ pub fn production_spec(profile: Profile) -> Result<Option<ProfileSpec>, ProfileF
     }
 }
 
-type MappingLoader = Box<dyn Fn(&[StudySettingsFile]) -> super::profile_mappings::Mappings + Send>;
+type MappingLoader = Box<
+    dyn Fn(&[StudySettingsFile]) -> Result<super::profile_mappings::Mappings, ProfileFailure>
+        + Send,
+>;
 
 pub struct FileProfileHook {
     files: Vec<StudySettingsFile>,
@@ -117,7 +120,7 @@ impl ProfileHook for FileProfileHook {
             return Err(ProfileFailure::Failed("GameRunning"));
         }
         if let Some(loader) = &self.mapping_loader {
-            self.mappings = loader(&self.files);
+            self.mappings = loader(&self.files)?;
         }
         let spec = self.mappings.resolve(spec);
         for (index, file) in self.files.iter().enumerate() {

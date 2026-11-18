@@ -8,7 +8,11 @@
 //! directory, so they survive restarts and can be audited; a profile is resolved against them, and
 //! whatever is still unobserved stays `BlockedProfileMapping`, naming the missing option.
 
-use std::{collections::BTreeMap, fs::File, os::fd::AsFd};
+use std::{
+    collections::BTreeMap,
+    fs::File,
+    os::{fd::AsFd, unix::fs::MetadataExt},
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -134,6 +138,11 @@ impl Mappings {
                     .downcast_ref::<std::io::Error>()
                     .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
             {
+                let uid = dir.metadata()?.uid();
+                anyhow::ensure!(
+                    read_private(dir, &name, uid)? == bytes,
+                    "existing mapping observation differs"
+                );
                 Ok(())
             }
             Err(error) => Err(error),
@@ -155,6 +164,11 @@ impl Mappings {
             }
             let bytes = read_private(dir, &name, uid)?;
             anyhow::ensure!(bytes.len() <= MAX_FILE, "{name} is too large");
+            let expected = format!(
+                "{PREFIX}{}.json",
+                &stutter_core::hash::sha256_hex(&bytes)[..16]
+            );
+            anyhow::ensure!(name == expected, "{name} does not match its content digest");
             let one: Self = serde_json::from_slice(&bytes)?;
             anyhow::ensure!(one.schema == 1, "{name} has an unsupported schema");
             all.merge(&one).map_err(|reason| anyhow::anyhow!(reason))?;

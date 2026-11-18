@@ -396,7 +396,7 @@ fn a_running_game_prevents_mapping_observation_and_settings_edits() {
     let mut hook = FileProfileHook::new(a.files, index_free, running).with_mapping_loader(
         Box::new(move |_| {
             count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            Default::default()
+            Ok(Default::default())
         }),
     );
     assert_eq!(

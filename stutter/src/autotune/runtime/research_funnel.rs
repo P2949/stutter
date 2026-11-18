@@ -34,31 +34,30 @@ fn observed_mappings(
     study_dir: &std::path::Path,
     uid: u32,
     files: &[StudySettingsFile],
-) -> crate::autotune::research::profile_mappings::Mappings {
+) -> Result<crate::autotune::research::profile_mappings::Mappings, ProfileFailure> {
     use crate::autotune::research::profile_mappings::Mappings;
-    let Ok(dir) = File::open(study_dir) else {
-        return Mappings::default();
-    };
-    let mut known = Mappings::load(&dir, uid).unwrap_or_else(|error| {
-        log::warn!("remembered profile mappings are not usable: {error:#}");
-        Mappings::default()
-    });
+    let dir =
+        File::open(study_dir).map_err(|_| ProfileFailure::Blocked("BlockedProfileMapping"))?;
+    let mut known =
+        Mappings::load(&dir, uid).map_err(|_| ProfileFailure::Blocked("BlockedProfileMapping"))?;
     let mut fresh = Mappings::default();
     for file in files {
-        if let Some(seen) = file.read().ok().and_then(|bytes| Mappings::observe(&bytes)) {
-            match known.clone().merge(&seen) {
-                Ok(()) => {
-                    let _ = known.merge(&seen);
-                    let _ = fresh.merge(&seen);
-                }
-                Err(reason) => log::warn!("a settings observation is ignored: {reason}"),
-            }
-        }
+        let bytes = file
+            .read()
+            .map_err(|_| ProfileFailure::Blocked("BlockedProfileMapping"))?;
+        let seen =
+            Mappings::observe(&bytes).ok_or(ProfileFailure::Blocked("BlockedProfileMapping"))?;
+        known
+            .merge(&seen)
+            .map_err(|_| ProfileFailure::Blocked("BlockedProfileMapping"))?;
+        fresh
+            .merge(&seen)
+            .map_err(|_| ProfileFailure::Blocked("BlockedProfileMapping"))?;
     }
-    if let Err(error) = fresh.save(&dir) {
-        log::warn!("profile mappings not remembered: {error:#}");
-    }
-    known
+    fresh
+        .save(&dir)
+        .map_err(|_| ProfileFailure::Blocked("BlockedProfileMapping"))?;
+    Ok(known)
 }
 
 /// The graphics-profile hook over every arm's own `UserSettings.json`. If any of them cannot be
@@ -404,7 +403,7 @@ mod tests {
                                 let observations = observations.clone();
                                 move |files| {
                                     observations.lock().unwrap().push(files[0].read().unwrap());
-                                    Default::default()
+                                    Ok(Default::default())
                                 }
                             },
                         )),
@@ -437,6 +436,38 @@ mod tests {
         );
         hook.restore().unwrap();
         assert_eq!(std::fs::read(&settings).unwrap(), original);
+    }
+
+    #[test]
+    fn mapping_discovery_blocks_unreadable_history_and_conflicting_arm_observations() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let root_path = std::fs::canonicalize(root.path()).unwrap();
+        let uid = crate::syscall::geteuid();
+        let mut files = Vec::new();
+        for (name, index) in [("first", 4), ("second", 7)] {
+            let dir = root_path.join(name);
+            std::fs::create_dir(&dir).unwrap();
+            let path = dir.join("UserSettings.json");
+            let contents = format!(
+                r#"{{"data":[{{"group_name":"/video/display","options":[{{"name":"Resolution","type":"string_list","value":"1920x1080","index":{index}}}]}}]}}"#
+            );
+            std::fs::write(&path, contents).unwrap();
+            files.push(StudySettingsFile::new(&root_path, path, uid).unwrap());
+        }
+        assert_eq!(
+            observed_mappings(&root_path, uid, &files),
+            Err(ProfileFailure::Blocked("BlockedProfileMapping"))
+        );
+        let corrupt = root_path.join("profile-mappings-invalid.json");
+        std::fs::write(&corrupt, b"{}").unwrap();
+        std::fs::set_permissions(&corrupt, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            observed_mappings(&root_path, uid, &files[..1]),
+            Err(ProfileFailure::Blocked("BlockedProfileMapping"))
+        );
+        std::fs::remove_file(&corrupt).unwrap();
+        assert!(observed_mappings(&root_path, uid, &files[..1]).is_ok());
     }
 
     #[test]

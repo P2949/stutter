@@ -129,3 +129,20 @@ fn observations_are_remembered_beside_the_study_and_untrusted_ones_are_not_used(
     clash.save(&dir).unwrap();
     assert!(Mappings::load(&dir, uid).is_err());
 }
+
+#[test]
+fn a_changed_content_named_observation_is_refused_on_load_and_reuse() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let dir = File::open(root.path()).unwrap();
+    let mapping = shipped();
+    mapping.save(&dir).unwrap();
+    let entry = std::fs::read_dir(root.path())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    std::fs::write(entry.path(), b"{}\n").unwrap();
+    assert!(Mappings::load(&dir, crate::syscall::geteuid()).is_err());
+    assert!(mapping.save(&dir).is_err());
+}
