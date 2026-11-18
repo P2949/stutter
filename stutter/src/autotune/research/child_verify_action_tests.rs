@@ -298,6 +298,11 @@ fn independent_screen_replay_accepts_compatibility_failures_but_not_integrity_fa
                 }
             };
             journal.seal(AttemptRecord { slot, outcome }).unwrap();
+            if class == Some(crate::autotune::research::driver::FailureClass::Integrity)
+                && index >= 2
+            {
+                break;
+            }
         }
         let report = build_from_dirs(&child, &journal, &evidence).unwrap();
         write_report(&dir, &report).unwrap();
