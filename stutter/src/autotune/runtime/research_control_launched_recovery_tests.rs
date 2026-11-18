@@ -112,6 +112,28 @@ fn a_restarted_coordinator_retires_only_a_settled_interrupted_attempt_and_blocks
     )
     .unwrap();
 
+    // Leave a durable profile snapshot as if the controller died after editing the settings.
+    let study_root = std::fs::canonicalize(study.path()).unwrap();
+    let settings =
+        crate::autotune::research::session_host::arm_prefix_paths(&study_root, ProtonSource::Ge).2;
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let original = br#"{"version":1,"data":[{"group_name":"/graphics/raytracing","options":[{"name":"RayTracing","type":"bool","value":true},{"name":"RayTracedReflections","type":"bool","value":true},{"name":"RayTracedSunShadows","type":"bool","value":true},{"name":"RayTracedLocalShadows","type":"bool","value":true},{"name":"RayTracedPathTracing","type":"bool","value":false}]}]}"#;
+    std::fs::write(&settings, original).unwrap();
+    let file = crate::autotune::research::profile_applier::StudySettingsFile::new(
+        &study_root,
+        settings.clone(),
+        crate::syscall::geteuid(),
+    )
+    .unwrap();
+    crate::autotune::research::profile_applier::apply(
+        &file,
+        &crate::autotune::research::profile_applier::ray_tracing_off(),
+        false,
+    )
+    .unwrap();
+    let edited = std::fs::read(&settings).unwrap();
+    assert_ne!(edited, original);
+
     let restart = |factory: crate::autotune::runtime::research_recovery::RecoveryFactory| {
         let mut coordinator = ResearchCoordinator::new(
             Some(campaign.path().to_path_buf()),
@@ -126,6 +148,12 @@ fn a_restarted_coordinator_retires_only_a_settled_interrupted_attempt_and_blocks
     let mut unsafe_restart = restart(witnesses(false));
     let result = unsafe_restart.prepare_recovery(102).unwrap().run();
     assert!(result.is_err());
+    assert_eq!(
+        std::fs::read(&settings).unwrap(),
+        edited,
+        "unsettled parent must prevent profile restoration"
+    );
+    assert!(crate::autotune::research::profile_applier::pending_snapshot(&settings));
     unsafe_restart.finish_recovery(result);
     assert!(unsafe_restart.owns_action_slot());
     drop(unsafe_restart);
@@ -134,6 +162,8 @@ fn a_restarted_coordinator_retires_only_a_settled_interrupted_attempt_and_blocks
     let mut settled_restart = restart(witnesses(true));
     let result = settled_restart.prepare_recovery(103).unwrap().run();
     assert!(result.is_ok(), "{:?}", result.as_ref().err());
+    assert_eq!(std::fs::read(&settings).unwrap(), original);
+    assert!(!crate::autotune::research::profile_applier::pending_snapshot(&settings));
     settled_restart.finish_recovery(result);
     assert!(!settled_restart.owns_action_slot());
     assert_eq!(

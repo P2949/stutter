@@ -411,7 +411,7 @@ fn a_running_game_prevents_mapping_observation_and_settings_edits() {
 fn a_game_starting_between_arm_edits_retains_the_unrestored_profile() {
     static SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     fn game_starts() -> bool {
-        SCANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 2
+        SCANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 6
     }
     SCANS.store(0, std::sync::atomic::Ordering::Relaxed);
     let a = arms(2, &[]);
@@ -425,6 +425,7 @@ fn a_game_starting_between_arm_edits_retains_the_unrestored_profile() {
     assert_eq!(std::fs::read(&a.paths[1]).unwrap(), original[1]);
     // Once the owner has independently established that the game is gone, restoration
     // still has the in-memory record and durable snapshot for the first arm.
+    SCANS.store(0, std::sync::atomic::Ordering::Relaxed);
     hook.restore().unwrap();
     assert_eq!(bytes(&a_paths(&a.paths)), original);
 }
@@ -433,7 +434,7 @@ fn a_game_starting_between_arm_edits_retains_the_unrestored_profile() {
 fn a_game_starting_on_an_apply_error_keeps_earlier_snapshots() {
     static SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     fn game_starts() -> bool {
-        SCANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 3
+        SCANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 8
     }
     SCANS.store(0, std::sync::atomic::Ordering::Relaxed);
     let a = arms(2, &[SETTINGS, r#"{"version":1,"data":[]}"#]);
@@ -445,6 +446,24 @@ fn a_game_starting_on_an_apply_error_keeps_earlier_snapshots() {
     );
     assert_ne!(std::fs::read(&a.paths[0]).unwrap(), original[0]);
     assert_eq!(std::fs::read(&a.paths[1]).unwrap(), original[1]);
+    SCANS.store(0, std::sync::atomic::Ordering::Relaxed);
     hook.restore().unwrap();
+    assert_eq!(bytes(&a_paths(&a.paths)), original);
+}
+
+#[test]
+fn a_pending_snapshot_discovered_during_apply_is_an_unresolved_owner() {
+    use std::os::unix::fs::PermissionsExt;
+    let a = arms(1, &[]);
+    let original = bytes(&a);
+    let snapshot = a.paths[0].with_file_name("UserSettings.json.stutter-original");
+    std::fs::write(&snapshot, &original[0]).unwrap();
+    std::fs::set_permissions(&snapshot, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut hook = FileProfileHook::new(a.files, index_free, idle);
+    assert_eq!(
+        hook.apply(Profile::Cpu),
+        Err(ProfileFailure::Unrestored("RecoveryPending"))
+    );
+    assert!(snapshot.exists());
     assert_eq!(bytes(&a_paths(&a.paths)), original);
 }

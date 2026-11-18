@@ -387,3 +387,72 @@ fn a_directory_that_cannot_be_searched_does_not_look_like_a_clean_one() {
         assert!(unknown);
     }
 }
+
+#[test]
+fn game_activity_inside_apply_and_recovery_retains_the_durable_snapshot() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for first_running_scan in [1, 2] {
+        let f = fixture();
+        let file = open(&f);
+        let scans = AtomicUsize::new(0);
+        assert_eq!(
+            apply_guarded(&file, &ray_tracing_off(), &|| scans
+                .fetch_add(1, Ordering::SeqCst)
+                >= first_running_scan)
+            .unwrap_err(),
+            Refusal::RestoreUnproven
+        );
+        assert!(pending_snapshot(&f.path));
+        let before = std::fs::read(&f.path).unwrap();
+        assert_eq!(recover_guarded(&file, &|| true), Err(Refusal::GameRunning));
+        assert_eq!(std::fs::read(&f.path).unwrap(), before);
+        assert!(pending_snapshot(&f.path));
+        assert!(recover_guarded(&file, &|| false).is_ok());
+        assert_eq!(std::fs::read(&f.path).unwrap(), SETTINGS.as_bytes());
+        assert!(!pending_edit(&f.path));
+    }
+}
+
+#[test]
+fn a_marker_without_its_original_snapshot_is_not_a_clean_recovery() {
+    let f = fixture();
+    let file = open(&f);
+    file.write_marker(b"unsettled").unwrap();
+    let marker = std::fs::read(file.marker_path()).unwrap();
+    assert_eq!(
+        apply_guarded(&file, &ray_tracing_off(), &|| false).unwrap_err(),
+        Refusal::RecoveryPending
+    );
+    assert_eq!(std::fs::read(file.marker_path()).unwrap(), marker);
+    assert_eq!(
+        recover_guarded(&file, &|| false),
+        Err(Refusal::RestoreUnproven)
+    );
+    assert!(pending_edit(&f.path));
+}
+
+#[test]
+fn untrusted_recovery_sidecars_cannot_authorize_a_restore() {
+    let f = fixture();
+    let file = open(&f);
+    let applied = apply(&file, &ray_tracing_off(), false).unwrap();
+    drop(applied);
+    let edited = std::fs::read(&f.path).unwrap();
+    let marker = file.marker_path();
+    let bytes = std::fs::read(&marker).unwrap();
+    let target = f.path.with_file_name("outside-marker");
+    std::fs::write(&target, bytes).unwrap();
+    std::fs::remove_file(&marker).unwrap();
+    std::os::unix::fs::symlink(&target, &marker).unwrap();
+    assert_eq!(
+        recover_guarded(&file, &|| false),
+        Err(Refusal::RestoreMismatch)
+    );
+    assert_eq!(std::fs::read(&f.path).unwrap(), edited);
+    assert!(snapshot_of(&f).exists());
+    std::fs::remove_file(&marker).unwrap();
+    file.write_marker(&edited).unwrap();
+    std::fs::set_permissions(snapshot_of(&f), std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(recover_guarded(&file, &|| false), Err(Refusal::UnsafeFile));
+    assert_eq!(std::fs::read(&f.path).unwrap(), edited);
+}

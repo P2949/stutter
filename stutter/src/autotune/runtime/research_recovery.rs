@@ -256,21 +256,28 @@ fn restore_arm(
     uid: u32,
 ) -> anyhow::Result<()> {
     use crate::autotune::research::{
-        profile_applier::{StudySettingsFile, pending_snapshot, recover},
+        profile_applier::{StudySettingsFile, pending_edit, recover_guarded},
         session_host::arm_prefix_paths,
     };
     let settings = arm_prefix_paths(study, source).2;
-    if !settings.exists() {
-        anyhow::ensure!(
-            !pending_snapshot(&settings),
-            "UnsafeToResume: a settings snapshot survives without its settings file"
-        );
-        return Ok(());
+    match std::fs::symlink_metadata(&settings) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            anyhow::ensure!(
+                !pending_edit(&settings),
+                "UnsafeToResume: a settings snapshot or marker survives without its settings file"
+            );
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
     }
     let file = StudySettingsFile::new(study, settings, uid)
         .map_err(|_| anyhow::anyhow!("UnsafeToResume: arm settings are not trustworthy"))?;
-    recover(&file)
-        .map_err(|_| anyhow::anyhow!("UnsafeToResume: a profile could not be restored"))?;
+    recover_guarded(
+        &file,
+        &crate::autotune::research::profile_hook::cyberpunk_running,
+    )
+    .map_err(|_| anyhow::anyhow!("UnsafeToResume: a profile could not be restored"))?;
     Ok(())
 }
 
@@ -309,11 +316,12 @@ fn recover_launched(
     // The child studies of a funnel campaign are settled first, each through the same independent
     // witnesses, before the campaign may be retired.
     recover_children(&campaign, uid, &intent, factory, same_boot, now)?;
-    restore_profiles(study_path, &intent)?;
-    let mut driver = Driver::new(journal, intent, dispatch, evidence, len);
+    let mut driver = Driver::new(journal, intent.clone(), dispatch, evidence, len);
     if let Some(slot) = adopted {
         driver.recover_interrupted(slot, same_boot, witnesses, now)?;
     }
+    // Both child and parent launch ownership must be settled before any settings are restored.
+    restore_profiles(study_path, &intent)?;
     // Every attempt that started is now sealed. Block the campaign through the normal restoring
     // transition so it ends as a recovered, blocked campaign with its report intact.
     if !matches!(

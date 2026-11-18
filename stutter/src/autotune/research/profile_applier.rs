@@ -225,6 +225,7 @@ fn readback_matches(original: &[u8], now: &[u8], planned: &[Planned]) -> bool {
 /// inside the study's own directory, reached without following a symlink.
 pub struct StudySettingsFile {
     path: PathBuf,
+    owner_uid: u32,
 }
 
 impl StudySettingsFile {
@@ -242,7 +243,7 @@ impl StudySettingsFile {
         {
             return Err(Refusal::UnsafeFile);
         }
-        Ok(Self { path })
+        Ok(Self { path, owner_uid })
     }
 
     pub fn read(&self) -> Result<Vec<u8>, Refusal> {
@@ -298,12 +299,14 @@ impl StudySettingsFile {
     /// Durably record the original bytes (private, new, fsynced with its directory).
     fn write_snapshot(&self, original: &[u8]) -> Result<(), Refusal> {
         let path = self.snapshot_path();
+        let mut created = false;
         let result = (|| {
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .mode(0o600)
                 .open(&path)?;
+            created = true;
             file.write_all(original)?;
             file.sync_all()?;
             std::fs::File::open(path.parent().unwrap_or(Path::new(".")))?.sync_all()
@@ -314,7 +317,9 @@ impl StudySettingsFile {
                 Err(Refusal::RecoveryPending)
             }
             Err(_) => {
-                let _ = std::fs::remove_file(&path);
+                if created {
+                    let _ = std::fs::remove_file(&path);
+                }
                 Err(Refusal::Io)
             }
         }
@@ -334,7 +339,6 @@ impl StudySettingsFile {
 
     fn write_marker(&self, applied: &[u8]) -> Result<(), Refusal> {
         let path = self.marker_path();
-        let _ = std::fs::remove_file(&path);
         let result = (|| {
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
@@ -349,14 +353,42 @@ impl StudySettingsFile {
     }
 
     fn read_marker(&self) -> Option<String> {
-        std::fs::read_to_string(self.marker_path())
-            .ok()
-            .map(|text| text.trim().to_owned())
+        use std::io::Read;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(self.marker_path())
+            .ok()?;
+        let meta = file.metadata().ok()?;
+        if !meta.is_file()
+            || meta.uid() != self.owner_uid
+            || meta.nlink() != 1
+            || meta.mode() & 0o077 != 0
+            || meta.len() != 64
+        {
+            return None;
+        }
+        let mut text = String::new();
+        file.take(65).read_to_string(&mut text).ok()?;
+        (text.len() == 64
+            && text
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+        .then_some(text)
     }
 
     fn remove_snapshot(&self) -> Result<(), Refusal> {
         let path = self.snapshot_path();
-        let _ = std::fs::remove_file(self.marker_path());
+        match std::fs::symlink_metadata(self.marker_path()) {
+            Ok(_) => {
+                if self.read_marker().is_none() {
+                    return Err(Refusal::UnsafeFile);
+                }
+                std::fs::remove_file(self.marker_path()).map_err(|_| Refusal::Io)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(Refusal::Io),
+        }
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             // Already removed by an earlier, proven restore: removing it again is a success.
@@ -381,7 +413,12 @@ impl StudySettingsFile {
             Err(_) => return Err(Refusal::Io),
         };
         let meta = file.metadata().map_err(|_| Refusal::Io)?;
-        if !meta.is_file() || meta.nlink() != 1 || meta.len() > MAX_SETTINGS_BYTES {
+        if !meta.is_file()
+            || meta.uid() != self.owner_uid
+            || meta.nlink() != 1
+            || meta.mode() & 0o077 != 0
+            || meta.len() > MAX_SETTINGS_BYTES
+        {
             return Err(Refusal::UnsafeFile);
         }
         let mut bytes = Vec::new();
@@ -406,22 +443,47 @@ impl AppliedProfile {
     }
 }
 
-/// Apply `spec` while the game is not running, verify by reading the file back, and return what is
-/// needed to restore it. On any failure the original bytes are put back.
+/// Apply `spec` while the game is not running and verify by reading the file back. A failure is
+/// rolled back only while safe; otherwise the durable snapshot remains for independent recovery.
+#[cfg(test)]
 pub fn apply(
     file: &StudySettingsFile,
     spec: &ProfileSpec,
     game_running: bool,
 ) -> Result<AppliedProfile, Refusal> {
-    if game_running {
+    apply_guarded(file, spec, &|| game_running)
+}
+
+pub fn apply_guarded(
+    file: &StudySettingsFile,
+    spec: &ProfileSpec,
+    game_running: &dyn Fn() -> bool,
+) -> Result<AppliedProfile, Refusal> {
+    if game_running() {
         return Err(Refusal::GameRunning);
+    }
+    if pending_edit(&file.path) {
+        return Err(Refusal::RecoveryPending);
     }
     let original = file.read()?;
     let (bytes, planned) = edited(&original, spec)?;
     // The original is durable before the first edit: a crash from here on is recoverable.
-    file.write_snapshot(&original)?;
-    file.write_marker(&bytes)?;
+    file.write_snapshot(&original).map_err(|error| {
+        if pending_edit(&file.path) && error != Refusal::RecoveryPending {
+            Refusal::RestoreUnproven
+        } else {
+            error
+        }
+    })?;
+    file.write_marker(&bytes)
+        .map_err(|_| Refusal::RestoreUnproven)?;
+    if game_running() {
+        return Err(Refusal::RestoreUnproven);
+    }
     let replaced = file.replace(&bytes);
+    if game_running() {
+        return Err(Refusal::RestoreUnproven);
+    }
     let verified = replaced.and_then(|()| {
         file.read()
             .map(|now| readback_matches(&original, &now, &planned) && now == bytes)
@@ -429,14 +491,20 @@ pub fn apply(
     if !matches!(verified, Ok(true)) {
         // Only a proven rollback ends the matter; otherwise the snapshot stays for recovery and the
         // caller is told the settings may still be edited.
-        let proven = file.replace(&original).is_ok()
+        let proven = !game_running()
+            && file.replace(&original).is_ok()
+            && !game_running()
             && file.read().is_ok_and(|now| now == original)
+            && !game_running()
             && file.remove_snapshot().is_ok();
         return Err(if proven {
             Refusal::ReadbackMismatch
         } else {
             Refusal::RestoreUnproven
         });
+    }
+    if game_running() {
+        return Err(Refusal::RestoreUnproven);
     }
     Ok(AppliedProfile {
         profile: spec.name,
@@ -447,16 +515,37 @@ pub fn apply(
 
 /// Put the original bytes back and prove it. A file that is no longer what was applied (the game
 /// or something else rewrote it) is reported, never silently overwritten blind.
+#[cfg(test)]
 pub fn restore(file: &StudySettingsFile, applied: &AppliedProfile) -> Result<(), Refusal> {
+    restore_guarded(file, applied, &|| false)
+}
+
+pub fn restore_guarded(
+    file: &StudySettingsFile,
+    applied: &AppliedProfile,
+    game_running: &dyn Fn() -> bool,
+) -> Result<(), Refusal> {
+    if game_running() {
+        return Err(Refusal::GameRunning);
+    }
     let current = file.read()?;
     let sha = stutter_core::hash::sha256_hex(&current);
     if sha != applied.applied_sha256 && sha != applied.original_sha256() {
         return Err(Refusal::RestoreMismatch);
     }
     if sha != applied.original_sha256() {
+        if game_running() {
+            return Err(Refusal::GameRunning);
+        }
         file.replace(&applied.original)?;
     }
+    if game_running() {
+        return Err(Refusal::GameRunning);
+    }
     if file.read()? == applied.original {
+        if game_running() {
+            return Err(Refusal::GameRunning);
+        }
         file.remove_snapshot()
     } else {
         Err(Refusal::RestoreMismatch)
@@ -509,10 +598,24 @@ pub fn pending_edit(settings: &Path) -> bool {
 
 /// After a crash or restart: if a durable snapshot exists the settings may still be edited, so put
 /// the original bytes back, prove it, and only then remove the snapshot. Run before any study.
+#[cfg(test)]
 pub fn recover(file: &StudySettingsFile) -> Result<Recovery, Refusal> {
+    recover_guarded(file, &|| false)
+}
+
+pub fn recover_guarded(
+    file: &StudySettingsFile,
+    game_running: &dyn Fn() -> bool,
+) -> Result<Recovery, Refusal> {
     let Some(original) = file.read_snapshot()? else {
+        if pending_edit(&file.path) {
+            return Err(Refusal::RestoreUnproven);
+        }
         return Ok(Recovery::Nothing);
     };
+    if game_running() {
+        return Err(Refusal::GameRunning);
+    }
     let current = file.read()?;
     let was_original = current == original;
     if !was_original {
@@ -524,10 +627,19 @@ pub fn recover(file: &StudySettingsFile) -> Result<Recovery, Refusal> {
         if !ours {
             return Err(Refusal::RestoreMismatch);
         }
+        if game_running() {
+            return Err(Refusal::GameRunning);
+        }
         file.replace(&original)?;
+    }
+    if game_running() {
+        return Err(Refusal::GameRunning);
     }
     if file.read()? != original {
         return Err(Refusal::RestoreMismatch);
+    }
+    if game_running() {
+        return Err(Refusal::GameRunning);
     }
     file.remove_snapshot()?;
     Ok(if was_original {

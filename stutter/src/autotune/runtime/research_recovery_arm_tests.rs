@@ -35,3 +35,15 @@ fn a_snapshot_that_survives_without_its_settings_file_makes_recovery_refuse() {
     // Another arm with nothing pending is unaffected.
     assert!(restore_arm(&study, ProtonSource::Em, crate::syscall::geteuid()).is_ok());
 }
+
+#[test]
+fn a_marker_without_its_settings_file_keeps_recovery_unresolved() {
+    let root = study();
+    let study = std::fs::canonicalize(root.path()).unwrap();
+    let settings = arm_prefix_paths(&study, ProtonSource::Ge).2;
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let marker = settings.with_file_name("UserSettings.json.stutter-applied");
+    std::fs::write(&marker, b"unsettled").unwrap();
+    assert!(restore_arm(&study, ProtonSource::Ge, crate::syscall::geteuid()).is_err());
+    assert!(marker.exists());
+}
