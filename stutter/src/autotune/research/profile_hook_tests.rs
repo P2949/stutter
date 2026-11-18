@@ -386,3 +386,65 @@ fn the_gpu_profile_applies_only_once_every_list_value_it_needs_has_been_observed
     assert!(hook.restore().is_ok());
     assert_eq!(bytes(&a_paths(&b.paths)), original);
 }
+
+#[test]
+fn a_running_game_prevents_mapping_observation_and_settings_edits() {
+    let a = arms(1, &[]);
+    let original = bytes(&a);
+    let observations = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = observations.clone();
+    let mut hook = FileProfileHook::new(a.files, index_free, running).with_mapping_loader(
+        Box::new(move |_| {
+            count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Default::default()
+        }),
+    );
+    assert_eq!(
+        hook.apply(Profile::Cpu),
+        Err(ProfileFailure::Failed("GameRunning"))
+    );
+    assert_eq!(observations.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(bytes(&a_paths(&a.paths)), original);
+}
+
+#[test]
+fn a_game_starting_between_arm_edits_retains_the_unrestored_profile() {
+    static SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    fn game_starts() -> bool {
+        SCANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 2
+    }
+    SCANS.store(0, std::sync::atomic::Ordering::Relaxed);
+    let a = arms(2, &[]);
+    let original = bytes(&a);
+    let mut hook = FileProfileHook::new(a.files, index_free, game_starts);
+    assert_eq!(
+        hook.apply(Profile::Cpu),
+        Err(ProfileFailure::Unrestored("GameRunningDuringApply"))
+    );
+    assert_ne!(std::fs::read(&a.paths[0]).unwrap(), original[0]);
+    assert_eq!(std::fs::read(&a.paths[1]).unwrap(), original[1]);
+    // Once the owner has independently established that the game is gone, restoration
+    // still has the in-memory record and durable snapshot for the first arm.
+    hook.restore().unwrap();
+    assert_eq!(bytes(&a_paths(&a.paths)), original);
+}
+
+#[test]
+fn a_game_starting_on_an_apply_error_keeps_earlier_snapshots() {
+    static SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    fn game_starts() -> bool {
+        SCANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= 3
+    }
+    SCANS.store(0, std::sync::atomic::Ordering::Relaxed);
+    let a = arms(2, &[SETTINGS, r#"{"version":1,"data":[]}"#]);
+    let original = bytes(&a);
+    let mut hook = FileProfileHook::new(a.files, index_free, game_starts);
+    assert_eq!(
+        hook.apply(Profile::Cpu),
+        Err(ProfileFailure::Unrestored("GameRunningDuringRollback"))
+    );
+    assert_ne!(std::fs::read(&a.paths[0]).unwrap(), original[0]);
+    assert_eq!(std::fs::read(&a.paths[1]).unwrap(), original[1]);
+    hook.restore().unwrap();
+    assert_eq!(bytes(&a_paths(&a.paths)), original);
+}

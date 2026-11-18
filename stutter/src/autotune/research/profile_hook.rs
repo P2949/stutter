@@ -95,10 +95,6 @@ impl ProfileHook for FileProfileHook {
         let Some(spec) = (self.spec_for)(profile)? else {
             return Ok(false);
         };
-        if let Some(loader) = &self.mapping_loader {
-            self.mappings = loader(&self.files);
-        }
-        let spec = self.mappings.resolve(spec);
         if !self.unavailable.is_empty() {
             // A settings file that simply does not exist yet belongs to a prefix no game run has
             // initialized (cold). That is not a failure of the study: it cannot take a profile until
@@ -117,10 +113,31 @@ impl ProfileHook for FileProfileHook {
             });
         }
         let running = (self.game_running)();
+        if running {
+            return Err(ProfileFailure::Failed("GameRunning"));
+        }
+        if let Some(loader) = &self.mapping_loader {
+            self.mappings = loader(&self.files);
+        }
+        let spec = self.mappings.resolve(spec);
         for (index, file) in self.files.iter().enumerate() {
-            match apply(file, &spec, running) {
+            // Mapping discovery may take time. Recheck immediately before each edit, and never
+            // roll back already-edited settings while a game is now running.
+            if (self.game_running)() {
+                return Err(if self.applied.is_empty() {
+                    ProfileFailure::Failed("GameRunning")
+                } else {
+                    ProfileFailure::Unrestored("GameRunningDuringApply")
+                });
+            }
+            match apply(file, &spec, false) {
                 Ok(applied) => self.applied.push((index, applied)),
                 Err(refusal) => {
+                    // Never restore earlier edits while a game may be using these settings. Keep
+                    // the snapshots and ownership until independent settlement proves it is gone.
+                    if !self.applied.is_empty() && (self.game_running)() {
+                        return Err(ProfileFailure::Unrestored("GameRunningDuringRollback"));
+                    }
                     // Put every arm already changed back before reporting; an unproven rollback
                     // is the worse failure and is what the caller must see.
                     let rolled_back = self.restore().is_ok();
