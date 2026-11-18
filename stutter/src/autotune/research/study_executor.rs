@@ -181,7 +181,7 @@ pub(super) fn screen_sufficient(
         || u64::from(completed) + failures.len() as u64 != u64::from(used)
         || failures
             .iter()
-            .any(|code| code != "ExitedWithoutNativeResult" && code != "InvalidNativeResult")
+            .any(|code| code != "ExitedWithoutNativeResult")
         || runs.iter().any(|(_, fps)| !fps.is_finite() || *fps <= 0.0)
     {
         return false;
@@ -229,7 +229,7 @@ fn pilot_accounted(
         && runs.len() == completed as usize
         && failures
             .iter()
-            .all(|code| code == "ExitedWithoutNativeResult" || code == "InvalidNativeResult")
+            .all(|code| code == "ExitedWithoutNativeResult")
 }
 
 impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {

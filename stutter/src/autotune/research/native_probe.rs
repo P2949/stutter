@@ -92,6 +92,13 @@ impl<S: NativeObservationSource> ResultProbe for NativeResultProbe<S> {
                     Ok(completion) => GameState::Result {
                         completion: Box::new(completion),
                     },
+                    Err(error)
+                        if error
+                            .downcast_ref::<super::cyberpunk::NoFreshBenchmarkResult>()
+                            .is_some() =>
+                    {
+                        GameState::ExitedWithoutResult
+                    }
                     Err(error) => {
                         log::warn!("native result rejected: {error:#}");
                         GameState::InvalidNativeResult

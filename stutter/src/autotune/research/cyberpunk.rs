@@ -30,6 +30,19 @@ const MAX_RESULT_TOTAL_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_JSON_SUMMARY_BYTES: usize = 4 * 1024 * 1024;
 const CLOCK_TOLERANCE_NS: i128 = 2_000_000_000;
 
+/// A fully inspected result directory had no new benchmark result for this attempt.
+/// This is distinct from a malformed, ambiguous, inaccessible or changed result.
+#[derive(Debug)]
+pub struct NoFreshBenchmarkResult;
+
+impl std::fmt::Display for NoFreshBenchmarkResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no fresh native benchmark result")
+    }
+}
+
+impl std::error::Error for NoFreshBenchmarkResult {}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BenchmarkDirectorySnapshot {
@@ -460,12 +473,19 @@ pub fn verify_benchmark_completion(
         "invalid benchmark time interval"
     );
 
-    let after = snapshot_benchmark_results(results_dir, process.uid)?;
+    let after = snapshot_benchmark_results_or_absent(results_dir, process.uid)?;
     let new_dirs: Vec<_> = after
         .directories
         .iter()
         .filter(|(name, _)| !before.directories.contains_key(*name))
         .collect();
+    if new_dirs.is_empty() {
+        anyhow::ensure!(
+            before.directories == after.directories,
+            "existing native results changed during the attempt"
+        );
+        return Err(NoFreshBenchmarkResult.into());
+    }
     anyhow::ensure!(
         new_dirs.len() == 1,
         "native benchmark did not create exactly one fresh folder"

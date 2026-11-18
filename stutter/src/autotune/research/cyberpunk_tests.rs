@@ -198,6 +198,18 @@ fn native_probe_uses_the_verifier_and_rejects_stale_results() {
         started,
         now_unix_nanos().unwrap(),
     ));
+    assert_eq!(probe.poll(), GameState::ExitedWithoutResult);
+    // A fresh but malformed result is an integrity failure, not an incompatible build.
+    probe.begin(super::super::ProtonSource::Ge).unwrap();
+    let started = now_unix_nanos().unwrap();
+    std::thread::sleep(Duration::from_millis(2));
+    write_result(root.path(), "corrupt", "not json");
+    *observed.lock().unwrap() = Some(attempt(
+        installation(),
+        process(),
+        started,
+        now_unix_nanos().unwrap(),
+    ));
     assert_eq!(probe.poll(), GameState::InvalidNativeResult);
 }
 

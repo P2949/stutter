@@ -288,13 +288,15 @@ fn a_screen_preserves_failed_tools_but_allows_two_verified_viable_arms() {
         StudyResult::Qualified
     );
 
-    let mut unsafe_failure = outcome.clone();
-    unsafe_failure.failures[0] = "IdentityMismatch".into();
-    let (mut exec, _) = executor(Ok(true), Ok(()), Ok(unsafe_failure));
-    assert_eq!(
-        run_to_end(&mut exec, &study).unwrap().reason,
-        "IncompleteAttempts"
-    );
+    for failure in ["IdentityMismatch", "InvalidNativeResult"] {
+        let mut unsafe_failure = outcome.clone();
+        unsafe_failure.failures[0] = failure.into();
+        let (mut exec, _) = executor(Ok(true), Ok(()), Ok(unsafe_failure));
+        assert_eq!(
+            run_to_end(&mut exec, &study).unwrap().reason,
+            "IncompleteAttempts"
+        );
+    }
 
     outcome.run_fps[1].0 = outcome.run_fps[0].0;
     let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome.clone()));

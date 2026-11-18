@@ -339,9 +339,11 @@ fn independent_screen_replay_accepts_compatibility_failures_but_not_integrity_fa
         checked
     };
     assert!(check("ExitedWithoutNativeResult").is_ok());
-    assert!(
-        check("IdentityMismatch")
-            .unwrap_err()
-            .contains("ScreenOrPilotViabilityUnproven")
-    );
+    for failure in ["IdentityMismatch", "InvalidNativeResult"] {
+        assert!(
+            check(failure)
+                .unwrap_err()
+                .contains("ScreenOrPilotViabilityUnproven")
+        );
+    }
 }
