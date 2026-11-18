@@ -56,9 +56,13 @@ struct Attempts {
     progress: bool,
     abort_ok: bool,
     settle_ok: bool,
+    required: Option<u32>,
 }
 
 impl StudyAttempts for Attempts {
+    fn required_attempts(&mut self, study: &ChildStudy) -> anyhow::Result<u32> {
+        Ok(self.required.unwrap_or(study.min_attempts))
+    }
     fn abort(&mut self) -> Result<(), &'static str> {
         self.log.borrow_mut().push("abort");
         if self.abort_ok {
@@ -106,8 +110,11 @@ fn run_to_end(
 
 fn good(study: &ChildStudy) -> AttemptsOutcome {
     AttemptsOutcome {
+        planned_attempts: study.min_attempts,
+        source_order: vec![ProtonSource::Ge, ProtonSource::ValveStable],
         attempts_used: study.min_attempts,
         completed: study.min_attempts,
+        failures: Vec::new(),
         health_halt: false,
         context_consistent: true,
         conformance: vec![ProfileConformance::Conforms; study.min_attempts as usize],
@@ -150,10 +157,24 @@ fn executor(
                 progress: false,
                 abort_ok: true,
                 settle_ok: true,
+                required: None,
             },
         ),
         log,
     )
+}
+
+#[test]
+fn a_pilot_that_does_not_fit_its_selected_arms_is_deferred_before_profile_application() {
+    let study = pilot();
+    let (mut exec, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
+    exec.attempts.required = Some(9);
+    let result = exec.poll(&study, 8).unwrap().unwrap();
+    assert_eq!(
+        (result.result, result.reason, result.attempts_used),
+        (StudyResult::DeferredBudget, "DeferredBudget", 0)
+    );
+    assert_eq!(*log.borrow(), ["recover"]);
 }
 
 #[test]
@@ -250,6 +271,100 @@ fn health_incomplete_and_unproven_context_outcomes_are_not_qualified() {
         (loose.result, loose.reason, loose.halt),
         (StudyResult::Unqualified, "UnprovenContext", false)
     );
+}
+
+#[test]
+fn a_screen_preserves_failed_tools_but_allows_two_verified_viable_arms() {
+    let mut study = cpu_screen();
+    study.min_attempts = 3;
+    let mut outcome = good(&study);
+    outcome.completed = 2;
+    outcome.failures.push("ExitedWithoutNativeResult".into());
+    outcome.conformance.truncate(2);
+    outcome.run_fps.truncate(2);
+    let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome.clone()));
+    assert_eq!(
+        run_to_end(&mut exec, &study).unwrap().result,
+        StudyResult::Qualified
+    );
+
+    let mut unsafe_failure = outcome.clone();
+    unsafe_failure.failures[0] = "IdentityMismatch".into();
+    let (mut exec, _) = executor(Ok(true), Ok(()), Ok(unsafe_failure));
+    assert_eq!(
+        run_to_end(&mut exec, &study).unwrap().reason,
+        "IncompleteAttempts"
+    );
+
+    outcome.run_fps[1].0 = outcome.run_fps[0].0;
+    let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome.clone()));
+    assert_eq!(
+        run_to_end(&mut exec, &study).unwrap().reason,
+        "IncompleteAttempts"
+    );
+
+    outcome.run_fps[1].0 = ProtonSource::ValveStable;
+    outcome.attempts_used = 2;
+    let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome.clone()));
+    assert_eq!(
+        run_to_end(&mut exec, &study).unwrap().reason,
+        "IncompleteAttempts"
+    );
+}
+
+#[test]
+fn a_compatibility_failure_leaves_a_viable_screen_and_fallback_pilot_in_the_resident_funnel() {
+    use std::{collections::BTreeMap, fs::File, os::unix::fs::PermissionsExt};
+
+    use crate::autotune::research::{
+        child_ledger::ChildLedger,
+        child_runner::{RunnerStep, StageRunner},
+        funnel_driver::inputs_for_study,
+    };
+    let mut parent = base_intent();
+    parent.tools.push(ResearchTool {
+        source: ProtonSource::ValveStable,
+        identity_sha256: "b".repeat(64),
+    });
+    parent.tools.push(ResearchTool {
+        source: ProtonSource::Em,
+        identity_sha256: "c".repeat(64),
+    });
+    let plan = plan(&parent).unwrap();
+    let screen = &plan[0];
+    let pilot = plan
+        .iter()
+        .find(|s| s.profile == screen.profile && s.stage == Stage::Pilot)
+        .unwrap();
+    let mut outcome = good(screen);
+    outcome.completed = 2;
+    outcome.failures.push("ExitedWithoutNativeResult".into());
+    outcome.conformance.truncate(2);
+    outcome.run_fps = vec![(ProtonSource::Ge, 70.0), (ProtonSource::Em, 75.0)];
+    let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
+    let root = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let ledger = ChildLedger::open(
+        File::open(root.path()).unwrap(),
+        crate::syscall::geteuid(),
+        plan.clone(),
+    )
+    .unwrap();
+    let mut runner = StageRunner::new(ledger, 100);
+    let step = runner.step(&mut exec, &|_| None, &mut || false).unwrap();
+    assert!(matches!(
+        step,
+        RunnerStep::Ran {
+            result: StudyResult::Qualified,
+            ..
+        }
+    ));
+    let fps = BTreeMap::from([
+        (ProtonSource::Ge, vec![70.0]),
+        (ProtonSource::Em, vec![75.0]),
+    ]);
+    let inputs = inputs_for_study(&parent, pilot, &fps, None).unwrap();
+    assert_eq!(inputs.arms, [ProtonSource::Ge, ProtonSource::Em]);
 }
 
 #[test]
@@ -564,103 +679,8 @@ fn pilot() -> ChildStudy {
         .unwrap()
 }
 
-#[test]
-fn a_qualified_pilot_freezes_the_rule_a_confirmation_will_be_bound_to() {
-    let study = pilot();
-    assert_eq!(study.min_attempts, 6, "three runs for each of two arms");
-    let (mut exec, _) = executor(Ok(true), Ok(()), Ok(good(&study)));
-    let outcome = run_to_end(&mut exec, &study).unwrap();
-    assert_eq!(outcome.result, StudyResult::Qualified);
-    let rule = outcome.rule.expect("a qualified pilot freezes a rule");
-    assert!(rule.is_consistent());
-    assert_eq!(
-        rule.pilot_runs, 3,
-        "the rule comes from one arm's three runs"
-    );
-    // Studies that are not pilots never carry a rule.
-    let screen = cpu_screen();
-    let (mut other, _) = executor(Ok(true), Ok(()), Ok(good(&screen)));
-    assert_eq!(run_to_end(&mut other, &screen).unwrap().rule, None);
-}
-
-#[test]
-fn a_pilot_that_cannot_support_a_confirmation_is_unqualified_with_its_reason() {
-    let study = pilot();
-    let case = |mutate: &dyn Fn(&mut AttemptsOutcome)| {
-        let mut outcome = good(&study);
-        mutate(&mut outcome);
-        let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
-        let result = run_to_end(&mut exec, &study).unwrap();
-        (result.result, result.reason, result.rule)
-    };
-    // One arm has only two runs.
-    let thin = case(&|o| {
-        let index = o
-            .run_fps
-            .iter()
-            .position(|(arm, _)| *arm == ProtonSource::Ge)
-            .unwrap();
-        o.run_fps.remove(index);
-    });
-    assert_eq!((thin.0, thin.1), (StudyResult::Unqualified, "PilotTooThin"));
-    assert!(thin.2.is_none());
-    // The runs are wildly noisy.
-    let noisy = case(&|o| {
-        for (index, (_, fps)) in o.run_fps.iter_mut().enumerate() {
-            *fps = [40.0, 100.0, 70.0][index % 3];
-        }
-    });
-    assert_eq!(
-        (noisy.0, noisy.1),
-        (StudyResult::Unqualified, "PilotTooNoisy")
-    );
-    // Only one arm produced runs.
-    let single = case(&|o| {
-        for (arm, _) in o.run_fps.iter_mut() {
-            *arm = ProtonSource::Ge;
-        }
-    });
-    assert_eq!(
-        (single.0, single.1),
-        (StudyResult::Unqualified, "PilotArms")
-    );
-    // A nonsense measurement.
-    let invalid = case(&|o| o.run_fps[0].1 = f64::NAN);
-    assert_eq!(
-        (invalid.0, invalid.1),
-        (StudyResult::Unqualified, "PilotInvalid")
-    );
-}
-
-#[test]
-fn an_observed_activation_is_not_a_functional_proof_and_the_reasons_differ() {
-    use crate::autotune::research::ResearchFactor;
-    let mut intent = base_intent();
-    intent.tools.push(ResearchTool {
-        source: ProtonSource::ValveStable,
-        identity_sha256: "b".repeat(64),
-    });
-    intent.factors = vec![ResearchFactor::NtSync];
-    let plan = plan(&intent).unwrap();
-    let feature = plan
-        .iter()
-        .find(|s| matches!(s.stage, Stage::Feature(_)))
-        .unwrap();
-    let run_with = |activation: Option<bool>| {
-        let mut outcome = good(feature);
-        outcome.activation = activation;
-        let (mut exec, _) = executor(Ok(true), Ok(()), Ok(outcome));
-        run_to_end(&mut exec, feature).unwrap()
-    };
-    assert_eq!(run_with(None).reason, "FeatureActivationUnproven");
-    assert_eq!(run_with(Some(false)).reason, "FeatureActivationUnproven");
-    // The treatment reached the game, but no receipt shows the feature works: still unqualified.
-    let reached = run_with(Some(true));
-    assert_eq!(
-        (reached.result, reached.reason),
-        (StudyResult::Unqualified, "FeatureFunctionalUnproven")
-    );
-}
+#[path = "study_executor_pilot_tests.rs"]
+mod pilot_tests;
 
 #[path = "study_executor_feature_tests.rs"]
 mod feature;

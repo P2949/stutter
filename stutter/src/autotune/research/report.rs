@@ -117,9 +117,9 @@ fn verdict_name(verdict: Verdict) -> &'static str {
 }
 
 /// The design of one comparison. Warmup and washout are zero seconds by construction, not by
-/// omission: a unit is one whole launch of the game (a cold process with a pre-existing prefix and
-/// shader cache, which attestation requires to be uniformly warm or cold and stamped by its own
-/// Proton: `prefix_identity::comparable`), the benchmark carries its own internal warm-up, and
+/// omission: a unit is one whole launch of the game. Prefix identity is checked separately and does
+/// not prove shader-cache temperature. Any prior screen used as operational warmup is recorded in
+/// its own child study, and
 /// carry-over between launches is controlled by complete, seeded, order-balanced blocks
 /// (`scheduler::balanced`) rather than by discarding time. A policy that discarded seconds would
 /// have to be frozen in the intent before the data, and none is.
@@ -169,10 +169,13 @@ pub fn build_report(
 ) -> anyhow::Result<ResearchReportV1> {
     let schedule = build_schedule(intent)?;
     let arms: Vec<ProtonSource> = intent.tools.iter().map(|tool| tool.source).collect();
-    let control = if arms.contains(&ProtonSource::ValveStable) {
-        ProtonSource::ValveStable
-    } else {
-        arms[0]
+    let control = {
+        let viable = |source: ProtonSource| arms.contains(&source);
+        [ProtonSource::ValveStable, ProtonSource::ValveExperimental]
+            .into_iter()
+            .find(|s| viable(*s))
+            .or_else(|| arms.first().copied())
+            .ok_or_else(|| anyhow::anyhow!("no authorized arms"))?
     };
     anyhow::ensure!(
         records.len() <= schedule.len(),

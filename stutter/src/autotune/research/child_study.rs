@@ -24,7 +24,7 @@ pub enum Profile {
 pub enum Stage {
     /// Observe-only screen of every eligible tool, no Stutter mutation.
     Screen,
-    /// Three runs per arm of the selected pair, to measure run-to-run variability. It freezes the
+    /// Three runs per viable arm, to measure run-to-run variability. It freezes the
     /// confirmation rule (effect size and equivalence margin) before any confirmation run starts.
     Pilot,
     /// Frozen confirmation of the selected pair under the pilot's rule.
@@ -32,6 +32,8 @@ pub enum Stage {
     /// Held-out validation: the confirmed pair re-measured on fresh, separately seeded runs under the
     /// same frozen rule, so a winner is claimed only when an independent repetition agrees.
     Holdout,
+    /// Preregistered matched comparison of CachyOS generic vs v3, its own frozen study.
+    MatchedCachyOs,
     /// Normal-controller action study (Supported actions only).
     Action(ResearchAction),
     /// One fork-local factor at a time.
@@ -56,6 +58,8 @@ pub struct ChildStudy {
 pub enum StudyArms {
     /// Every eligible tool of the campaign (the screen).
     All,
+    /// Every viable screen arm, subject to the campaign's frozen authorization.
+    Viable,
     /// Exactly two of them, selected after the screen: the control and one candidate. Confirmation,
     /// feature and action studies compare two conditions, so their attempt counts divide across two
     /// arms whatever the campaign's tool count is.
@@ -71,14 +75,19 @@ impl ChildStudy {
         match self.stage {
             Stage::Feature(factor) => Some(super::TreatmentSpec::Factor(factor)),
             Stage::Action(action) => Some(super::TreatmentSpec::Action(action)),
-            Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout => None,
+            Stage::Screen
+            | Stage::Pilot
+            | Stage::Confirm
+            | Stage::Holdout
+            | Stage::MatchedCachyOs => None,
         }
     }
 
     pub fn arms(&self) -> StudyArms {
         match self.stage {
             Stage::Screen => StudyArms::All,
-            Stage::Pilot | Stage::Confirm | Stage::Holdout => StudyArms::Pair,
+            Stage::Pilot => StudyArms::Viable,
+            Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs => StudyArms::Pair,
             Stage::Action(_) | Stage::Feature(_) => StudyArms::Single,
         }
     }
@@ -150,6 +159,25 @@ pub fn plan(intent: &ResearchIntentV1) -> anyhow::Result<Vec<ChildStudy>> {
             deps,
         )?);
     }
+    // The explicit CA↔C3 matched comparison study (PLAN §3.1).
+    if intent
+        .tools
+        .iter()
+        .any(|tool| tool.source == super::ProtonSource::CachyOs)
+        && intent
+            .tools
+            .iter()
+            .any(|tool| tool.source == super::ProtonSource::CachyOsV3)
+    {
+        let deps = dependency_digests(&studies, Profile::Cpu, Stage::MatchedCachyOs);
+        studies.push(study(
+            &digest,
+            Profile::Cpu,
+            Stage::MatchedCachyOs,
+            CONFIRM_ATTEMPTS,
+            deps,
+        )?);
+    }
     // One study per authorized action; which one actually runs is decided from the qualified
     // diagnosis at run time, never by enum order here.
     let mut actions = intent.actions.clone();
@@ -210,6 +238,7 @@ fn requires(profile: Profile, stage: Stage) -> Vec<(Profile, Stage)> {
         Stage::Confirm => vec![(profile, Stage::Pilot)],
         // The holdout runs under its pilot's rule and only after the confirmation it repeats qualified.
         Stage::Holdout => vec![(profile, Stage::Pilot), (profile, Stage::Confirm)],
+        Stage::MatchedCachyOs => vec![(Profile::Cpu, Stage::Pilot)],
         Stage::Action(_) | Stage::Feature(_) => {
             vec![
                 (Profile::Cpu, Stage::Screen),
@@ -638,7 +667,11 @@ mod tests {
                 // An unaffordable pilot is deferred, and everything that depends on it is blocked
                 // rather than run on the leftover budget.
                 Stage::Pilot => assert_eq!(*what, "deferred"),
-                Stage::Confirm | Stage::Holdout | Stage::Action(_) | Stage::Feature(_) => {
+                Stage::Confirm
+                | Stage::Holdout
+                | Stage::MatchedCachyOs
+                | Stage::Action(_)
+                | Stage::Feature(_) => {
                     assert_eq!(*what, "blocked")
                 }
             }

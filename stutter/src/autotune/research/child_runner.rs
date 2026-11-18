@@ -187,8 +187,13 @@ impl StageRunner {
             }
         };
         // Qualified evidence needs at least the study's own attempts.
+        let minimum = if matches!(study.stage, super::child_study::Stage::Pilot) {
+            (2 * super::pilot_rule::MIN_PILOT_RUNS) as u32
+        } else {
+            study.min_attempts
+        };
         let (result, reason) =
-            if run.result == StudyResult::Qualified && run.attempts_used < study.min_attempts {
+            if run.result == StudyResult::Qualified && run.attempts_used < minimum {
                 (StudyResult::Unqualified, "InsufficientAttempts")
             } else {
                 (run.result, run.reason)

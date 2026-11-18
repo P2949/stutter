@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ProtonSource, ResearchIntentV1, ResearchJournal,
+    child_verify_rules::{receipts_valid, rule_matches_pilot},
     driver::build_schedule,
     raw_verify::verify_raw_evidence,
     report_store::{load_and_verify, read_private},
@@ -36,7 +37,7 @@ pub struct ChildVerification {
     /// The action receipts an action child recorded beside its study (absent for other studies).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_receipts: Option<serde_json::Value>,
-    /// The cache cohort (cold or warm prefixes) the study ran in, when the host observed it.
+    /// Prefix initialization cohort observed by the host; it does not establish shader-cache state.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefix_cohort: Option<serde_json::Value>,
     /// For a holdout child: whether it reproduced its confirmation (`replication`), by name.
@@ -223,12 +224,15 @@ pub(crate) fn derived_from(
         && child.tools.iter().all(|tool| parent.tools.contains(tool))
         && match study.arms() {
             StudyArms::All => child.tools == parent.tools,
+            StudyArms::Viable => child.tools.len() >= 2,
             StudyArms::Pair => child.tools.len() == 2,
             StudyArms::Single => child.tools.len() == 1,
         };
     let rule_ok = match (study.stage, &child.confirmation_rule) {
-        (Stage::Confirm | Stage::Holdout, Some(rule)) => rule.is_consistent(),
-        (Stage::Confirm | Stage::Holdout, None) => false,
+        (Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs, Some(rule)) => {
+            rule.is_consistent()
+        }
+        (Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs, None) => false,
         (_, Some(_)) => false,
         (_, None) => true,
     };
@@ -250,7 +254,19 @@ pub(crate) fn derived_from(
         && rule_ok
         && treatment_ok
         && attempt_seconds_ok
-        && child.max_attempts == study.min_attempts
+        && child.max_attempts
+            == if matches!(study.stage, Stage::Pilot) {
+                (child.tools.len() as u32).saturating_mul(3)
+            } else {
+                study.min_attempts
+            }
+        && child.tools
+            == parent
+                .tools
+                .iter()
+                .filter(|tool| child.tools.contains(tool))
+                .cloned()
+                .collect::<Vec<_>>()
         && rebuilt == *parent
 }
 
@@ -472,10 +488,8 @@ fn study_checks(
     };
     let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name)?);
     let child: ResearchIntentV1 = serde_json::from_slice(&read_private(&dir, "intent.json", uid)?)?;
-    // A qualified comparison must have run over warm prefixes: the first run in a prefix a game never
-    // used is a cold-cache run, and pooling it with later warm ones would mix two cohorts. Only the
-    // exploratory screen may be cold. The cohort is read from the child's sealed intent, and an
-    // unknown one is not treated as warm.
+    // The prefix must be initialized for later studies. Its registry does not establish actual
+    // shader-cache temperature, which remains a separate measurement question.
     if decided.result == Some(StudyResult::Qualified) && !matches!(decided.stage, Stage::Screen) {
         anyhow::ensure!(
             child.prefix_cohort.as_deref() == Some("warm"),
@@ -483,6 +497,56 @@ fn study_checks(
         );
     }
     match decided.stage {
+        Stage::Screen | Stage::Pilot if decided.result == Some(StudyResult::Qualified) => {
+            let report = load_and_verify(&dir, uid)?;
+            let journal = ResearchJournal::open(
+                crate::syscall::openat_dir_nofollow(dir.as_fd(), "journal")?,
+                uid,
+                build_schedule(&child)?,
+            )?;
+            let failures: Vec<_> = journal
+                .verify()?
+                .into_iter()
+                .filter_map(|record| match record.outcome {
+                    super::journal::AttemptOutcome::Failed { code } => Some(code),
+                    super::journal::AttemptOutcome::Completed { .. } => None,
+                })
+                .collect();
+            let evidence = File::from(crate::syscall::openat_dir_nofollow(
+                dir.as_fd(),
+                "evidence",
+            )?);
+            let evidence = super::report_store::read_evidence(&evidence, uid)?;
+            let runs: Vec<_> = evidence
+                .values()
+                .filter_map(|item| {
+                    let native = item.native_completion.as_deref()?;
+                    Some((native.proton_source, native.metrics.average_fps))
+                })
+                .collect();
+            let used = u32::try_from(report.attempts_sealed)?;
+            let completed = u32::try_from(report.attempts_completed)?;
+            let sufficient = if decided.stage == Stage::Screen {
+                super::study_executor::screen_sufficient(
+                    child.max_attempts,
+                    used,
+                    completed,
+                    &runs,
+                    &failures,
+                )
+            } else {
+                let sources: Vec<_> = child.tools.iter().map(|tool| tool.source).collect();
+                super::study_executor::pilot_sufficient(
+                    child.max_attempts,
+                    used,
+                    completed,
+                    &sources,
+                    &runs,
+                    &failures,
+                )
+            };
+            anyhow::ensure!(sufficient, "ScreenOrPilotViabilityUnproven");
+        }
         Stage::Confirm | Stage::Holdout => {
             let planned = super::child_study::plan(parent)?
                 .into_iter()
@@ -496,6 +560,33 @@ fn study_checks(
             anyhow::ensure!(
                 child.confirmation_rule.as_ref() == Some(frozen),
                 "the confirmation does not run under its pilot's frozen rule"
+            );
+        }
+        Stage::MatchedCachyOs => {
+            let planned = super::child_study::plan(parent)?
+                .into_iter()
+                .find(|study| study.study_sha256 == decided.study_sha256)
+                .ok_or_else(|| anyhow::anyhow!("the matched CachyOS study is not in the plan"))?;
+            let pilot = super::arm_selection::pilot_of(parent, &planned)?;
+            let fps = super::arm_selection::pilot_fps_in_studies(studies, uid, &pilot)?;
+            let ca_runs = fps
+                .get(&super::ProtonSource::CachyOs)
+                .ok_or_else(|| anyhow::anyhow!("missing CA pilot runs"))?;
+            let c3_runs = fps
+                .get(&super::ProtonSource::CachyOsV3)
+                .ok_or_else(|| anyhow::anyhow!("missing C3 pilot runs"))?;
+            let mut runs = Vec::new();
+            for &val in ca_runs {
+                runs.push((super::ProtonSource::CachyOs, val));
+            }
+            for &val in c3_runs {
+                runs.push((super::ProtonSource::CachyOsV3, val));
+            }
+            let expected_rule =
+                super::pilot_rule::rule_from_runs(&runs).map_err(|e| anyhow::anyhow!("{e}"))?;
+            anyhow::ensure!(
+                child.confirmation_rule.as_ref() == Some(&expected_rule),
+                "the matched CachyOS study does not run under its own frozen rule"
             );
         }
         Stage::Action(action) if decided.result == Some(StudyResult::Qualified) => {
@@ -548,8 +639,13 @@ fn selection_check(
             .into_iter()
             .find(|study| study.study_sha256 == decided.study_sha256)
             .ok_or_else(|| anyhow::anyhow!("the study is not in the plan"))?;
-        let screen = super::arm_selection::screen_of(parent, &planned)?;
-        let fps = super::arm_selection::screen_fps(campaign, uid, &screen)?;
+        let fps = if decided.stage == Stage::Pilot {
+            let screen = super::arm_selection::screen_of(parent, &planned)?;
+            super::arm_selection::screen_fps(campaign, uid, &screen)?
+        } else {
+            let pilot = super::arm_selection::pilot_of(parent, &planned)?;
+            super::arm_selection::pilot_fps(campaign, uid, &pilot)?
+        };
         let rule = planned
             .depends_on
             .iter()
@@ -565,103 +661,6 @@ fn selection_check(
             "the child does not run the builds its screen selects"
         );
     }
-    Ok(())
-}
-
-/// Every receipt names the permitted action, the frozen process (start time and owner), its
-/// experiment, and shows the same placement before and after: the same cgroup and leader CPUs, the
-/// same process identity, and every thread the original saw (that still exists) back where it was.
-fn receipts_valid(
-    receipts: &serde_json::Value,
-    action: super::ResearchAction,
-    uid: u32,
-) -> anyhow::Result<()> {
-    let items = receipts
-        .as_array()
-        .filter(|items| !items.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("the receipts are empty"))?;
-    for item in items {
-        anyhow::ensure!(
-            item["action"] == format!("{action:?}"),
-            "a receipt names another action"
-        );
-        let pid = item["pid"]
-            .as_u64()
-            .and_then(|pid| u32::try_from(pid).ok())
-            .filter(|pid| *pid > 0)
-            .ok_or_else(|| anyhow::anyhow!("a receipt does not identify the frozen process"))?;
-        let start_ticks = item["start_ticks"]
-            .as_u64()
-            .filter(|ticks| *ticks > 0)
-            .ok_or_else(|| anyhow::anyhow!("a receipt does not identify the frozen process"))?;
-        anyhow::ensure!(
-            item["uid"].as_u64() == Some(u64::from(uid)),
-            "a receipt does not identify the frozen process"
-        );
-        anyhow::ensure!(
-            item["transaction"]
-                .as_str()
-                .is_some_and(|id| !id.is_empty()),
-            "a receipt names no experiment"
-        );
-        let before: super::action_gate::KernelState =
-            serde_json::from_value(item["original"].clone())?;
-        let after: super::action_gate::KernelState =
-            serde_json::from_value(item["restored"].clone())?;
-        let expected_identity = (start_ticks, uid);
-        anyhow::ensure!(
-            !before.cgroup.is_empty()
-                && !before.cpus_allowed.is_empty()
-                && before.cgroup == after.cgroup
-                && before.cpus_allowed == after.cpus_allowed
-                && before.identity == Some(expected_identity)
-                && after.identity == Some(expected_identity)
-                && !before.tasks.is_empty()
-                && before.tasks.contains_key(&pid)
-                && before.tasks.values().all(|cpus| !cpus.is_empty())
-                && after.tasks.values().all(|cpus| !cpus.is_empty()),
-            "a receipt shows a different placement or process after the restore"
-        );
-        // An absent task is not proof that it exited; that would need a separate identity witness.
-        let moved = before
-            .tasks
-            .iter()
-            .any(|(tid, cpus)| after.tasks.get(tid) != Some(cpus));
-        anyhow::ensure!(!moved, "a thread was not restored");
-    }
-    Ok(())
-}
-
-/// A pilot's recorded rule is recomputed from its sealed whole-run results; any difference is refused.
-fn rule_matches_pilot(
-    rules: &std::collections::BTreeMap<String, super::pilot_rule::FrozenConfirmationRule>,
-    name: &str,
-    studies: std::os::fd::BorrowedFd<'_>,
-    uid: u32,
-) -> anyhow::Result<()> {
-    let Some(recorded) = rules
-        .iter()
-        .find(|(digest, _)| digest.get(..16) == Some(name))
-        .map(|(_, rule)| rule)
-    else {
-        return Ok(());
-    };
-    let dir = File::from(crate::syscall::openat_dir_nofollow(studies, name)?);
-    let evidence = File::from(crate::syscall::openat_dir_nofollow(
-        dir.as_fd(),
-        "evidence",
-    )?);
-    let runs: Vec<_> = super::report_store::read_evidence(&evidence, uid)?
-        .values()
-        .filter_map(|item| item.native_completion.as_deref())
-        .map(|native| (native.proton_source, native.metrics.average_fps))
-        .collect();
-    let recomputed = super::pilot_rule::rule_from_runs(&runs)
-        .map_err(|code| anyhow::anyhow!("the pilot's runs do not support a rule: {code}"))?;
-    anyhow::ensure!(
-        recomputed == *recorded,
-        "the recorded confirmation rule is not what the pilot's sealed runs freeze"
-    );
     Ok(())
 }
 

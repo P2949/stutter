@@ -360,9 +360,13 @@ impl DriverStudyAttempts {
         self.running.is_some()
     }
 
-    fn begin(&mut self, study: &ChildStudy) -> anyhow::Result<()> {
+    fn begin(&mut self, study: &ChildStudy, remaining_attempts: u32) -> anyhow::Result<()> {
         let inputs = (self.select_arms)(study)?;
         let mut intent = child_intent(&self.parent, study, &inputs.arms, inputs.rule.as_ref())?;
+        anyhow::ensure!(
+            intent.max_attempts <= remaining_attempts,
+            "selected inputs exceed remaining campaign budget"
+        );
         // The arms must run over comparable prefixes before anything is created for the study.
         let cohort = self
             .host
@@ -474,8 +478,23 @@ impl DriverStudyAttempts {
             _ => self.stage_evidence(study),
         };
         Ok(AttemptsOutcome {
+            planned_attempts: driver.intent().max_attempts,
+            source_order: driver
+                .intent()
+                .tools
+                .iter()
+                .map(|tool| tool.source)
+                .collect(),
             attempts_used: u32::try_from(report.attempts_sealed)?,
             completed: u32::try_from(report.attempts_completed)?,
+            failures: driver
+                .records()?
+                .into_iter()
+                .filter_map(|record| match record.outcome {
+                    super::journal::AttemptOutcome::Failed { code } => Some(code),
+                    super::journal::AttemptOutcome::Completed { .. } => None,
+                })
+                .collect(),
             health_halt,
             context_consistent: evidence_context_consistent(&evidence),
             conformance,
@@ -496,6 +515,15 @@ impl DriverStudyAttempts {
 }
 
 impl StudyAttempts for DriverStudyAttempts {
+    fn required_attempts(&mut self, study: &ChildStudy) -> anyhow::Result<u32> {
+        let inputs = (self.select_arms)(study)?;
+        if study.stage == Stage::Pilot {
+            return u32::try_from(inputs.arms.len())?
+                .checked_mul(3)
+                .ok_or_else(|| anyhow::anyhow!("pilot attempt count overflow"));
+        }
+        Ok(study.min_attempts)
+    }
     fn has_progress(&mut self, study: &ChildStudy) -> bool {
         match open_dir(&self.campaign, STUDIES_DIR) {
             Ok(studies) => open_dir(&studies, dir_name(study)).is_ok(),
@@ -550,11 +578,11 @@ impl StudyAttempts for DriverStudyAttempts {
     fn poll_fenced(
         &mut self,
         study: &ChildStudy,
-        _remaining_attempts: u32,
+        remaining_attempts: u32,
         fence: &mut dyn FnMut() -> anyhow::Result<()>,
     ) -> anyhow::Result<Option<AttemptsOutcome>> {
         if self.running.is_none() {
-            self.begin(study)?;
+            self.begin(study, remaining_attempts)?;
         }
         let now = self.override_now.take().unwrap_or_else(|| (self.clock)());
         let own_fence = &mut self.launch_fence;

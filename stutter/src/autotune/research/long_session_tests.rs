@@ -156,7 +156,7 @@ fn a_long_child_intent_carries_the_long_window_validates_and_is_derived_from_its
         }
         let sources: Vec<_> = campaign.tools.iter().map(|tool| tool.source).collect();
         let arms = match study.arms() {
-            StudyArms::All => sources,
+            StudyArms::All | StudyArms::Viable => sources,
             StudyArms::Pair => sources[..2].to_vec(),
             StudyArms::Single => sources[..1].to_vec(),
         };

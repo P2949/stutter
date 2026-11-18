@@ -56,10 +56,16 @@ impl ProfileHook for Box<dyn ProfileHook + Send> {
 /// What the attempts of one study produced.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AttemptsOutcome {
+    /// Attempts frozen in this child after viable arms were selected.
+    pub planned_attempts: u32,
+    /// The selected tools in the campaign's frozen order.
+    pub source_order: Vec<ProtonSource>,
     /// Whole attempts that ran to a sealed result.
     pub attempts_used: u32,
     /// Sealed, valid native results among them.
     pub completed: u32,
+    /// Every sealed failure's original code; integrity or health failures cannot become compatibility exclusions.
+    pub failures: Vec<String>,
     /// A GPU reset or any health stop ended the study early.
     pub health_halt: bool,
     /// The comparison context was proven consistent across the study's arms.
@@ -87,6 +93,10 @@ pub struct AttemptsOutcome {
 /// Runs a study's attempts (the real one drives the journalled `Driver` over the Steam host, one
 /// tick per poll).
 pub trait StudyAttempts {
+    /// Exact attempt cost of the selected frozen inputs, before applying a profile or launching.
+    fn required_attempts(&mut self, study: &ChildStudy) -> anyhow::Result<u32> {
+        Ok(study.min_attempts)
+    }
     /// The study's own durable journal already holds progress: a restart found it mid-run.
     fn has_progress(&mut self, study: &ChildStudy) -> bool;
     /// Advance the study. `Ok(None)` means it is still running.
@@ -156,6 +166,72 @@ fn unresolved(attempts_used: u32, reason: &'static str) -> StudyRun {
     }
 }
 
+/// A screen is a compatibility census: every authorized slot is sealed, and at least two distinct
+/// builds have independently usable whole-run results. A failed build is retained as a failure.
+pub(super) fn screen_sufficient(
+    required: u32,
+    used: u32,
+    completed: u32,
+    runs: &[(ProtonSource, f64)],
+    failures: &[String],
+) -> bool {
+    if used != required
+        || completed < 2
+        || runs.len() != completed as usize
+        || u64::from(completed) + failures.len() as u64 != u64::from(used)
+        || failures
+            .iter()
+            .any(|code| code != "ExitedWithoutNativeResult" && code != "InvalidNativeResult")
+        || runs.iter().any(|(_, fps)| !fps.is_finite() || *fps <= 0.0)
+    {
+        return false;
+    }
+    runs.iter()
+        .map(|(source, _)| *source)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        >= 2
+}
+
+pub(super) fn pilot_sufficient(
+    expected: u32,
+    used: u32,
+    completed: u32,
+    sources: &[ProtonSource],
+    runs: &[(ProtonSource, f64)],
+    failures: &[String],
+) -> bool {
+    if !pilot_accounted(expected, used, completed, sources, runs, failures) {
+        return false;
+    }
+    let mut counts = std::collections::BTreeMap::<ProtonSource, usize>::new();
+    for (source, fps) in runs {
+        if !sources.contains(source) || !fps.is_finite() || *fps <= 0.0 {
+            return false;
+        }
+        *counts.entry(*source).or_default() += 1;
+    }
+    counts.values().all(|count| *count <= 3)
+        && counts.values().filter(|count| **count == 3).count() >= 2
+}
+
+fn pilot_accounted(
+    expected: u32,
+    used: u32,
+    completed: u32,
+    sources: &[ProtonSource],
+    runs: &[(ProtonSource, f64)],
+    failures: &[String],
+) -> bool {
+    used == expected
+        && expected as usize == sources.len() * 3
+        && u64::from(completed) + failures.len() as u64 == u64::from(used)
+        && runs.len() == completed as usize
+        && failures
+            .iter()
+            .all(|code| code == "ExitedWithoutNativeResult" || code == "InvalidNativeResult")
+}
+
 impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
     /// The study's result once its attempts have ended and the profile is restored. A benchmark
     /// study is qualified only by independently verified evidence, never by counts alone.
@@ -163,7 +239,26 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
         let used = outcome.attempts_used;
         if outcome.health_halt {
             run(StudyResult::Failed, used, "GpuReset", true)
-        } else if outcome.completed < study.min_attempts {
+        } else if if matches!(study.stage, Stage::Screen) {
+            !screen_sufficient(
+                study.min_attempts,
+                outcome.attempts_used,
+                outcome.completed,
+                &outcome.run_fps,
+                &outcome.failures,
+            )
+        } else if matches!(study.stage, Stage::Pilot) {
+            !pilot_accounted(
+                outcome.planned_attempts,
+                outcome.attempts_used,
+                outcome.completed,
+                &outcome.source_order,
+                &outcome.run_fps,
+                &outcome.failures,
+            )
+        } else {
+            outcome.attempts_used < study.min_attempts || outcome.completed < study.min_attempts
+        } {
             run(StudyResult::Failed, used, "IncompleteAttempts", false)
         } else if let Some(reason) = Self::stage_gap(study, outcome) {
             run(StudyResult::Unqualified, used, reason, false)
@@ -201,7 +296,7 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
 
     /// The confirmation rule a pilot freezes (the one derivation the verifier also uses).
     fn pilot_rule(outcome: &AttemptsOutcome) -> Result<FrozenConfirmationRule, &'static str> {
-        super::pilot_rule::rule_from_runs(&outcome.run_fps)
+        super::pilot_rule::rule_from_all_pilots(&outcome.source_order, &outcome.run_fps)
     }
 
     /// A feature or action study is not qualified by benchmark attempts alone.
@@ -223,7 +318,11 @@ impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
             }
             Stage::Feature(_) => Some("FeatureActivationUnproven"),
             Stage::Action(_) => Some("ActionEvidenceMissing"),
-            Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout => None,
+            Stage::Screen
+            | Stage::Pilot
+            | Stage::Confirm
+            | Stage::Holdout
+            | Stage::MatchedCachyOs => None,
         }
     }
 
@@ -285,6 +384,14 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
                     study.min_attempts,
                     "InterruptedStudy",
                     true,
+                )));
+            }
+            if self.attempts.required_attempts(study)? > remaining_attempts {
+                return Ok(Some(run(
+                    StudyResult::DeferredBudget,
+                    0,
+                    "DeferredBudget",
+                    false,
                 )));
             }
             let applied = match self.profiles.apply(study.profile) {

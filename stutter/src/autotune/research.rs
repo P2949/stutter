@@ -28,7 +28,6 @@ pub(crate) mod action_study;
 )]
 pub(crate) mod analysis;
 pub(crate) mod arm_selection;
-pub(crate) mod cache_state;
 pub(crate) mod campaign_budget;
 #[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod child_intent;
@@ -44,6 +43,7 @@ pub(crate) mod child_runner;
 )]
 pub(crate) mod child_study;
 pub(crate) mod child_verify;
+mod child_verify_rules;
 pub(crate) mod control_socket;
 #[cfg_attr(
     not(test),

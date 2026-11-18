@@ -14,7 +14,7 @@ use std::{
 use super::{
     ResearchIntentV1,
     action_gate::SharedActionGate,
-    arm_selection::{screen_fps, screen_of, select_pair},
+    arm_selection::{pilot_fps, pilot_of, screen_fps, screen_of, select_pair, viable_sources},
     child_ledger::{Disposition, open_for_campaign},
     child_runner::{RunnerStep, StageRunner},
     child_study::{ChildStudy, Stage, StudyArms},
@@ -38,11 +38,25 @@ pub fn inputs_for_study(
     fps: &BTreeMap<super::ProtonSource, Vec<f64>>,
     rule: Option<FrozenConfirmationRule>,
 ) -> anyhow::Result<StudyInputs> {
+    if !matches!(study.stage, Stage::Screen | Stage::Pilot) {
+        anyhow::ensure!(
+            fps.values()
+                .all(|runs| runs.len() == super::pilot_rule::MIN_PILOT_RUNS),
+            "selection requires three whole-run pilot measurements per viable build"
+        );
+    }
     Ok(match study.arms() {
         StudyArms::All => StudyInputs {
             arms: parent.tools.iter().map(|tool| tool.source).collect(),
             rule: None,
         },
+        StudyArms::Viable => {
+            let arms = viable_sources(parent, fps);
+            if arms.len() < 2 {
+                return Err(NoEligibleSource.into());
+            }
+            StudyInputs { arms, rule: None }
+        }
         // A treatment study measures one build with the switch off and on: the stable control for an
         // action, and for a feature the best measured build that has an environment control for it.
         StudyArms::Single => StudyInputs {
@@ -52,37 +66,67 @@ pub fn inputs_for_study(
             ],
             rule: None,
         },
-        StudyArms::Pair => StudyInputs {
-            arms: select_pair(parent, fps)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("the screen did not measure a control and a candidate")
-                })?
-                .to_vec(),
-            rule: match study.stage {
-                Stage::Confirm | Stage::Holdout => {
-                    Some(rule.ok_or_else(|| anyhow::anyhow!("the pilot froze no rule"))?)
+        StudyArms::Pair => match study.stage {
+            Stage::MatchedCachyOs => {
+                let ca = parent
+                    .tools
+                    .iter()
+                    .any(|tool| tool.source == super::ProtonSource::CachyOs);
+                let c3 = parent
+                    .tools
+                    .iter()
+                    .any(|tool| tool.source == super::ProtonSource::CachyOsV3);
+                let ca_runs = fps.get(&super::ProtonSource::CachyOs);
+                let c3_runs = fps.get(&super::ProtonSource::CachyOsV3);
+                match (ca, c3, ca_runs, c3_runs) {
+                    (true, true, Some(ca_runs), Some(c3_runs)) => {
+                        let mut runs = Vec::new();
+                        for &v in ca_runs {
+                            runs.push((super::ProtonSource::CachyOs, v));
+                        }
+                        for &v in c3_runs {
+                            runs.push((super::ProtonSource::CachyOsV3, v));
+                        }
+                        let matched_rule = super::pilot_rule::rule_from_runs(&runs)
+                            .map_err(|e| anyhow::anyhow!("{e}"))?;
+                        StudyInputs {
+                            arms: vec![
+                                super::ProtonSource::CachyOs,
+                                super::ProtonSource::CachyOsV3,
+                            ],
+                            rule: Some(matched_rule),
+                        }
+                    }
+                    _ => return Err(NoEligibleSource.into()),
                 }
-                _ => None,
+            }
+            _ => StudyInputs {
+                arms: select_pair(parent, fps).ok_or(NoEligibleSource)?.to_vec(),
+                rule: match study.stage {
+                    Stage::Confirm | Stage::Holdout => {
+                        Some(rule.ok_or_else(|| anyhow::anyhow!("the pilot froze no rule"))?)
+                    }
+                    _ => None,
+                },
             },
         },
     })
 }
 
-/// No measured build can run this treatment study (the factor has no environment control on any
-/// build the screen measured): the study is blocked, not run on a build that would refuse it.
+/// No measured viable pair or treatment source can run this study.
 #[derive(Debug)]
 pub struct NoEligibleSource;
 
 impl std::fmt::Display for NoEligibleSource {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("no measured build has an environment control for this factor")
+        formatter.write_str("no measured eligible source or comparison pair")
     }
 }
 
 impl std::error::Error for NoEligibleSource {}
 
-/// Decide before a study starts whether its arms can be selected at all, so a study with no eligible
-/// build is recorded as blocked rather than halting the funnel or running on the wrong build.
+/// Decide before a study starts whether its pair or treatment source can be selected at all, so a
+/// study without viable inputs is blocked rather than halting the funnel or running on the wrong build.
 /// A blocker that decides a study from the screen's results.
 pub type SelectionBlocker = Box<dyn Fn(&ChildStudy) -> Option<&'static str> + Send>;
 
@@ -93,7 +137,7 @@ pub fn selection_blocker(
 ) -> SelectionBlocker {
     let select = Mutex::new(production_inputs(campaign, parent, rules));
     Box::new(move |study| {
-        if study.arms() != StudyArms::Single {
+        if study.stage == Stage::Screen {
             return None;
         }
         let Ok(mut select) = select.lock() else {
@@ -104,7 +148,22 @@ pub fn selection_blocker(
             Err(error) if error.downcast_ref::<NoEligibleSource>().is_some() => {
                 Some("BlockedNoEligibleSource")
             }
-            Err(_) => Some("BlockedScreenUnavailable"),
+            Err(error) => {
+                let msg = error.to_string();
+                if msg.contains("rebuild")
+                    || msg.contains("tampered")
+                    || msg.contains("PilotInvalid")
+                    || msg.contains("evidence")
+                    || msg.contains("corrupt")
+                    || msg.contains("digest")
+                {
+                    Some("BlockedPredecessorCorrupt")
+                } else if msg.contains("PilotTooThin") {
+                    Some("BlockedPilotTooThin")
+                } else {
+                    Some("BlockedScreenUnavailable")
+                }
+            }
         }
     })
 }
@@ -116,11 +175,10 @@ pub fn production_inputs(
     rules: RuleRegistry,
 ) -> SelectArms {
     Box::new(move |study| {
-        let fps = match study.arms() {
-            StudyArms::All => BTreeMap::new(),
-            StudyArms::Pair | StudyArms::Single => {
-                screen_fps(&campaign, parent.uid, &screen_of(&parent, study)?)?
-            }
+        let fps = match study.stage {
+            Stage::Screen => BTreeMap::new(),
+            Stage::Pilot => screen_fps(&campaign, parent.uid, &screen_of(&parent, study)?)?,
+            _ => pilot_fps(&campaign, parent.uid, &pilot_of(&parent, study)?)?,
         };
         let rule = study
             .depends_on
@@ -135,7 +193,7 @@ pub struct FunnelDriver {
     executor: HostStudyExecutor<Box<dyn ProfileHook + Send>, DriverStudyAttempts>,
     /// Studies this build cannot run are decided with their blocker, never run or dropped.
     blocker: fn(&ChildStudy) -> Option<&'static str>,
-    /// Blockers that depend on the screen's own results (no build can run a treatment study).
+    /// Blockers that depend on the screen's own results (no viable pair or treatment source).
     selection: Option<SelectionBlocker>,
     cancelled: bool,
     rules: RuleRegistry,

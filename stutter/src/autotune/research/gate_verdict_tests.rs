@@ -151,6 +151,22 @@ fn a_blocked_or_failed_study_is_not_a_qualified_one() {
 }
 
 #[test]
+fn a_planned_matched_cachyos_study_must_be_qualified_for_the_comparison_gate() {
+    let mut studies = full(Some(StudyResult::Qualified));
+    studies.push(study(
+        Stage::MatchedCachyOs,
+        Some(StudyResult::DeferredBudget),
+    ));
+    assert!(
+        of(&run(&studies, true, false), "G4")
+            .blockers
+            .contains(&"ComparisonNotQualified")
+    );
+    studies.last_mut().unwrap().result = Some(StudyResult::Qualified);
+    assert!(of(&run(&studies, true, false), "G4").accepted);
+}
+
+#[test]
 fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
     let studies = full(Some(StudyResult::Qualified));
     let with = |telemetry: Option<(u32, u32)>, health: bool| {

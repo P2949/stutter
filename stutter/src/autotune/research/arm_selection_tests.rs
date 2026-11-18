@@ -28,9 +28,47 @@ fn the_control_is_valves_stable_build_or_else_the_first_tool() {
         ProtonSource::ValveStable,
         ProtonSource::Em,
     ]);
-    assert_eq!(control_of(&with_valve), Some(ProtonSource::ValveStable));
+    let fps = measured(&[
+        (ProtonSource::ValveStable, &[60.0]),
+        (ProtonSource::Ge, &[70.0]),
+        (ProtonSource::Em, &[65.0]),
+    ]);
+    assert_eq!(
+        control_of(&with_valve, &fps),
+        Some(ProtonSource::ValveStable)
+    );
     let without = campaign(&[ProtonSource::Ge, ProtonSource::Em]);
-    assert_eq!(control_of(&without), Some(ProtonSource::Ge));
+    assert_eq!(control_of(&without, &fps), Some(ProtonSource::Ge));
+}
+
+#[test]
+fn control_falls_back_to_a_measured_authorized_build() {
+    let intent = campaign(&[
+        ProtonSource::ValveStable,
+        ProtonSource::Ge,
+        ProtonSource::ValveExperimental,
+        ProtonSource::Em,
+    ]);
+    let fps = measured(&[
+        (ProtonSource::ValveStable, &[f64::NAN]),
+        (ProtonSource::Ge, &[70.0]),
+        (ProtonSource::ValveExperimental, &[60.0]),
+        (ProtonSource::Em, &[80.0]),
+    ]);
+    assert_eq!(
+        select_pair(&intent, &fps),
+        Some([ProtonSource::ValveExperimental, ProtonSource::Em])
+    );
+    let no_valve = measured(&[(ProtonSource::Ge, &[70.0]), (ProtonSource::Em, &[80.0])]);
+    assert_eq!(
+        select_pair(&intent, &no_valve),
+        Some([ProtonSource::Ge, ProtonSource::Em])
+    );
+    let invalid = measured(&[
+        (ProtonSource::Ge, &[70.0, -1.0]),
+        (ProtonSource::Em, &[80.0]),
+    ]);
+    assert_eq!(select_pair(&intent, &invalid), None);
 }
 
 #[test]
@@ -124,9 +162,9 @@ mod inputs {
 
     fn screen_fps() -> BTreeMap<ProtonSource, Vec<f64>> {
         measured(&[
-            (ProtonSource::ValveStable, &[60.0, 61.0]),
-            (ProtonSource::Ge, &[70.0, 71.0]),
-            (ProtonSource::Em, &[65.0, 66.0]),
+            (ProtonSource::ValveStable, &[60.0, 61.0, 60.0]),
+            (ProtonSource::Ge, &[70.0, 71.0, 70.0]),
+            (ProtonSource::Em, &[65.0, 66.0, 65.0]),
         ])
     }
 
@@ -143,7 +181,14 @@ mod inputs {
         assert!(all.rule.is_none());
         let pilot = study_of(&intent, |s| matches!(s, Stage::Pilot));
         let pair = inputs_for_study(&intent, &pilot, &screen_fps(), None).unwrap();
-        assert_eq!(pair.arms, [ProtonSource::ValveStable, ProtonSource::Ge]);
+        assert_eq!(
+            pair.arms,
+            [
+                ProtonSource::ValveStable,
+                ProtonSource::Ge,
+                ProtonSource::Em
+            ]
+        );
         assert!(pair.rule.is_none(), "only a confirmation carries a rule");
     }
 
@@ -161,6 +206,106 @@ mod inputs {
         assert_eq!(inputs.rule, Some(rule.clone()));
         assert!(inputs_for_study(&intent, &confirm, &screen_fps(), None).is_err());
         assert!(inputs_for_study(&intent, &confirm, &BTreeMap::new(), Some(rule)).is_err());
+    }
+
+    #[test]
+    fn screen_values_do_not_choose_the_confirmation_challenger() {
+        let intent = campaign(&[
+            ProtonSource::ValveStable,
+            ProtonSource::Ge,
+            ProtonSource::Em,
+        ]);
+        let pilot = study_of(&intent, |s| matches!(s, Stage::Pilot));
+        let screen = measured(&[
+            (ProtonSource::ValveStable, &[60.0]),
+            (ProtonSource::Ge, &[100.0]),
+            (ProtonSource::Em, &[80.0]),
+        ]);
+        let inputs = inputs_for_study(&intent, &pilot, &screen, None).unwrap();
+        assert_eq!(
+            inputs.arms,
+            [
+                ProtonSource::ValveStable,
+                ProtonSource::Ge,
+                ProtonSource::Em
+            ]
+        );
+        let confirm = study_of(&intent, |s| matches!(s, Stage::Confirm));
+        assert!(
+            inputs_for_study(
+                &intent,
+                &confirm,
+                &screen,
+                Some(freeze(&[70.0, 73.0, 67.0]).unwrap())
+            )
+            .is_err()
+        );
+        let repeated = measured(&[
+            (ProtonSource::ValveStable, &[60.0, 60.0, 60.0]),
+            (ProtonSource::Ge, &[65.0, 65.0, 65.0]),
+            (ProtonSource::Em, &[80.0, 80.0, 80.0]),
+        ]);
+        let chosen = inputs_for_study(
+            &intent,
+            &confirm,
+            &repeated,
+            Some(freeze(&[70.0, 73.0, 67.0]).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(chosen.arms, [ProtonSource::ValveStable, ProtonSource::Em]);
+    }
+
+    #[test]
+    fn matched_cachyos_comparison_uses_its_own_two_piloted_builds_and_rule() {
+        let intent = campaign(&[
+            ProtonSource::ValveStable,
+            ProtonSource::CachyOs,
+            ProtonSource::CachyOsV3,
+            ProtonSource::Ge,
+        ]);
+        let matched = study_of(&intent, |stage| *stage == Stage::MatchedCachyOs);
+        let fps = measured(&[
+            (ProtonSource::ValveStable, &[60.0, 60.0, 60.0]),
+            (ProtonSource::CachyOs, &[70.0, 71.0, 69.0]),
+            (ProtonSource::CachyOsV3, &[72.0, 73.0, 71.0]),
+            (ProtonSource::Ge, &[100.0, 100.0, 100.0]),
+        ]);
+        let inputs = inputs_for_study(&intent, &matched, &fps, None).unwrap();
+        assert_eq!(
+            inputs.arms,
+            [ProtonSource::CachyOs, ProtonSource::CachyOsV3]
+        );
+        let expected = [
+            (ProtonSource::CachyOs, 70.0),
+            (ProtonSource::CachyOs, 71.0),
+            (ProtonSource::CachyOs, 69.0),
+            (ProtonSource::CachyOsV3, 72.0),
+            (ProtonSource::CachyOsV3, 73.0),
+            (ProtonSource::CachyOsV3, 71.0),
+        ];
+        assert_eq!(
+            inputs.rule,
+            Some(crate::autotune::research::pilot_rule::rule_from_runs(&expected).unwrap())
+        );
+        let mut missing = fps;
+        missing.remove(&ProtonSource::CachyOsV3);
+        assert!(inputs_for_study(&intent, &matched, &missing, None).is_err());
+    }
+
+    #[test]
+    fn an_unavailable_screen_blocks_a_pair_study_before_any_driver_starts() {
+        use std::os::unix::fs::PermissionsExt;
+        let intent = campaign(&[ProtonSource::ValveStable, ProtonSource::Ge]);
+        let pilot = study_of(&intent, |s| matches!(s, Stage::Pilot));
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let blocker = crate::autotune::research::funnel_driver::selection_blocker(
+            std::fs::File::open(root.path()).unwrap(),
+            intent,
+            Default::default(),
+        );
+        assert_eq!(blocker(&pilot), Some("BlockedScreenUnavailable"));
+        assert!(!root.path().join("studies").exists());
     }
 }
 
@@ -203,12 +348,12 @@ mod treatment_source {
     /// Valve Stable is the fastest and the control, GE next.
     fn fps() -> BTreeMap<ProtonSource, Vec<f64>> {
         measured(&[
-            (ProtonSource::ValveStable, &[80.0, 81.0]),
-            (ProtonSource::ValveExperimental, &[70.0, 71.0]),
-            (ProtonSource::CachyOs, &[72.0, 73.0]),
-            (ProtonSource::CachyOsV3, &[74.0, 75.0]),
-            (ProtonSource::Ge, &[76.0, 77.0]),
-            (ProtonSource::Em, &[60.0, 61.0]),
+            (ProtonSource::ValveStable, &[80.0, 81.0, 80.0]),
+            (ProtonSource::ValveExperimental, &[70.0, 71.0, 70.0]),
+            (ProtonSource::CachyOs, &[72.0, 73.0, 72.0]),
+            (ProtonSource::CachyOsV3, &[74.0, 75.0, 74.0]),
+            (ProtonSource::Ge, &[76.0, 77.0, 76.0]),
+            (ProtonSource::Em, &[60.0, 61.0, 60.0]),
         ])
     }
 
@@ -257,6 +402,12 @@ mod treatment_source {
         assert_eq!(
             select_treatment_source(&intent, &action, &BTreeMap::new()),
             None
+        );
+        let mut fallback = fps();
+        fallback.remove(&ProtonSource::ValveStable);
+        assert_eq!(
+            select_treatment_source(&intent, &action, &fallback),
+            Some(ProtonSource::ValveExperimental)
         );
         // Gamescope is not a Proton environment factor: no build can run it.
         let gamescope = feature(&intent, ResearchFactor::Gamescope);

@@ -79,3 +79,41 @@ fn a_child_that_would_start_over_an_exhausted_campaign_budget_is_stopped_at_once
         "no attempt may start over an exhausted active budget"
     );
 }
+
+#[test]
+fn actual_viable_arm_count_sets_the_pilot_cost_before_any_study_directory_exists() {
+    use crate::autotune::research::{child_study::Stage, study_executor::StudyAttempts};
+    let root = tempfile::tempdir().unwrap();
+    let mut intent = parent();
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::Em,
+        identity_sha256: "c".repeat(64),
+    });
+    intent.max_attempts = 8;
+    let study = plan(&intent)
+        .unwrap()
+        .into_iter()
+        .find(|s| s.stage == Stage::Pilot)
+        .unwrap();
+    let mut runner = DriverStudyAttempts::new(
+        File::open(root.path()).unwrap(),
+        intent,
+        Box::new(Host::finishing()),
+        Box::new(|| 11),
+        Box::new(|| Ok(())),
+        Box::new(|_| "/nonexistent".into()),
+        Box::new(|_| {
+            Ok(StudyInputs {
+                arms: vec![
+                    ProtonSource::Ge,
+                    ProtonSource::ValveStable,
+                    ProtonSource::Em,
+                ],
+                rule: None,
+            })
+        }),
+    );
+    assert_eq!(runner.required_attempts(&study).unwrap(), 9);
+    assert!(runner.poll(&study, 8).is_err());
+    assert!(!root.path().join("studies").exists());
+}

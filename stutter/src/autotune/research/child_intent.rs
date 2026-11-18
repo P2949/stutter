@@ -26,12 +26,17 @@ pub fn child_intent(
     );
     // The child's tools are the selected arms, in the campaign's own order and with its frozen
     // identities; nothing outside the authorization can be introduced.
-    let tools: Vec<_> = parent
-        .tools
+    let tools: Vec<_> = arms
         .iter()
-        .filter(|tool| arms.contains(&tool.source))
-        .cloned()
-        .collect();
+        .map(|arm| {
+            parent
+                .tools
+                .iter()
+                .find(|tool| tool.source == *arm)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("tool for arm {arm:?} not found"))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let minimum = if study.arms() == StudyArms::Single {
         1
     } else {
@@ -46,6 +51,9 @@ pub fn child_intent(
             tools.len() == parent.tools.len(),
             "a screen runs across every authorized tool"
         ),
+        StudyArms::Viable => {
+            anyhow::ensure!(tools.len() >= 2, "a pilot needs at least two viable tools")
+        }
         StudyArms::Pair => {
             anyhow::ensure!(tools.len() == 2, "this study compares exactly two arms")
         }
@@ -64,15 +72,15 @@ pub fn child_intent(
             parent.actions.contains(&action),
             "the campaign did not authorize this action"
         ),
-        Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout => {}
+        Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs => {}
     }
     // A confirmation runs under the rule its pilot froze; no other study carries one.
     match (study.stage, rule) {
-        (Stage::Confirm | Stage::Holdout, Some(rule)) => anyhow::ensure!(
+        (Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs, Some(rule)) => anyhow::ensure!(
             rule.is_consistent(),
             "the confirmation rule is not one a pilot could have frozen"
         ),
-        (Stage::Confirm | Stage::Holdout, None) => {
+        (Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs, None) => {
             anyhow::bail!("a confirmation needs its pilot's frozen rule")
         }
         (_, Some(_)) => anyhow::bail!("only a confirmation carries a frozen rule"),
@@ -84,18 +92,25 @@ pub fn child_intent(
     } else {
         u32::try_from(tools.len())?
     };
+    let attempts = if matches!(study.stage, Stage::Pilot) {
+        count
+            .checked_mul(3)
+            .ok_or_else(|| anyhow::anyhow!("pilot attempt count overflow"))?
+    } else {
+        study.min_attempts
+    };
     anyhow::ensure!(
-        study.min_attempts > 0 && study.min_attempts.is_multiple_of(count),
+        attempts > 0 && attempts.is_multiple_of(count),
         "the study's attempts do not fill whole blocks across its arms"
     );
     anyhow::ensure!(
-        study.min_attempts <= parent.max_attempts,
+        attempts <= parent.max_attempts,
         "the study needs more attempts than the campaign allows"
     );
     let mut child = parent.clone();
     child.tools = tools;
     child.max_attempt_seconds = attempt_seconds(parent, study);
-    child.max_attempts = study.min_attempts;
+    child.max_attempts = attempts;
     child.child_study_sha256 = Some(study.study_sha256.clone());
     child.confirmation_rule = rule.cloned();
     child.treatment = study.treatment_spec();

@@ -1,6 +1,6 @@
 //! Choosing the two arms of a pilot, confirmation, feature or action study from the screen's own
-//! sealed results (PLAN section 6.3). The control is the stable baseline (Valve's Proton when the
-//! campaign authorized it, otherwise the first authorized tool) and the candidate is the other
+//! sealed results (PLAN section 6.3). The control is the first viable preferred baseline (Valve
+//! Stable, then Experimental, then the campaign's remaining tools) and the candidate is the other
 //! arm with the highest mean native FPS in the screen. It is a deterministic function of sealed
 //! evidence, so a verifier reproduces it, and ties break by the tool order of the campaign.
 
@@ -12,13 +12,49 @@ use super::{
     report_store::read_evidence,
 };
 
-/// Valve's stable build when authorized, otherwise the campaign's first tool.
-pub fn control_of(intent: &ResearchIntentV1) -> Option<ProtonSource> {
-    let tools: Vec<ProtonSource> = intent.tools.iter().map(|tool| tool.source).collect();
-    tools
-        .contains(&ProtonSource::ValveStable)
-        .then_some(ProtonSource::ValveStable)
-        .or_else(|| tools.first().copied())
+fn mean_fps(fps: &BTreeMap<ProtonSource, Vec<f64>>, source: ProtonSource) -> Option<f64> {
+    let runs = fps.get(&source).filter(|runs| !runs.is_empty())?;
+    if !runs.iter().all(|value| value.is_finite() && *value > 0.0) {
+        return None;
+    }
+    let mean = runs
+        .iter()
+        .map(|value| value / runs.len() as f64)
+        .sum::<f64>();
+    (mean.is_finite() && mean > 0.0).then_some(mean)
+}
+
+/// Screen results establish viability only; they do not rank builds or prove shader-cache warmth.
+pub fn viable_sources(
+    intent: &ResearchIntentV1,
+    fps: &BTreeMap<ProtonSource, Vec<f64>>,
+) -> Vec<ProtonSource> {
+    intent
+        .tools
+        .iter()
+        .map(|tool| tool.source)
+        .filter(|source| mean_fps(fps, *source).is_some())
+        .collect()
+}
+
+/// Choose a control from authorized tools with usable measurements, preferring Valve controls.
+pub fn control_of(
+    intent: &ResearchIntentV1,
+    fps: &BTreeMap<ProtonSource, Vec<f64>>,
+) -> Option<ProtonSource> {
+    let viable = |source| {
+        intent.tools.iter().any(|tool| tool.source == source) && mean_fps(fps, source).is_some()
+    };
+    [ProtonSource::ValveStable, ProtonSource::ValveExperimental]
+        .into_iter()
+        .find(|source| viable(*source))
+        .or_else(|| {
+            intent
+                .tools
+                .iter()
+                .map(|tool| tool.source)
+                .find(|source| viable(*source))
+        })
 }
 
 /// The control and the best non-control arm by mean FPS (campaign tool order breaks ties).
@@ -26,26 +62,31 @@ pub fn select_pair(
     intent: &ResearchIntentV1,
     fps: &BTreeMap<ProtonSource, Vec<f64>>,
 ) -> Option<[ProtonSource; 2]> {
-    let control = control_of(intent)?;
+    let sources: Vec<_> = intent.tools.iter().map(|tool| tool.source).collect();
+    select_pair_from_sources(&sources, fps)
+}
+
+pub(super) fn select_pair_from_sources(
+    sources: &[ProtonSource],
+    fps: &BTreeMap<ProtonSource, Vec<f64>>,
+) -> Option<[ProtonSource; 2]> {
+    let viable = |source| sources.contains(&source) && mean_fps(fps, source).is_some();
+    let control = [ProtonSource::ValveStable, ProtonSource::ValveExperimental]
+        .into_iter()
+        .find(|source| viable(*source))
+        .or_else(|| sources.iter().copied().find(|source| viable(*source)))?;
     let mut best: Option<(ProtonSource, f64)> = None;
-    for tool in &intent.tools {
-        let arm = tool.source;
+    for &arm in sources {
         if arm == control {
             continue;
         }
-        let Some(runs) = fps.get(&arm).filter(|runs| !runs.is_empty()) else {
+        let Some(mean) = mean_fps(fps, arm) else {
             continue;
         };
-        let mean = runs.iter().sum::<f64>() / runs.len() as f64;
-        if !mean.is_finite() {
-            continue;
-        }
         if best.is_none_or(|(_, top)| mean > top) {
             best = Some((arm, mean));
         }
     }
-    // The control must itself have been measured, or there is nothing to compare against.
-    fps.get(&control).filter(|runs| !runs.is_empty())?;
     best.map(|(candidate, _)| [control, candidate])
 }
 
@@ -65,13 +106,9 @@ pub fn select_treatment_source(
     study: &ChildStudy,
     fps: &BTreeMap<ProtonSource, Vec<f64>>,
 ) -> Option<ProtonSource> {
-    let mean = |source: ProtonSource| -> Option<f64> {
-        let runs = fps.get(&source).filter(|runs| !runs.is_empty())?;
-        let mean = runs.iter().sum::<f64>() / runs.len() as f64;
-        mean.is_finite().then_some(mean)
-    };
+    let mean = |source: ProtonSource| mean_fps(fps, source);
     match study.stage {
-        Stage::Action(_) => control_of(intent).filter(|control| mean(*control).is_some()),
+        Stage::Action(_) => control_of(intent, fps),
         Stage::Feature(factor) => {
             let mut best: Option<(ProtonSource, f64)> = None;
             for tool in &intent.tools {
@@ -86,7 +123,9 @@ pub fn select_treatment_source(
             }
             best.map(|(source, _)| source)
         }
-        Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout => None,
+        Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs => {
+            None
+        }
     }
 }
 
@@ -94,13 +133,25 @@ pub fn select_treatment_source(
 /// chain, or the CPU screen for the action and feature studies).
 pub fn screen_of(intent: &ResearchIntentV1, study: &ChildStudy) -> anyhow::Result<ChildStudy> {
     let wanted = match study.stage {
-        Stage::Action(_) | Stage::Feature(_) => Profile::Cpu,
+        Stage::Action(_) | Stage::Feature(_) | Stage::MatchedCachyOs => Profile::Cpu,
         _ => study.profile,
     };
     plan(intent)?
         .into_iter()
         .find(|candidate| candidate.stage == Stage::Screen && candidate.profile == wanted)
         .ok_or_else(|| anyhow::anyhow!("the study has no screen to select its arms from"))
+}
+
+/// The pilot whose repeated whole runs select the confirmation and treatment sources.
+pub fn pilot_of(intent: &ResearchIntentV1, study: &ChildStudy) -> anyhow::Result<ChildStudy> {
+    let wanted = match study.stage {
+        Stage::Action(_) | Stage::Feature(_) | Stage::MatchedCachyOs => Profile::Cpu,
+        _ => study.profile,
+    };
+    plan(intent)?
+        .into_iter()
+        .find(|candidate| candidate.stage == Stage::Pilot && candidate.profile == wanted)
+        .ok_or_else(|| anyhow::anyhow!("the study has no pilot to select its arms from"))
 }
 
 /// Each arm's native average FPS per completed run in a screen study's own sealed evidence.
@@ -113,6 +164,14 @@ pub fn screen_fps(
         campaign.as_fd(),
         "studies",
     )?);
+    screen_fps_in_studies(&studies, uid, screen)
+}
+
+pub fn screen_fps_in_studies(
+    studies: &File,
+    uid: u32,
+    screen: &ChildStudy,
+) -> anyhow::Result<BTreeMap<ProtonSource, Vec<f64>>> {
     let dir = File::from(crate::syscall::openat_dir_nofollow(
         studies.as_fd(),
         &screen.study_sha256[..16],
@@ -124,12 +183,6 @@ pub fn screen_fps(
         dir.as_fd(),
         "evidence",
     )?);
-    // The screen's cohort is read from its own sealed intent. In a cold cohort each arm's first run is a
-    // cold-cache run and is set aside, so the ranking compares steady state and not first use.
-    let cohort = serde_json::from_slice::<super::ResearchIntentV1>(
-        &super::report_store::read_private(&dir, "intent.json", uid)?,
-    )?
-    .prefix_cohort;
     let runs: Vec<_> = read_evidence(&evidence, uid)?
         .into_iter()
         .filter_map(|(slot, item)| {
@@ -137,7 +190,46 @@ pub fn screen_fps(
             Some((slot, native.proton_source, native.metrics.average_fps))
         })
         .collect();
-    Ok(super::cache_state::warm_fps(cohort.as_deref(), &runs))
+    let mut fps = BTreeMap::new();
+    for (_, source, value) in runs {
+        fps.entry(source).or_insert_with(Vec::new).push(value);
+    }
+    Ok(fps)
+}
+
+/// Reconstructed pilot measurements. Fewer than three runs on any included arm are not a pilot.
+pub fn pilot_fps(
+    campaign: &File,
+    uid: u32,
+    pilot: &ChildStudy,
+) -> anyhow::Result<BTreeMap<ProtonSource, Vec<f64>>> {
+    let studies = File::from(crate::syscall::openat_dir_nofollow(
+        campaign.as_fd(),
+        "studies",
+    )?);
+    pilot_fps_in_studies(&studies, uid, pilot)
+}
+
+pub fn pilot_fps_in_studies(
+    studies: &File,
+    uid: u32,
+    pilot: &ChildStudy,
+) -> anyhow::Result<BTreeMap<ProtonSource, Vec<f64>>> {
+    let mut fps = screen_fps_in_studies(studies, uid, pilot)?;
+    anyhow::ensure!(
+        fps.values()
+            .all(|runs| runs.len() <= super::pilot_rule::MIN_PILOT_RUNS),
+        "PilotInvalid"
+    );
+    fps.retain(|_, runs| runs.len() == super::pilot_rule::MIN_PILOT_RUNS);
+    anyhow::ensure!(
+        fps.len() >= 2
+            && fps
+                .values()
+                .all(|runs| runs.len() >= super::pilot_rule::MIN_PILOT_RUNS),
+        "PilotTooThin"
+    );
+    Ok(fps)
 }
 
 #[cfg(test)]

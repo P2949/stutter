@@ -218,7 +218,7 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
     let comparison = |stage: &Stage| {
         matches!(
             stage,
-            Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout
+            Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs
         )
     };
     let holdout = |stage: &Stage| matches!(stage, Stage::Holdout);

@@ -1,7 +1,7 @@
 # Research child-study funnel: status and remaining integration
 
 Status at this revision: the funnel is **connected to the resident controller, default off**, and
-unit/controller-tested with fake hosts. Nothing here has run against a live game.
+unit/controller-tested with fake hosts. The composed funnel has not been qualified on a live game.
 
 ## Built and connected (all under `stutter/src/autotune/`)
 
@@ -16,36 +16,18 @@ unit/controller-tested with fake hosts. Nothing here has run against a live game
 | `research/profile_applier.rs`, `profile_hook.rs` | atomic edit, readback, durable snapshot, crash recovery, all-or-nothing per arm |
 | `research/driver_attempts.rs` | one child through the journalled `Driver`, own journal/dispatch/evidence/intent/report |
 | `research/funnel_driver.rs` | presents the funnel as a campaign driver: ticks map to the `Step`s the lease already uses |
-| `research/arm_selection.rs` | control + best candidate from the screen's sealed FPS |
+| `research/arm_selection.rs` | viable screen arms; control and candidate from repeated sealed pilot runs |
 | `research/child_verify.rs`, `raw_verify.rs`, `verdict.rs` | per-child reconstruction and raw replay; separate verification statuses |
 | `runtime/research_funnel.rs` + `research_control_drive.rs` | `research_child_funnel` switch (default false, needs live launch); tick, cancel, shutdown, report |
 | `runtime/research_recovery.rs` | restart: settle every child's interrupted attempt via the witnesses, then restore profiles |
 | `research/dispatch_select.rs`, `steam_port.rs` | the dispatcher and port find a child's attempt under `studies/<digest>/dispatch` |
 
-## Not connectable without a design decision: the Stutter action child (CP-LONG)
+## Remaining action-child integration (CP-LONG)
 
-`runtime.research_campaign_active` (set in `runtime/session.rs`) blanket-suppresses the autonomous
-loop while research owns the action slot. `research/action_child.rs` and `action_bridge.rs` model the
-authorization and the apply/readback/decide/restore sequence, but the *normal* controller applies
-actions through `LiveExperimentManager` and `RuntimeLiveExperimentActionExecutor`
-(`live_experiment/executor.rs`), with its own journalled, two-phase, token-bearing lifecycle. A
-second applier would create a parallel optimizer, which the plan forbids. The real bridge is a
-**per-candidate gate** in place of the boolean:
-
-1. `session.rs` holds an `ActionChildScope` (built from the campaign intent's `actions`, the frozen
-   game process identity and the window) while a CP-LONG child is running.
-2. Before `RuntimeLiveExperimentActionExecutor::apply_candidate`, the gate is asked for a grant for
-   (candidate kind, target pid, start ticks, uid, now). A refusal blocks the apply exactly as the
-   boolean does today.
-3. The experiment manager reports `applied(readback_ok)`, `kept`, `reverted` and `restored` events
-   back to the scope (the experiment already journals each of these phases).
-4. `restored(true)` requires the worker's own kernel readback **and** zero outstanding tokens
-   (`UnixSocketPrivilegedActionService::outstanding_tokens`), as `action_bridge` already enforces.
-5. The study's `stage_evidence` becomes `Some(true)` only when the scope settled the action with a
-   proven restoration; benchmark FPS alone never qualifies it.
-
-This touches the normal autotuner's lifecycle and needs a review of its journal phases and of the
-diagnosis that selects the candidate. It cannot be proven without a live CP-LONG run.
+The normal controller has a per-candidate research gate and retains the existing worker lifecycle.
+An authorized long work unit, its execution and evidence lifecycle, runnable-delay objective, and
+complete independent action/restoration verification still need integration. A real route and
+physical action remain unqualified; no second applier or forced candidate is authorized.
 
 ## Still requires a live run or a human decision
 
@@ -67,7 +49,7 @@ unknown counts as unproven. No new root IPC. Not yet exercised against the real 
 
 ## Treatment designs
 
-Feature and action studies measure **one fixed Proton build** (the screen's control) with the factor or
+Feature and action studies measure **one fixed Proton build** selected from pilot evidence with the factor or
 action off versus on (`StudyArms::Single`, `treatment`, `Treatment::{Off,On}`): the schedule balances the
 two treatments in complete seeded blocks, the host applies the factor only to attempts treated On, the
 action gate permits an action only during On attempts, and the report is one paired result carrying the
@@ -87,7 +69,7 @@ confirmation. The verifier checks its rule and arm selection exactly as it does 
 - Studies on the long profile need a `LongWorkUnit` (`research/long_session.rs`: an id, a 20-60
   minute duration and a definition digest). None is installed, so they are recorded as
   `BlockedNoComparableLongWorkUnit`; the native benchmark's FPS is never reported as a long session.
-- A treatment study measures the build the screen's verified results select for its factor
+- A treatment study measures the build the pilot's verified results select for its factor
   (`arm_selection::select_treatment_source`): a fork-local feature is never measured on Valve
   Stable, and a factor no measured build can run is `BlockedNoEligibleSource`.
 - Before any study creates anything, its arms' prefixes must be all cold, or all warm and stamped by
@@ -101,8 +83,9 @@ time it is bound to, drop and gap counters, health, competing targets, clock ali
 attempt ends, a receipt per attempt is written to the study's `telemetry-receipts.json` stating whether
 the source was bound to the attested game process and what `quality::judge_frame_source` says of it.
 Competing candidate games stand in for an ambiguous swapchain; a counter the runtime cannot read stays
-unknown, never zero. G3 is accepted only when every completed attempt of the verified children has an
-`Eligible`, game-bound receipt; otherwise it reports `NoTelemetryReceipts` or `FrameSourceNotEligible`.
+unknown, never zero. Current G3 logic incorrectly requires an eligible frame receipt for every completed
+attempt; the plan permits degraded optional frame-source evidence and requires broader resident
+observation. The gate and independent raw replay still need correction.
 Nothing here has run against a real game: the real frame sources' behaviour is unproven.
 
 ## Deployment receipt (G8)
@@ -157,8 +140,9 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
 - **G5** joins each action receipt to a completed attempt the schedule treated On and requires every
   treated attempt to carry one (`ActionNotAppliedOnEveryTreatedAttempt` otherwise): a policy-only
   comparison is not reported as an applied-action study.
-- **G6** consumes a typed `fault-matrix-*.json` receipt: every required class must have a physical
-  pass for this binary; fixtures never count. No physical matrix has been run.
+- **G6** currently consumes a typed `fault-matrix-*.json` receipt that incorrectly requires physical
+  passes for all fault classes. This remains to be corrected to the plan's fixture and benign physical
+  acceptance policy; destructive real-game tests are prohibited.
 - **G9** also requires each holdout to reproduce its confirmation (`replication`): a sound holdout
   that reaches another conclusion, or an inconclusive one, blocks with `HoldoutDoesNotReplicate`.
 - **Bundle.** Child rows carry telemetry receipts and process identities, and a bundle that cannot be
@@ -180,8 +164,7 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   Verification needs a warm prefix with its settings file; a profile is never allowed while a launch is
   in flight or unverified; a forged, gapped, reordered or time-reversed journal is an error. The
   supervised launch itself is a live action and is not run; the module is staged until it is. The
-  per-attempt cache-state contract (a first run in a freshly initialized prefix is cold-cache and is
-  never pooled with warm runs) is not implemented.
+  shader-cache state is not established by the prefix state.
 - **CP-LONG producer interface.** `research::long_receipt` defines the lifecycle a producer follows
   (`LongSessionDriver`: start, poll, abort), the record a completed session leaves, and `verify`, which
   accepts it only for the authorized unit (same id and definition digest), played for at least the
@@ -194,11 +177,10 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   cohort; a cold or unrecorded one is `ColdOrUnknownCohortNotComparable`, and only the exploratory
   screen may be cold. Prefix state is still not shader-cache state: a warm Wine prefix does not prove
   the Vulkan and game caches are warm, and per-attempt cache identity is not recorded.
-- **Per-attempt cache state.** `research::cache_state` classifies each completed run from the study's
-  sealed cohort and sealed evidence (nothing to trust): in a cold-cohort study the first completed run
-  of each arm is `ColdFirstUse`, every other run `Warm`. The screen ranking (`screen_fps`, used by both
-  selection and its verification) averages warm runs only, so first-use compilation is never pooled
-  with steady state. Shader-cache temperature is still inferred from the prefix, not measured.
+- **Warmup and cache state.** A completed screen establishes feasibility and supplies a prior run for
+  each viable build; three new whole-run pilot measurements per viable build select the pair. Neither
+  prefix state nor the existence of a prior run proves actual shader-cache temperature. Equivalent
+  cache preparation and cache identity still require independent evidence before physical acceptance.
 - **Diagnosis oracle producer.** `research::oracle_cases` maps the controller's own `Diagnosis` to the
   oracle's causes (a cause that needs an attribution chain is reported only with an explicit one; the
   unknown and the causes the oracle has no name for are an abstention), commits ground truth by
@@ -208,14 +190,14 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   a cause and capturing the live controller's output for it) needs the real game and controller.
 - **Functional probes.** `research::functional_probe` reads a feature's state from the game's own
   sealed native context: frame generation (`frameGenerationType`) and the upscaler (`upscalingType`).
-  A feature study is qualified only when its treatment reached the game and every On attempt reported
-  the feature in use while every Off attempt reported it off (`Observed`); otherwise the reason is
-  `FeatureActivatedButNotFunctional`, `FeatureNotObservable` (no such report exists: Wayland, NTSync,
-  VKD3D latency, AntiLag2, HDR) or `FeatureFunctionalUnproven`. No feature has been run in the game.
+  A nonzero enum is game-reported selection, not proof of the technology, replacement DLL or effective
+  backend. Feature qualification remains blocked until independently replayable functional evidence is
+  connected.
 - **Measurement window.** The observer buckets the frames it receives per unix second into each
   receipt (`frame_seconds`), and the verifier counts only the frames inside the attempt's native
-  benchmark window (the sealed completion's start and end) toward the 2 400-frame floor, so menu and
-  loading-screen frames cannot satisfy it. A receipt with truncated or missing buckets counts none.
+  recorded completion window toward the 2 400-frame floor. The recorded start is currently first
+  game-process sighting, not an independently established benchmark-scene start, so it can include
+  menu or loading frames. A receipt with truncated or missing buckets counts none.
 - **Capture identity.** `procfs_state` requires the same process (pid, start time, owner) before and
   after reading its threads; a recycled pid mid-capture leaves the state unknown.
 - **G8 campaign binding.** A deployment receipt attests G8 only if the deployed binary is the build

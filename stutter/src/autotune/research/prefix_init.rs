@@ -3,8 +3,8 @@
 //! launches, so a cold arm can never reach its first launch through the screen. Initialization is
 //! therefore its own stage, run before any profile or comparison: one supervised launch whose only
 //! job is to let the game create its prefix and settings, then settle, then be verified. No profile
-//! is applied and nothing is measured during it, and the first run is a cold-cache run that is
-//! never pooled with later warm ones.
+//! is applied and nothing is measured during it. Prefix initialization does not establish the
+//! temperature of a shader cache.
 //!
 //! This module is the contract and its verifier: the plan (which arms need it), the state machine
 //! (`Planned -> Launched -> Settled -> Verified`, or `Abandoned`), a hash-chained journal of

@@ -199,10 +199,13 @@ fn a_qualified_comparison_over_a_cold_or_unknown_cohort_is_not_comparable_but_a_
         study_checks(&rules, &dispositions, &name(study), &studies, uid, &parent)
             .map_err(|error| error.to_string())
     };
-    // The exploratory screen may run cold.
-    assert!(verdict(|s| matches!(s, Stage::Screen), Some("cold")).is_ok());
-    // A pilot is a comparison: warm only, and an unrecorded cohort is not assumed warm.
-    assert!(verdict(|s| matches!(s, Stage::Pilot), Some("warm")).is_ok());
+    // A cold screen is not rejected for its cohort; its missing sealed report still prevents
+    // the fixture from claiming that a screen actually qualified.
+    let screen_error = verdict(|s| matches!(s, Stage::Screen), Some("cold")).unwrap_err();
+    assert!(!screen_error.contains("ColdOrUnknownCohortNotComparable"));
+    // An initialized prefix alone cannot qualify the pilot without its sealed report.
+    let pilot_error = verdict(|s| matches!(s, Stage::Pilot), Some("warm")).unwrap_err();
+    assert!(!pilot_error.contains("ColdOrUnknownCohortNotComparable"));
     for cohort in [Some("cold"), None] {
         let error = verdict(|s| matches!(s, Stage::Pilot), cohort).unwrap_err();
         assert!(
@@ -210,4 +213,135 @@ fn a_qualified_comparison_over_a_cold_or_unknown_cohort_is_not_comparable_but_a_
             "{error}"
         );
     }
+}
+
+#[test]
+fn independent_screen_replay_accepts_compatibility_failures_but_not_integrity_failures() {
+    use crate::autotune::research::{
+        cyberpunk::NativeBenchmarkFile,
+        driver::build_schedule,
+        journal::{AttemptOutcome, AttemptRecord},
+        report_store::{build_from_dirs, write_report},
+    };
+    let check = |failure: &str| {
+        let mut parent = parent();
+        parent.uid = crate::syscall::geteuid();
+        let study = plan(&parent).unwrap().remove(0);
+        let mut child = built(&parent, &study);
+        child.prefix_cohort = Some("cold".into());
+        let root = tempfile::tempdir().unwrap();
+        let studies_path = root.path().join("studies");
+        let path = studies_path.join(name(&study));
+        for dir in [
+            &studies_path,
+            &path,
+            &path.join("journal"),
+            &path.join("evidence"),
+        ] {
+            std::fs::create_dir(dir).unwrap();
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let dir = File::open(&path).unwrap();
+        crate::autotune::research::report_store::write_new(
+            &dir,
+            "intent.json",
+            &serde_json::to_vec(&child).unwrap(),
+        )
+        .unwrap();
+        let schedule = build_schedule(&child).unwrap();
+        let mut journal = ResearchJournal::open(
+            crate::syscall::open_dir_no_symlinks(&path.join("journal")).unwrap(),
+            child.uid,
+            schedule,
+        )
+        .unwrap();
+        let evidence = File::open(path.join("evidence")).unwrap();
+        for index in 0..study.min_attempts {
+            let slot = journal.start().unwrap();
+            let outcome = if index < 2 {
+                let mut native = completion(index);
+                native.build_id = child.build_id;
+                native.process.uid = child.uid;
+                native.process.build_id = child.build_id;
+                native.process.executable_sha256 = child.game_executable_sha256.clone();
+                native.proton_source = slot.arm;
+                native.proton_identity_sha256 = child
+                    .tools
+                    .iter()
+                    .find(|tool| tool.source == slot.arm)
+                    .unwrap()
+                    .identity_sha256
+                    .clone();
+                native.files = vec![NativeBenchmarkFile {
+                    path: "result/summary.json".into(),
+                    size_bytes: 10,
+                    sha256: "d".repeat(64),
+                }];
+                let item = AttemptEvidenceV1 {
+                    schema_version: 1,
+                    slot_index: slot.index,
+                    average_fps: 60.0,
+                    native_completion: Some(Box::new(native)),
+                };
+                AttemptOutcome::Completed {
+                    evidence_sha256: write_evidence(&evidence, &slot, &item).unwrap(),
+                }
+            } else {
+                AttemptOutcome::Failed {
+                    code: failure.into(),
+                }
+            };
+            journal.seal(AttemptRecord { slot, outcome }).unwrap();
+        }
+        let report = build_from_dirs(&child, &journal, &evidence).unwrap();
+        write_report(&dir, &report).unwrap();
+        drop(journal);
+        let dispositions = vec![Disposition {
+            study_sha256: study.study_sha256.clone(),
+            profile: study.profile,
+            stage: study.stage,
+            result: Some(StudyResult::Qualified),
+            reason: String::new(),
+        }];
+        let studies = File::open(studies_path).unwrap();
+        let checked = study_checks(
+            &Default::default(),
+            &dispositions,
+            &name(&study),
+            &studies,
+            child.uid,
+            &parent,
+        )
+        .map_err(|error| error.to_string());
+        if checked.is_ok() {
+            let campaign = File::open(root.path()).unwrap();
+            let viable =
+                crate::autotune::research::arm_selection::screen_fps(&campaign, child.uid, &study)
+                    .unwrap();
+            assert_eq!(
+                viable.len(),
+                2,
+                "one cold-prefix screen per viable arm establishes feasibility without ranking cache warmth"
+            );
+            let pilot = plan(&parent)
+                .unwrap()
+                .into_iter()
+                .find(|candidate| {
+                    candidate.profile == study.profile && candidate.stage == Stage::Pilot
+                })
+                .unwrap();
+            let inputs = crate::autotune::research::funnel_driver::inputs_for_study(
+                &parent, &pilot, &viable, None,
+            )
+            .unwrap();
+            assert_eq!(inputs.arms.len(), 2);
+        }
+        checked
+    };
+    assert!(check("ExitedWithoutNativeResult").is_ok());
+    assert!(
+        check("IdentityMismatch")
+            .unwrap_err()
+            .contains("ScreenOrPilotViabilityUnproven")
+    );
 }

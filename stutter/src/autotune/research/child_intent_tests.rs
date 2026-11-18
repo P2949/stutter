@@ -11,7 +11,11 @@ fn build(
     study: &ChildStudy,
     arms: &[ProtonSource],
 ) -> anyhow::Result<ResearchIntentV1> {
-    let rule = matches!(study.stage, Stage::Confirm | Stage::Holdout).then(rule);
+    let rule = matches!(
+        study.stage,
+        Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs
+    )
+    .then(rule);
     child_intent(parent, study, arms, rule.as_ref())
 }
 use crate::autotune::research::{
@@ -69,14 +73,22 @@ fn every_stage_of_a_six_proton_campaign_builds_a_schedule_over_its_own_arms() {
     let parent = parent();
     for study in plan(&parent).unwrap() {
         let arms: Vec<ProtonSource> = match study.arms() {
-            StudyArms::All => SIX.to_vec(),
+            StudyArms::All | StudyArms::Viable => SIX.to_vec(),
+            StudyArms::Pair if study.stage == Stage::MatchedCachyOs => {
+                vec![ProtonSource::CachyOs, ProtonSource::CachyOsV3]
+            }
             StudyArms::Pair => pair().to_vec(),
             StudyArms::Single => vec![ProtonSource::ValveStable],
         };
         let child = build(&parent, &study, &arms)
             .unwrap_or_else(|e| panic!("{:?}/{:?}: {e:#}", study.profile, study.stage));
         let schedule = build_schedule(&child).unwrap();
-        assert_eq!(schedule.len(), study.min_attempts as usize);
+        let expected = if study.stage == Stage::Pilot {
+            arms.len() * 3
+        } else {
+            study.min_attempts as usize
+        };
+        assert_eq!(schedule.len(), expected);
         if study.arms() == StudyArms::Single {
             // One build, two treatments: the arm is that build in every slot, the treatment is carried
             // beside it, balanced off and on.
@@ -91,7 +103,7 @@ fn every_stage_of_a_six_proton_campaign_builds_a_schedule_over_its_own_arms() {
         // Every arm of the study, and only those, appears equally often (AB/BA balance).
         for arm in &arms {
             let count = schedule.iter().filter(|slot| slot.arm == *arm).count();
-            assert_eq!(count, study.min_attempts as usize / arms.len());
+            assert_eq!(count, expected / arms.len());
         }
         assert!(schedule.iter().all(|slot| arms.contains(&slot.arm)));
     }

@@ -43,12 +43,18 @@ fn study_of(parent: &ResearchIntentV1, stage: fn(&Stage) -> bool) -> ChildStudy 
 fn built(parent: &ResearchIntentV1, study: &ChildStudy) -> ResearchIntentV1 {
     use crate::autotune::research::child_study::StudyArms;
     let arms: Vec<_> = match study.arms() {
-        StudyArms::All => parent.tools.iter().map(|tool| tool.source).collect(),
+        StudyArms::All | StudyArms::Viable => parent.tools.iter().map(|tool| tool.source).collect(),
+        StudyArms::Pair if study.stage == Stage::MatchedCachyOs => {
+            vec![ProtonSource::CachyOs, ProtonSource::CachyOsV3]
+        }
         StudyArms::Pair => vec![ProtonSource::ValveStable, ProtonSource::Ge],
         StudyArms::Single => vec![ProtonSource::ValveStable],
     };
-    let rule = matches!(study.stage, Stage::Confirm | Stage::Holdout)
-        .then(|| freeze(&[70.0, 73.0, 67.0]).unwrap());
+    let rule = matches!(
+        study.stage,
+        Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs
+    )
+    .then(|| freeze(&[70.0, 73.0, 67.0]).unwrap());
     let mut child = child_intent(parent, study, &arms, rule.as_ref()).unwrap();
     child.prefix_cohort = Some("warm".into());
     child

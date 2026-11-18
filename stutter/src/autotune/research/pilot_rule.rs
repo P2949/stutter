@@ -121,9 +121,77 @@ pub fn rule_from_runs(
     chosen.ok_or("PilotArms")
 }
 
+/// Select a pair only after every viable pilot arm has three usable whole-run measurements, then
+/// freeze the rule from that selected pair. Runtime and independent replay share this derivation.
+pub fn rule_from_all_pilots(
+    sources: &[super::ProtonSource],
+    runs: &[(super::ProtonSource, f64)],
+) -> Result<FrozenConfirmationRule, &'static str> {
+    let mut grouped = std::collections::BTreeMap::<super::ProtonSource, Vec<f64>>::new();
+    for &(arm, fps) in runs {
+        if !sources.contains(&arm) {
+            return Err("PilotArms");
+        }
+        grouped.entry(arm).or_default().push(fps);
+    }
+    if grouped
+        .values()
+        .any(|runs| runs.iter().any(|fps| !fps.is_finite() || *fps <= 0.0))
+    {
+        return Err("PilotInvalid");
+    }
+    if sources.len() < 2 || grouped.values().any(|runs| runs.len() > MIN_PILOT_RUNS) {
+        return Err("PilotTooThin");
+    }
+    // A build with an incomplete pilot is not ranked. The caller must separately establish that
+    // its missing runs were sealed compatibility failures, not health or integrity failures.
+    grouped.retain(|_, runs| runs.len() == MIN_PILOT_RUNS);
+    let pair =
+        super::arm_selection::select_pair_from_sources(sources, &grouped).ok_or("PilotArms")?;
+    let selected: Vec<_> = runs
+        .iter()
+        .copied()
+        .filter(|(source, _)| pair.contains(source))
+        .collect();
+    rule_from_runs(&selected)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_arm_pilot_selects_after_three_runs_and_falls_back_if_control_failed() {
+        use super::super::ProtonSource::{Em, Ge, ValveStable};
+        let sources = [ValveStable, Ge, Em];
+        let runs = [
+            (ValveStable, 60.0),
+            (ValveStable, 61.0),
+            (ValveStable, 59.0),
+            (Ge, 80.0),
+            (Ge, 81.0),
+            (Ge, 79.0),
+            (Em, 90.0),
+            (Em, 91.0),
+            (Em, 89.0),
+        ];
+        let selected: Vec<_> = runs
+            .iter()
+            .copied()
+            .filter(|(source, _)| *source == ValveStable || *source == Em)
+            .collect();
+        assert_eq!(
+            rule_from_all_pilots(&sources, &runs).unwrap(),
+            rule_from_runs(&selected).unwrap()
+        );
+        let fallback: Vec<_> = runs
+            .iter()
+            .copied()
+            .filter(|(source, _)| *source != ValveStable)
+            .collect();
+        assert!(rule_from_all_pilots(&sources, &fallback).is_ok());
+        assert!(rule_from_all_pilots(&sources, &fallback[..3]).is_err());
+    }
 
     #[test]
     fn the_rule_follows_the_pilots_spread_and_is_frozen_by_digest() {
