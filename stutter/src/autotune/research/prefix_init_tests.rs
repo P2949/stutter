@@ -98,7 +98,8 @@ fn a_cold_arm_walks_planned_launched_settled_verified_and_is_then_initialized() 
 }
 
 #[test]
-fn an_illegal_transition_a_late_settlement_and_a_verification_over_a_bare_prefix_are_refused() {
+fn an_illegal_transition_and_verification_over_a_bare_prefix_are_refused_and_late_cleanup_is_recorded()
+ {
     let f = fixture();
     let mut journal = InitJournal::open(&f.journal, ARM, uid()).unwrap();
     // Nothing but planning can start a journal; stages cannot be skipped.
@@ -120,20 +121,33 @@ fn an_illegal_transition_a_late_settlement_and_a_verification_over_a_bare_prefix
             .advance(InitStage::Verified, &f.compat, &f.settings, NOW + 500)
             .is_err()
     );
-    // A settlement after the bound is refused, and the launch is never extended.
+    // A launched attempt cannot be abandoned before its ownership is settled.
     let g = fixture();
     let mut late = InitJournal::open(&g.journal, ARM, uid()).unwrap();
     walk(&g, &mut late, &[InitStage::Planned, InitStage::Launched]);
     assert!(
+        late.advance(InitStage::Abandoned, &g.compat, &g.settings, NOW + 500)
+            .is_err()
+    );
+    // Cleanup remains recordable even if the launch outlasted the execution bound.
+    late.advance(
+        InitStage::Settled,
+        &g.compat,
+        &g.settings,
+        NOW + 1_000 + MAX_INIT_SECONDS,
+    )
+    .unwrap();
+    initialize(&g);
+    assert!(
         late.advance(
-            InitStage::Settled,
+            InitStage::Verified,
             &g.compat,
             &g.settings,
-            NOW + 1_000 + MAX_INIT_SECONDS
+            NOW + 1_001 + MAX_INIT_SECONDS
         )
         .is_err()
     );
-    // Giving up is always possible and ends the journal short of verified.
+    // Once settled, giving up ends the journal short of verified.
     late.advance(
         InitStage::Abandoned,
         &g.compat,
@@ -170,11 +184,67 @@ fn a_forged_gapped_or_reordered_journal_is_not_a_chain() {
         &[
             InitStage::Planned,
             InitStage::Launched,
+            InitStage::Settled,
             InitStage::Abandoned,
         ],
     );
     std::fs::remove_file(g._root.path().join(file_name(ARM, 2))).unwrap();
     assert!(InitJournal::open(&g.journal, ARM, uid()).is_err());
+}
+
+#[test]
+fn replay_rejects_self_consistent_records_that_violate_cleanup_or_verification_semantics() {
+    for forged in ["unsettled", "cold", "missing_settings", "late"] {
+        let f = fixture();
+        let mut journal = InitJournal::open(&f.journal, ARM, uid()).unwrap();
+        journal
+            .advance(InitStage::Planned, &f.compat, &f.settings, NOW)
+            .unwrap();
+        journal
+            .advance(InitStage::Launched, &f.compat, &f.settings, NOW + 1)
+            .unwrap();
+        if forged == "unsettled" {
+            let last = std::fs::read(f._root.path().join(file_name(ARM, 2))).unwrap();
+            let record = InitRecord {
+                schema: 1,
+                arm: ARM,
+                sequence: 3,
+                stage: InitStage::Abandoned,
+                unix_seconds: NOW + 2,
+                previous_sha256: stutter_core::hash::sha256_hex(&last),
+                prefix_class: "cold".into(),
+                settings_present: false,
+            };
+            write_new(
+                &f.journal,
+                &file_name(ARM, 3),
+                &serde_json::to_vec(&record).unwrap(),
+            )
+            .unwrap();
+        } else {
+            initialize(&f);
+            journal
+                .advance(InitStage::Settled, &f.compat, &f.settings, NOW + 2)
+                .unwrap();
+            journal
+                .advance(InitStage::Verified, &f.compat, &f.settings, NOW + 3)
+                .unwrap();
+            let path = f._root.path().join(file_name(ARM, 4));
+            let mut record: InitRecord =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            match forged {
+                "cold" => record.prefix_class = "cold".into(),
+                "missing_settings" => record.settings_present = false,
+                "late" => record.unix_seconds = NOW + 2 + MAX_INIT_SECONDS,
+                _ => unreachable!(),
+            }
+            std::fs::write(path, serde_json::to_vec(&record).unwrap()).unwrap();
+        }
+        assert!(
+            InitJournal::open(&f.journal, ARM, uid()).is_err(),
+            "accepted {forged}"
+        );
+    }
 }
 
 #[test]

@@ -46,7 +46,6 @@ impl InitStage {
             (Planned, Launched)
                 | (Planned, Abandoned)
                 | (Launched, Settled)
-                | (Launched, Abandoned)
                 | (Settled, Verified)
                 | (Settled, Abandoned)
         )
@@ -166,6 +165,18 @@ impl<'a> InitJournal<'a> {
                     );
                 }
             }
+            if record.stage == InitStage::Verified {
+                let launched = records
+                    .iter()
+                    .find(|(prior, _)| prior.stage == InitStage::Launched)
+                    .ok_or_else(|| anyhow::anyhow!("verified initialization lacks a launch"))?;
+                anyhow::ensure!(
+                    record.unix_seconds.saturating_sub(launched.0.unix_seconds) <= MAX_INIT_SECONDS
+                        && record.prefix_class == PrefixClass::Warm.label()
+                        && record.settings_present,
+                    "verified initialization does not satisfy its recorded conditions"
+                );
+            }
             previous = stutter_core::hash::sha256_hex(&bytes);
             records.push((record, previous.clone()));
         }
@@ -182,8 +193,8 @@ impl<'a> InitJournal<'a> {
     }
 
     /// Append the next stage, observing the prefix now. A transition the machine does not permit,
-    /// one that would outlast `MAX_INIT_SECONDS` since the launch, or `Verified` over a prefix that
-    /// does not have its settings and registry is refused.
+    /// a late `Verified`, or `Verified` over a prefix without settings and registry is refused.
+    /// Settlement and abandonment remain recordable after expiry so cleanup is never hidden.
     pub fn advance(
         &mut self,
         next: InitStage,
@@ -207,7 +218,7 @@ impl<'a> InitJournal<'a> {
             .iter()
             .find(|(record, _)| record.stage == InitStage::Launched)
             .map(|(record, _)| record.unix_seconds);
-        if matches!(next, InitStage::Settled | InitStage::Verified)
+        if next == InitStage::Verified
             && let Some(launched) = launched_at
         {
             anyhow::ensure!(
