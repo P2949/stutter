@@ -64,3 +64,47 @@ fn rejected_evidence_is_sealed_then_latches_an_integrity_stop() {
     );
     assert_eq!(host.launches, 1);
 }
+
+#[test]
+fn a_restarted_driver_reconstructs_a_terminal_class_from_the_sealed_journal() {
+    for class in [
+        FailureClass::Integrity,
+        FailureClass::Environment,
+        FailureClass::Resource,
+        FailureClass::Health,
+    ] {
+        let (dir, mut driver, intent) = setup(4);
+        let mut host = fake();
+        let now = intent.issued_unix_seconds + 1;
+        assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+        host.polls.push_back(Progress::Failed {
+            class,
+            code: "SameDiagnostic".into(),
+        });
+        assert!(matches!(
+            driver.tick(&mut host, now + 1).unwrap(),
+            Step::Sealed(_)
+        ));
+        drop(driver);
+        let schedule = build_schedule(&intent).unwrap();
+        let len = schedule.len();
+        let journal = ResearchJournal::open(
+            crate::syscall::open_dir_no_symlinks(&dir.path().join("journal")).unwrap(),
+            intent.uid,
+            schedule,
+        )
+        .unwrap();
+        let root =
+            File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("dispatch")).unwrap());
+        let evidence =
+            File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("evidence")).unwrap());
+        let mut recovered = Driver::new(journal, intent, root, evidence, len);
+        let expected = if class == FailureClass::Health {
+            Step::Halted("BlockedGpuStability")
+        } else {
+            Step::Stopped(class)
+        };
+        assert_eq!(recovered.tick(&mut host, now + 2).unwrap(), expected);
+        assert_eq!(host.launches, 1);
+    }
+}

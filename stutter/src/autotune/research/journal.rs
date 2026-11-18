@@ -44,6 +44,18 @@ pub enum AttemptOutcome {
 }
 
 impl AttemptOutcome {
+    /// Classified failures other than verified incompatibility terminate the attempt schedule.
+    pub(crate) fn terminal_failure(&self) -> Option<super::driver_failure::FailureClass> {
+        match self {
+            Self::ClassifiedFailure { class, .. }
+                if *class != super::driver_failure::FailureClass::Incompatible =>
+            {
+                Some(*class)
+            }
+            _ => None,
+        }
+    }
+
     /// Only typed incompatibility is eligible for a compatibility exclusion. Legacy failures have
     /// no independently recorded class and remain unqualified, regardless of their message.
     pub(super) fn compatibility_failure(&self) -> Option<&str> {
@@ -227,6 +239,13 @@ impl ResearchJournal {
     pub fn start(&mut self) -> anyhow::Result<AttemptSlot> {
         anyhow::ensure!(self.active.is_none(), "attempt already active");
         let records = self.scan(false)?;
+        anyhow::ensure!(
+            records
+                .last()
+                .and_then(|record| record.outcome.terminal_failure())
+                .is_none(),
+            "terminal failure forbids another attempt"
+        );
         let index = records.len();
         let slot = self
             .schedule
@@ -312,6 +331,7 @@ impl ResearchJournal {
         }
         let mut records = Vec::new();
         let mut pending = false;
+        let mut terminal_failure = false;
         for (index, slot) in self.schedule.iter().enumerate() {
             let marker = format!("{index:04}.started");
             let result = format!("{index:04}.json");
@@ -321,6 +341,7 @@ impl ResearchJournal {
                 pending = true;
                 continue;
             }
+            anyhow::ensure!(!terminal_failure, "attempt follows a terminal failure");
             anyhow::ensure!(!pending && started, "journal is not a schedule prefix");
             let started: Started = serde_json::from_slice(&self.read(&marker)?)?;
             anyhow::ensure!(
@@ -343,6 +364,7 @@ impl ResearchJournal {
                         == stutter_core::hash::sha256_hex(&serde_json::to_vec(&seal.record)?),
                 "attempt seal mismatch"
             );
+            terminal_failure = seal.record.outcome.terminal_failure().is_some();
             records.push(seal.record);
         }
         anyhow::ensure!(entries.is_empty(), "unknown or temporary journal entry");
@@ -420,6 +442,62 @@ mod tests {
                 evidence_sha256: "c".repeat(64),
             },
         }
+    }
+
+    #[test]
+    fn terminal_classified_failures_forbid_start_and_forged_later_records() {
+        use super::super::driver_failure::FailureClass;
+        for class in [
+            FailureClass::Environment,
+            FailureClass::Resource,
+            FailureClass::Integrity,
+            FailureClass::Health,
+        ] {
+            let dir = private_dir();
+            let mut journal = open(dir.path()).unwrap();
+            let slot = journal.start().unwrap();
+            journal
+                .seal(AttemptRecord {
+                    slot,
+                    outcome: AttemptOutcome::ClassifiedFailure {
+                        class,
+                        code: "Stopped".into(),
+                    },
+                })
+                .unwrap();
+            assert!(journal.start().is_err());
+            drop(journal);
+            let reopened = open(dir.path()).unwrap();
+            assert_eq!(
+                reopened
+                    .verify()
+                    .unwrap()
+                    .last()
+                    .unwrap()
+                    .outcome
+                    .terminal_failure(),
+                Some(class)
+            );
+        }
+        // A self-consistent pair of seals is still illegal if the first is changed to terminal.
+        let dir = private_dir();
+        let mut journal = open(dir.path()).unwrap();
+        let first = journal.start().unwrap();
+        journal.seal(record(first)).unwrap();
+        let second = journal.start().unwrap();
+        journal.seal(record(second)).unwrap();
+        let path = dir.path().join("0000.json");
+        let mut seal: Seal = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        seal.record.outcome = AttemptOutcome::ClassifiedFailure {
+            class: FailureClass::Integrity,
+            code: "Stopped".into(),
+        };
+        seal.record_sha256 =
+            stutter_core::hash::sha256_hex(&serde_json::to_vec(&seal.record).unwrap());
+        fs::write(path, serde_json::to_vec(&seal).unwrap()).unwrap();
+        assert!(journal.verify().is_err());
+        drop(journal);
+        assert!(open(dir.path()).is_err());
     }
 
     #[test]

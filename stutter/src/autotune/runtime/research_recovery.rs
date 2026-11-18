@@ -34,6 +34,7 @@ pub(super) struct RecoveredCampaign {
     pub(super) facts: Option<CampaignFacts>,
     pub(super) lease: CampaignLease,
     pub(super) study_dir: Option<PathBuf>,
+    pub(super) terminal_code: Option<&'static str>,
 }
 
 impl RecoveryJob {
@@ -57,11 +58,13 @@ impl RecoveryJob {
                     "UnsafeToResume: launch history needs attempt and worker verification"
                 )
             })?;
-            recover_launched(&mut lease, self.study_dir.as_deref(), factory, self.now)?;
+            let terminal_code =
+                recover_launched(&mut lease, self.study_dir.as_deref(), factory, self.now)?;
             return Ok(RecoveredCampaign {
                 facts: self.facts,
                 lease,
                 study_dir: self.study_dir,
+                terminal_code,
             });
         }
         verify_no_attempts(&lease, self.study_dir.as_deref())?;
@@ -79,6 +82,7 @@ impl RecoveryJob {
             facts: self.facts,
             lease,
             study_dir: self.study_dir,
+            terminal_code: None,
         })
     }
 }
@@ -189,17 +193,28 @@ fn recover_children(
     factory: &RecoveryFactory,
     same_boot: bool,
     now: u64,
-) -> anyhow::Result<()> {
+    parent_has_attempts: bool,
+) -> anyhow::Result<(
+    Option<crate::autotune::research::driver::FailureClass>,
+    bool,
+)> {
     let studies = match crate::syscall::openat_dir_nofollow(campaign.as_fd(), "studies") {
         Ok(dir) => File::from(dir),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((None, false)),
         Err(error) => return Err(error.into()),
     };
     let mut names = Vec::new();
     for entry in std::fs::read_dir(format!("/proc/self/fd/{}", studies.as_raw_fd()))? {
         names.push(entry?.file_name().to_string_lossy().into_owned());
     }
-    names.sort();
+    let plan = crate::autotune::research::child_study::plan(parent)?;
+    names.sort_by_key(|name| {
+        plan.iter()
+            .position(|study| study.study_sha256.get(..16) == Some(name.as_str()))
+            .unwrap_or(usize::MAX)
+    });
+    let mut terminal = None;
+    let mut any_attempts = false;
     for name in names {
         let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), &name)?);
         let metadata = dir.metadata()?;
@@ -225,6 +240,15 @@ fn recover_children(
         };
         let (journal_dir, dispatch, evidence) =
             (open("journal")?, open("dispatch")?, open("evidence")?);
+        if terminal.is_some() || parent_has_attempts {
+            for dir in [&journal_dir, &dispatch, &evidence] {
+                let mut entries = std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))?;
+                anyhow::ensure!(
+                    entries.next().transpose()?.is_none(),
+                    "UnsafeToResume: attempt follows a terminal or parent history"
+                );
+            }
+        }
         let schedule = build_schedule(&child)?;
         let len = schedule.len();
         let (journal, adopted) =
@@ -234,8 +258,16 @@ fn recover_children(
         if let Some(slot) = adopted {
             driver.recover_interrupted(slot, same_boot, witnesses, now)?;
         }
+        let records = driver.records()?;
+        any_attempts |= !records.is_empty();
+        if let Some(class) = records
+            .last()
+            .and_then(|record| record.outcome.terminal_failure())
+        {
+            terminal = Some(class);
+        }
     }
-    Ok(())
+    Ok((terminal, any_attempts))
 }
 
 /// Put back the settings of any graphics profile a crash left applied, once every attempt is
@@ -297,7 +329,7 @@ fn recover_launched(
     study_path: Option<&Path>,
     factory: &RecoveryFactory,
     now: u64,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<&'static str>> {
     let (campaign, intent) = open_campaign(lease, study_path)?
         .ok_or_else(|| anyhow::anyhow!("UnsafeToResume: launch history without a study root"))?;
     let uid = crate::syscall::geteuid();
@@ -319,11 +351,29 @@ fn recover_launched(
     let same_boot = crate::telemetry::identity::read_boot_id()? == intent.boot_id;
     // The child studies of a funnel campaign are settled first, each through the same independent
     // witnesses, before the campaign may be retired.
-    recover_children(&campaign, uid, &intent, factory, same_boot, now)?;
+    let parent_has_attempts = adopted.is_some() || !journal.verify()?.is_empty();
+    let (child_terminal, child_attempts) = recover_children(
+        &campaign,
+        uid,
+        &intent,
+        factory,
+        same_boot,
+        now,
+        parent_has_attempts,
+    )?;
     let mut driver = Driver::new(journal, intent.clone(), dispatch, evidence, len);
     if let Some(slot) = adopted {
         driver.recover_interrupted(slot, same_boot, witnesses, now)?;
     }
+    let parent_records = driver.records()?;
+    anyhow::ensure!(
+        !(child_attempts && !parent_records.is_empty()),
+        "UnsafeToResume: parent and child attempt histories overlap"
+    );
+    let terminal = parent_records
+        .last()
+        .and_then(|record| record.outcome.terminal_failure())
+        .or(child_terminal);
     // Both child and parent launch ownership must be settled before any settings are restored.
     restore_profiles(study_path, &intent)?;
     // Every attempt that started is now sealed. Block the campaign through the normal restoring
@@ -335,7 +385,18 @@ fn recover_launched(
         if lease.phase() != ResearchPhase::Restoring {
             lease.advance(ResearchPhase::Restoring, now)?;
         }
-        lease.advance(ResearchPhase::Blocked, now)?;
+        let phase = if terminal == Some(crate::autotune::research::driver::FailureClass::Integrity)
+        {
+            ResearchPhase::Aborted
+        } else {
+            ResearchPhase::Blocked
+        };
+        lease.advance(phase, now)?;
+    } else if terminal == Some(crate::autotune::research::driver::FailureClass::Integrity) {
+        anyhow::ensure!(
+            lease.phase() == ResearchPhase::Aborted,
+            "UnsafeToResume: terminal lease contradicts integrity failure"
+        );
     }
-    Ok(())
+    Ok(terminal.map(|class| class.terminal_code()))
 }

@@ -263,11 +263,13 @@ impl ResearchCoordinator {
             self.terminal = Some(TerminalCampaign {
                 phase: lease.phase(),
                 intent_sha256: digest,
-                code: match (lease.phase(), lease.block_reason()) {
-                    (_, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",
-                    (ResearchPhase::Aborted, _) => "Cancelled",
-                    _ => "RecoveredBlocked",
-                },
+                code: recovered.terminal_code.unwrap_or(
+                    match (lease.phase(), lease.block_reason()) {
+                        (_, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",
+                        (ResearchPhase::Aborted, _) => "Cancelled",
+                        _ => "RecoveredBlocked",
+                    },
+                ),
             });
         } else {
             let deadline_unix_seconds = lease.deadline_unix_seconds();

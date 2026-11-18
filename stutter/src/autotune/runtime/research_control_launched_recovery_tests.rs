@@ -342,6 +342,75 @@ mod funnel_campaign {
             ResearchPhase::Blocked
         );
     }
+    #[test]
+    fn a_child_integrity_failure_is_reconstructed_after_the_controller_crashes() {
+        use crate::autotune::research::driver::FailureClass;
+        let campaign = tempfile::tempdir().unwrap();
+        let study = tempfile::tempdir().unwrap();
+        for dir in [&campaign, &study] {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let meta = std::fs::metadata(study.path()).unwrap();
+        let root = crate::autotune::research::StudyRootIdentity {
+            device: std::os::unix::fs::MetadataExt::dev(&meta),
+            inode: std::os::unix::fs::MetadataExt::ino(&meta),
+        };
+        let (mut intent, mut facts) = fixture();
+        intent.study_root = Some(root);
+        facts.study_root = Some(root);
+        intent.tools.push(ResearchTool {
+            source: ProtonSource::ValveStable,
+            identity_sha256: "b".repeat(64),
+        });
+        facts.tools = intent.tools.clone();
+        intent.max_attempts = 40;
+        let boot = crate::telemetry::identity::read_boot_id().unwrap();
+        intent.boot_id = boot.clone();
+        facts.boot_id = boot;
+        let mut script = Script {
+            safe: true,
+            ..Default::default()
+        };
+        script.polls.push_back(Progress::Failed {
+            class: FailureClass::Integrity,
+            code: "SameDiagnostic".into(),
+        });
+        let script = Arc::new(Mutex::new(script));
+        let mut first = ResearchCoordinator::new(
+            Some(campaign.path().to_path_buf()),
+            Some(facts.clone()),
+            "Ready",
+        );
+        first.set_study_dir(Some(study.path().to_path_buf()));
+        let handle = script.clone();
+        first.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
+        first.set_funnel_builder(Some(super::super::funnel_mode::builder()));
+        assert!(
+            send(
+                &mut first,
+                ResearchRequest::Submit {
+                    intent: Box::new(intent)
+                },
+                100
+            )
+            .contains("await_safe_window")
+        );
+        first.drive_attempts(101);
+        first.drive_attempts(102);
+        assert!(first.terminal.is_none());
+        drop(first);
+        let mut restarted =
+            ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
+        restarted.set_study_dir(Some(study.path().to_path_buf()));
+        restarted.set_recovery_factory(Some(witnesses(true)));
+        let result = restarted.prepare_recovery(103).unwrap().run();
+        assert!(result.is_ok(), "{:?}", result.as_ref().err());
+        restarted.finish_recovery(result);
+        let terminal = restarted.terminal.as_ref().unwrap();
+        assert_eq!(terminal.phase, ResearchPhase::Aborted);
+        assert_eq!(terminal.code, "AbortedIntegrity");
+        assert_eq!(script.lock().unwrap().launches, 1);
+    }
 }
 
 mod funnel_waiting {
@@ -401,4 +470,105 @@ mod funnel_waiting {
         let result = restarted.prepare_recovery(102).unwrap().run();
         assert!(result.is_ok(), "{:?}", result.as_ref().err());
     }
+}
+
+#[test]
+fn a_sealed_integrity_failure_reconstructs_its_abort_after_restart() {
+    use crate::autotune::research::{
+        driver::{ClaimSettlementGuard, ClaimSettlementVerifier, FailureClass},
+        launch_ticket::ResearchLaunchTicketV1,
+        launch_txn::UnitState,
+        recovery_gather::RecoveryWitnesses,
+    };
+    struct NoClaims;
+    impl ClaimSettlementVerifier for NoClaims {
+        fn verify_process(
+            &mut self,
+            _: &File,
+            _: &DispatchContextV1,
+            _: &ResearchLaunchTicketV1,
+        ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>> {
+            anyhow::bail!("no claim expected")
+        }
+        fn verify_worker(
+            &mut self,
+            _: &DispatchContextV1,
+        ) -> anyhow::Result<Box<dyn ClaimSettlementGuard>> {
+            anyhow::bail!("no claim expected")
+        }
+    }
+    let campaign = tempfile::tempdir().unwrap();
+    let study = tempfile::tempdir().unwrap();
+    for dir in [&campaign, &study] {
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let meta = std::fs::metadata(study.path()).unwrap();
+    let root = crate::autotune::research::StudyRootIdentity {
+        device: std::os::unix::fs::MetadataExt::dev(&meta),
+        inode: std::os::unix::fs::MetadataExt::ino(&meta),
+    };
+    let (mut intent, mut facts) = fixture();
+    intent.study_root = Some(root);
+    facts.study_root = Some(root);
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::ValveStable,
+        identity_sha256: "b".repeat(64),
+    });
+    facts.tools = intent.tools.clone();
+    intent.max_attempts = 4;
+    let boot = crate::telemetry::identity::read_boot_id().unwrap();
+    intent.boot_id = boot.clone();
+    facts.boot_id = boot;
+    let mut script = Script {
+        safe: true,
+        ..Default::default()
+    };
+    script.polls.push_back(Progress::Failed {
+        class: FailureClass::Integrity,
+        code: "SameDiagnostic".into(),
+    });
+    let script = Arc::new(Mutex::new(script));
+    let mut first = ResearchCoordinator::new(
+        Some(campaign.path().to_path_buf()),
+        Some(facts.clone()),
+        "Ready",
+    );
+    first.set_study_dir(Some(study.path().to_path_buf()));
+    let handle = script.clone();
+    first.set_host_factory(Some(Box::new(move |_| Ok(Box::new(Fake(handle.clone()))))));
+    assert!(
+        send(
+            &mut first,
+            ResearchRequest::Submit {
+                intent: Box::new(intent)
+            },
+            100
+        )
+        .contains("await_safe_window")
+    );
+    first.drive_attempts(101);
+    first.drive_attempts(102);
+    assert!(first.terminal.is_none());
+    drop(first);
+    let factory: crate::autotune::runtime::research_recovery::RecoveryFactory = Arc::new(|_| {
+        Ok(RecoveryWitnesses {
+            unit_state: Box::new(|_| Ok(UnitState::Finished)),
+            unit_invocation: Box::new(|_| Ok(None)),
+            process_tree_settled: Box::new(|_, _| Ok(true)),
+            outstanding_worker_tokens: Box::new(|| Ok(0)),
+            transactions_restored: Box::new(|| Ok(true)),
+            claim_verifier: Box::new(NoClaims),
+        })
+    });
+    let mut restarted =
+        ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
+    restarted.set_study_dir(Some(study.path().to_path_buf()));
+    restarted.set_recovery_factory(Some(factory));
+    let result = restarted.prepare_recovery(103).unwrap().run();
+    assert!(result.is_ok(), "{:?}", result.as_ref().err());
+    restarted.finish_recovery(result);
+    let terminal = restarted.terminal.as_ref().unwrap();
+    assert_eq!(terminal.phase, ResearchPhase::Aborted);
+    assert_eq!(terminal.code, "AbortedIntegrity");
+    assert_eq!(script.lock().unwrap().launches, 1);
 }

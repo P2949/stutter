@@ -431,8 +431,21 @@ impl Driver {
             });
         }
         if !self.fresh_journal_checked {
+            let records = self.journal.verify()?;
+            if let Some(class) = records
+                .last()
+                .and_then(|record| record.outcome.terminal_failure())
+            {
+                self.terminal_failure = Some(class);
+                self.fresh_journal_checked = true;
+                return Ok(if class == FailureClass::Health {
+                    Step::Halted("BlockedGpuStability")
+                } else {
+                    Step::Stopped(class)
+                });
+            }
             anyhow::ensure!(
-                self.journal.verify()?.is_empty(),
+                records.is_empty(),
                 "UnsafeToResume: active-time budget requires independent recovery"
             );
             self.fresh_journal_checked = true;
