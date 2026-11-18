@@ -585,12 +585,17 @@ fn receipts_valid(
             item["action"] == format!("{action:?}"),
             "a receipt names another action"
         );
+        let pid = item["pid"]
+            .as_u64()
+            .and_then(|pid| u32::try_from(pid).ok())
+            .filter(|pid| *pid > 0)
+            .ok_or_else(|| anyhow::anyhow!("a receipt does not identify the frozen process"))?;
+        let start_ticks = item["start_ticks"]
+            .as_u64()
+            .filter(|ticks| *ticks > 0)
+            .ok_or_else(|| anyhow::anyhow!("a receipt does not identify the frozen process"))?;
         anyhow::ensure!(
-            item["pid"]
-                .as_u64()
-                .is_some_and(|pid| pid > 0 && u32::try_from(pid).is_ok())
-                && item["start_ticks"].as_u64().is_some_and(|ticks| ticks > 0)
-                && item["uid"].as_u64() == Some(u64::from(uid)),
+            item["uid"].as_u64() == Some(u64::from(uid)),
             "a receipt does not identify the frozen process"
         );
         anyhow::ensure!(
@@ -603,7 +608,7 @@ fn receipts_valid(
             serde_json::from_value(item["original"].clone())?;
         let after: super::action_gate::KernelState =
             serde_json::from_value(item["restored"].clone())?;
-        let expected_identity = (item["start_ticks"].as_u64().unwrap(), uid);
+        let expected_identity = (start_ticks, uid);
         anyhow::ensure!(
             !before.cgroup.is_empty()
                 && !before.cpus_allowed.is_empty()
@@ -612,9 +617,7 @@ fn receipts_valid(
                 && before.identity == Some(expected_identity)
                 && after.identity == Some(expected_identity)
                 && !before.tasks.is_empty()
-                && before
-                    .tasks
-                    .contains_key(&(item["pid"].as_u64().unwrap() as u32))
+                && before.tasks.contains_key(&pid)
                 && before.tasks.values().all(|cpus| !cpus.is_empty())
                 && after.tasks.values().all(|cpus| !cpus.is_empty()),
             "a receipt shows a different placement or process after the restore"
