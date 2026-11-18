@@ -51,7 +51,8 @@ fn clean(study: &ChildStudy) -> anyhow::Result<StudyRun> {
         reason: "",
         halt: false,
         ownership: Ownership::Settled,
-        rule: None,
+        rule: (study.stage == Stage::Pilot)
+            .then(|| super::super::pilot_rule::freeze(&[70.0, 73.0, 67.0]).unwrap()),
     })
 }
 

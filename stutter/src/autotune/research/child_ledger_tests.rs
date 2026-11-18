@@ -42,7 +42,9 @@ fn the_funnel_resumes_after_a_restart_and_never_repeats_or_reorders_a_decision()
     let mut ledger = ChildLedger::open(handle, uid, plan.clone()).unwrap();
     let first = ledger.next_runnable(100, &|_| None).unwrap().unwrap();
     assert_eq!((first.profile, first.stage), (Profile::Cpu, Stage::Screen));
-    ledger.record(&first, StudyResult::Qualified, "").unwrap();
+    ledger
+        .record_run(&first, StudyResult::Qualified, "", first.min_attempts)
+        .unwrap();
     // A restarted controller sees the same state and picks the next study in funnel order.
     let mut restarted = reopen(&root, plan.clone()).unwrap();
     assert!(
@@ -105,8 +107,12 @@ fn a_tampered_gapped_foreign_or_duplicated_ledger_is_refused() {
     let plan = studies();
     let uid = crate::syscall::geteuid();
     let mut ledger = ChildLedger::open(handle, uid, plan.clone()).unwrap();
-    ledger.record(&plan[0], StudyResult::Qualified, "").unwrap();
-    ledger.record(&plan[1], StudyResult::Qualified, "").unwrap();
+    ledger
+        .record_run(&plan[0], StudyResult::Qualified, "", plan[0].min_attempts)
+        .unwrap();
+    ledger
+        .record_run(&plan[1], StudyResult::Qualified, "", plan[1].min_attempts)
+        .unwrap();
     let base = root.path().join("child-studies");
     assert!(reopen(&root, plan.clone()).is_ok());
     // Editing a record breaks the next record's chain.
@@ -160,4 +166,128 @@ fn unexecuted_studies_are_settled_once_with_their_reason_and_a_missing_ledger_re
             .iter()
             .any(|d| d.profile == Profile::Long && !d.reason.is_empty())
     );
+}
+
+#[test]
+fn a_self_consistent_chain_cannot_reorder_decisions_or_bypass_prerequisites() {
+    let plan = studies();
+    let uid = crate::syscall::geteuid();
+    // A validly hashed first record for the second planned study is still out of order.
+    let (root, handle) = dir();
+    let out_of_order = Record {
+        seq: 0,
+        study_sha256: plan[1].study_sha256.clone(),
+        result: StudyResult::Qualified,
+        reason: String::new(),
+        attempts_used: plan[1].min_attempts,
+        rule: None,
+        prev_sha256: GENESIS.into(),
+    };
+    write_new(
+        &handle,
+        &name(0),
+        &serde_json::to_vec(&out_of_order).unwrap(),
+    )
+    .unwrap();
+    assert!(reopen(&root, plan.clone()).is_err());
+    drop(handle);
+
+    // Even with a valid chain and order, a qualified pilot cannot follow a blocked screen.
+    let (root, handle) = dir();
+    let mut previous = GENESIS.to_owned();
+    for (seq, result) in [
+        StudyResult::Blocked,
+        StudyResult::Qualified,
+        StudyResult::Qualified,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let record = Record {
+            seq: seq as u32,
+            study_sha256: plan[seq].study_sha256.clone(),
+            result,
+            reason: String::new(),
+            attempts_used: if result == StudyResult::Qualified {
+                plan[seq].min_attempts
+            } else {
+                0
+            },
+            rule: if result == StudyResult::Qualified && plan[seq].stage == Stage::Pilot {
+                Some(super::super::pilot_rule::freeze(&[70.0, 73.0, 67.0]).unwrap())
+            } else {
+                None
+            },
+            prev_sha256: previous,
+        };
+        let bytes = serde_json::to_vec(&record).unwrap();
+        write_new(&handle, &name(seq as u32), &bytes).unwrap();
+        previous = stutter_core::hash::sha256_hex(&bytes);
+    }
+    assert!(ChildLedger::open(handle, uid, plan).is_err());
+    drop(root);
+}
+
+#[test]
+fn qualification_requires_attempts_and_a_valid_pilot_rule() {
+    let (root, handle) = dir();
+    let plan = studies();
+    let mut ledger = ChildLedger::open(handle, crate::syscall::geteuid(), plan.clone()).unwrap();
+    assert!(ledger.record(&plan[0], StudyResult::Qualified, "").is_err());
+    for study in &plan[..2] {
+        ledger
+            .record_run(study, StudyResult::Qualified, "", study.min_attempts)
+            .unwrap();
+    }
+    let pilot = &plan[2];
+    assert_eq!(pilot.stage, Stage::Pilot);
+    assert!(
+        ledger
+            .record_run(pilot, StudyResult::Qualified, "", pilot.min_attempts)
+            .is_err()
+    );
+    let rule = super::super::pilot_rule::freeze(&[70.0, 73.0, 67.0]).unwrap();
+    let mut forged = rule.clone();
+    forged.equivalence_margin_bp += 1;
+    assert!(
+        ledger
+            .record_run_with_rule(
+                pilot,
+                StudyResult::Qualified,
+                "",
+                pilot.min_attempts,
+                Some(forged),
+            )
+            .is_err()
+    );
+    ledger
+        .record_run_with_rule(
+            pilot,
+            StudyResult::Qualified,
+            "",
+            pilot.min_attempts,
+            Some(rule),
+        )
+        .unwrap();
+    assert!(reopen(&root, plan).is_ok());
+}
+
+#[test]
+fn authorized_attempt_limit_is_enforced_on_write_and_replay() {
+    let (root, handle) = dir();
+    let plan = studies();
+    let uid = crate::syscall::geteuid();
+    let limit = plan[0].min_attempts;
+    let mut ledger = ChildLedger::open_with_limit(handle, uid, plan.clone(), Some(limit)).unwrap();
+    ledger
+        .record_run(&plan[0], StudyResult::Qualified, "", limit)
+        .unwrap();
+    assert!(
+        ledger
+            .record_run(&plan[1], StudyResult::Qualified, "", plan[1].min_attempts)
+            .is_err()
+    );
+    drop(ledger);
+    let handle = File::open(root.path().join("child-studies")).unwrap();
+    assert!(ChildLedger::open_with_limit(handle, uid, plan, Some(limit - 1)).is_err());
 }

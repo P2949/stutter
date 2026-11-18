@@ -34,6 +34,49 @@ struct Record {
     prev_sha256: String,
 }
 
+/// Verify plan order and prerequisites independently of a record's claimed result.
+fn validate_next(
+    plan: &[ChildStudy],
+    results: &BTreeMap<String, (StudyResult, String)>,
+    record: &Record,
+) -> anyhow::Result<()> {
+    let study = plan
+        .get(results.len())
+        .ok_or_else(|| anyhow::anyhow!("ledger has more decisions than its plan"))?;
+    anyhow::ensure!(
+        study.study_sha256 == record.study_sha256,
+        "ledger decision is out of plan order"
+    );
+    if record.result != StudyResult::Blocked {
+        let prior = results
+            .iter()
+            .map(|(digest, (result, _))| (digest.clone(), *result))
+            .collect();
+        anyhow::ensure!(
+            super::child_study::ready_to_start(study, &prior).is_ok(),
+            "ledger decision has an unqualified prerequisite"
+        );
+    }
+    if record.result == StudyResult::Qualified {
+        anyhow::ensure!(
+            record.attempts_used >= study.min_attempts,
+            "qualified study has insufficient attempts"
+        );
+        if matches!(study.stage, Stage::Pilot) {
+            anyhow::ensure!(record.rule.is_some(), "qualified pilot has no frozen rule");
+        }
+    }
+    if let Some(rule) = &record.rule {
+        anyhow::ensure!(
+            matches!(study.stage, super::child_study::Stage::Pilot)
+                && record.result == StudyResult::Qualified
+                && rule.is_consistent(),
+            "only a qualified pilot may record a rule"
+        );
+    }
+    Ok(())
+}
+
 /// One planned study and what became of it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Disposition {
@@ -54,6 +97,7 @@ pub struct ChildLedger {
     next_seq: u32,
     /// Attempts the recorded studies consumed, so the budget survives a restart.
     spent: u32,
+    max_attempts: Option<u32>,
 }
 
 fn name(seq: u32) -> String {
@@ -63,7 +107,17 @@ fn name(seq: u32) -> String {
 impl ChildLedger {
     /// Open the ledger directory and verify every record: canonical names without gaps, a valid
     /// hash chain, only planned studies and at most one decision per study.
+    #[cfg(test)]
     pub fn open(dir: File, uid: u32, plan: Vec<ChildStudy>) -> anyhow::Result<Self> {
+        Self::open_with_limit(dir, uid, plan, None)
+    }
+
+    fn open_with_limit(
+        dir: File,
+        uid: u32,
+        plan: Vec<ChildStudy>,
+        max_attempts: Option<u32>,
+    ) -> anyhow::Result<Self> {
         let mut seqs: Vec<u32> = Vec::new();
         for entry in std::fs::read_dir(format!(
             "/proc/self/fd/{}",
@@ -90,6 +144,7 @@ impl ChildLedger {
             tip: GENESIS.to_owned(),
             next_seq: 0,
             spent: 0,
+            max_attempts,
         };
         for (expected, seq) in seqs.into_iter().enumerate() {
             anyhow::ensure!(seq as usize == expected, "gap in the ledger");
@@ -106,6 +161,7 @@ impl ChildLedger {
                     .any(|study| study.study_sha256 == record.study_sha256),
                 "ledger names a study that is not in the plan"
             );
+            validate_next(&ledger.plan, &ledger.results, &record)?;
             if let Some(rule) = record.rule.clone() {
                 anyhow::ensure!(
                     record.result == StudyResult::Qualified && rule.is_consistent(),
@@ -122,7 +178,7 @@ impl ChildLedger {
             );
             ledger.tip = stutter_core::hash::sha256_hex(&bytes);
             ledger.next_seq = seq + 1;
-            ledger.spent = ledger.spent.saturating_add(record.attempts_used);
+            ledger.spent = ledger.checked_spend(record.attempts_used)?;
         }
         Ok(ledger)
     }
@@ -140,6 +196,18 @@ impl ChildLedger {
     /// Attempts the recorded studies have consumed so far.
     pub fn spent_attempts(&self) -> u32 {
         self.spent
+    }
+
+    fn checked_spend(&self, attempts: u32) -> anyhow::Result<u32> {
+        let total = self
+            .spent
+            .checked_add(attempts)
+            .ok_or_else(|| anyhow::anyhow!("ledger attempt count overflow"))?;
+        anyhow::ensure!(
+            self.max_attempts.is_none_or(|limit| total <= limit),
+            "ledger exceeds authorized attempts"
+        );
+        Ok(total)
     }
 
     /// Record one decision and the attempts the study consumed. A study decided already, or not in
@@ -187,11 +255,13 @@ impl ChildLedger {
             rule: rule.clone(),
             prev_sha256: self.tip.clone(),
         };
+        validate_next(&self.plan, &self.results, &record)?;
+        let spent = self.checked_spend(attempts_used)?;
         let bytes = serde_json::to_vec(&record)?;
         write_new(&self.dir, &name(record.seq), &bytes)?;
         self.tip = stutter_core::hash::sha256_hex(&bytes);
         self.next_seq += 1;
-        self.spent = self.spent.saturating_add(attempts_used);
+        self.spent = spent;
         if let Some(rule) = rule {
             self.rules.insert(study.study_sha256.clone(), rule);
         }
@@ -295,7 +365,12 @@ fn open_ledger(
         campaign.as_fd(),
         "child-studies",
     )?);
-    ChildLedger::open(dir, uid, super::child_study::plan(intent)?)
+    ChildLedger::open_with_limit(
+        dir,
+        uid,
+        super::child_study::plan(intent)?,
+        Some(intent.max_attempts),
+    )
 }
 
 /// Open (creating it if needed) the campaign's child-study ledger over its frozen funnel plan.
