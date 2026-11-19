@@ -138,13 +138,6 @@ pub fn verify_frames(summary: &[u8], frames_csv: &[u8]) -> anyhow::Result<Native
 /// Whether a result's reported graphics context matches the frozen study profile it was meant to
 /// run. Two arms agreeing with each other proves comparability, not that they ran the profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "judged by the real attempt runner once child studies run live"
-    )
-)]
 pub enum ProfileConformance {
     Conforms,
     /// A reported field contradicts the profile.
@@ -174,13 +167,6 @@ impl NativeContext {
     /// in exactly its own factor and in nothing else: a frame-generation study may report frame
     /// generation on, an upscaler study may report an upscaler on, and every other constrained field
     /// must still hold, so an unrelated difference is never excused.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "called by the real attempt runner once child studies run live"
-        )
-    )]
     pub fn conformance_in(
         &self,
         profile: super::child_study::Profile,

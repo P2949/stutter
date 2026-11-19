@@ -45,6 +45,41 @@ fn a_finished_child_reconstructs_and_its_missing_raw_results_are_reported_not_as
 }
 
 #[test]
+fn a_qualified_ledger_count_cannot_replace_the_replayed_study_judgement() {
+    let (root, mut runner, study, parent) = attempts(Host::finishing());
+    let outcome = run_to_end(&mut runner, &study);
+    let mut ledger = crate::autotune::research::child_ledger::open_for_campaign(
+        &campaign(&root),
+        crate::syscall::geteuid(),
+        &parent,
+    )
+    .unwrap();
+    ledger
+        .record_run(
+            &study,
+            crate::autotune::research::child_study::StudyResult::Qualified,
+            "",
+            outcome.attempts_used,
+        )
+        .unwrap();
+    let verified = verify_children(
+        &campaign(&root),
+        crate::syscall::geteuid(),
+        &parent,
+        &lookup,
+    )
+    .unwrap();
+    assert!(!verified.children[0].reconstruction);
+    assert!(
+        verified.children[0]
+            .problem
+            .as_deref()
+            .unwrap()
+            .contains("QualifiedStudyJudgementContradicted")
+    );
+}
+
+#[test]
 fn a_child_records_the_cache_cohort_its_arms_ran_in() {
     let (root, parent, _) = finished();
     let result = verify_children(

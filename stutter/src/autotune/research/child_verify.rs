@@ -336,9 +336,25 @@ pub fn verify_children(
             crate::syscall::openat_dir_nofollow(studies.as_fd(), &name)
                 .map(File::from)
                 .map_err(anyhow::Error::from)
-                .and_then(|dir| verify_child(&dir, &name, uid, parent, results_for))
-                .and_then(|checked| {
+                .and_then(|dir| {
+                    verify_child(&dir, &name, uid, parent, results_for)
+                        .map(|checked| (dir, checked))
+                })
+                .and_then(|(dir, checked)| {
                     attempt_count_matches(&counts, &dispositions, &name, &checked.1)?;
+                    let disposition = dispositions
+                        .iter()
+                        .find(|study| study.study_sha256.starts_with(&name))
+                        .ok_or_else(|| anyhow::anyhow!("child is outside the frozen plan"))?;
+                    super::child_judgement::verify_qualification(
+                        &dir,
+                        uid,
+                        parent,
+                        disposition,
+                        &checked.1,
+                        checked.0,
+                        checked.2,
+                    )?;
                     // A rule the ledger froze for this pilot must follow from the pilot's own runs.
                     rule_matches_pilot(&rules, &name, studies.as_fd(), uid)?;
                     study_checks(&rules, &dispositions, &name, &studies, uid, parent)?;

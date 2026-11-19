@@ -31,6 +31,7 @@ pub(crate) mod arm_selection;
 pub(crate) mod campaign_budget;
 #[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod child_intent;
+mod child_judgement;
 pub(crate) mod child_ledger;
 #[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod child_runner;

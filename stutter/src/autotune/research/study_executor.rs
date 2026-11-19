@@ -247,102 +247,100 @@ fn pilot_accounted(
             .all(|code| code == "ExitedWithoutNativeResult")
 }
 
+/// The study's result once its attempts have ended and the profile is restored. The caller must
+/// derive its inputs from verified evidence; the live and offline paths use this same decision.
+pub(super) fn judge(study: &ChildStudy, outcome: &AttemptsOutcome) -> StudyRun {
+    let used = outcome.attempts_used;
+    if let Some(class) = outcome.terminal_failure {
+        run(StudyResult::Failed, used, class.terminal_code(), true)
+    } else if outcome.health_halt {
+        run(StudyResult::Failed, used, "GpuReset", true)
+    } else if if matches!(study.stage, Stage::Screen) {
+        !screen_sufficient(
+            study.min_attempts,
+            outcome.attempts_used,
+            outcome.completed,
+            &outcome.run_fps,
+            &outcome.failures,
+        )
+    } else if matches!(study.stage, Stage::Pilot) {
+        !pilot_accounted(
+            outcome.planned_attempts,
+            outcome.attempts_used,
+            outcome.completed,
+            &outcome.source_order,
+            &outcome.run_fps,
+            &outcome.failures,
+        )
+    } else {
+        outcome.attempts_used < study.min_attempts || outcome.completed < study.min_attempts
+    } {
+        run(StudyResult::Failed, used, "IncompleteAttempts", false)
+    } else if let Some(reason) = stage_gap(study, outcome) {
+        run(StudyResult::Unqualified, used, reason, false)
+    } else if outcome.conformance.contains(&ProfileConformance::Violates) {
+        run(StudyResult::Unqualified, used, "ProfileViolated", false)
+    } else if outcome.conformance.len() != outcome.completed as usize {
+        // Exactly one conformance verdict per completed result; an empty or short list proves
+        // nothing about the profile.
+        run(StudyResult::Unqualified, used, "UnprovenContext", false)
+    } else if !outcome.raw_verified {
+        run(
+            StudyResult::Unqualified,
+            used,
+            "RawEvidenceUnverified",
+            false,
+        )
+    } else if !outcome.runtime_matched {
+        run(StudyResult::Unqualified, used, "RuntimeUnproven", false)
+    } else if !outcome.context_consistent
+        || outcome.conformance.contains(&ProfileConformance::Unproven)
+    {
+        run(StudyResult::Unqualified, used, "UnprovenContext", false)
+    } else if matches!(study.stage, Stage::Pilot) {
+        match pilot_rule(outcome) {
+            Ok(rule) => StudyRun {
+                rule: Some(rule),
+                ..run(StudyResult::Qualified, used, "", false)
+            },
+            Err(reason) => run(StudyResult::Unqualified, used, reason, false),
+        }
+    } else {
+        run(StudyResult::Qualified, used, "", false)
+    }
+}
+
+/// The confirmation rule a pilot freezes (the one derivation the verifier also uses).
+fn pilot_rule(outcome: &AttemptsOutcome) -> Result<FrozenConfirmationRule, &'static str> {
+    super::pilot_rule::rule_from_all_pilots(&outcome.source_order, &outcome.run_fps)
+}
+
+/// A feature or action study is not qualified by benchmark attempts alone.
+fn stage_gap(study: &ChildStudy, outcome: &AttemptsOutcome) -> Option<&'static str> {
+    if outcome.stage_evidence == Some(true) {
+        return None;
+    }
+    match study.stage {
+        // Activation (the treatment reached the game) and function (the feature works) are
+        // separate: the first can be observed, the second needs a functional receipt.
+        Stage::Feature(_) if outcome.activation == Some(true) => {
+            Some(match outcome.functional {
+                // The game reported the feature off where it should be on (or on where off).
+                Some(Functional::NotObserved) => "FeatureActivatedButNotFunctional",
+                // The game's own result carries no report for this factor at all.
+                Some(Functional::NotObservable) => "FeatureNotObservable",
+                _ => "FeatureFunctionalUnproven",
+            })
+        }
+        Stage::Feature(_) => Some("FeatureActivationUnproven"),
+        Stage::Action(_) => Some("ActionEvidenceMissing"),
+        Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs => {
+            None
+        }
+    }
+}
+
 impl<P: ProfileHook, A: StudyAttempts> HostStudyExecutor<P, A> {
-    /// The study's result once its attempts have ended and the profile is restored. A benchmark
-    /// study is qualified only by independently verified evidence, never by counts alone.
-    fn judge(study: &ChildStudy, outcome: &AttemptsOutcome) -> StudyRun {
-        let used = outcome.attempts_used;
-        if let Some(class) = outcome.terminal_failure {
-            run(StudyResult::Failed, used, class.terminal_code(), true)
-        } else if outcome.health_halt {
-            run(StudyResult::Failed, used, "GpuReset", true)
-        } else if if matches!(study.stage, Stage::Screen) {
-            !screen_sufficient(
-                study.min_attempts,
-                outcome.attempts_used,
-                outcome.completed,
-                &outcome.run_fps,
-                &outcome.failures,
-            )
-        } else if matches!(study.stage, Stage::Pilot) {
-            !pilot_accounted(
-                outcome.planned_attempts,
-                outcome.attempts_used,
-                outcome.completed,
-                &outcome.source_order,
-                &outcome.run_fps,
-                &outcome.failures,
-            )
-        } else {
-            outcome.attempts_used < study.min_attempts || outcome.completed < study.min_attempts
-        } {
-            run(StudyResult::Failed, used, "IncompleteAttempts", false)
-        } else if let Some(reason) = Self::stage_gap(study, outcome) {
-            run(StudyResult::Unqualified, used, reason, false)
-        } else if outcome.conformance.contains(&ProfileConformance::Violates) {
-            run(StudyResult::Unqualified, used, "ProfileViolated", false)
-        } else if outcome.conformance.len() != outcome.completed as usize {
-            // Exactly one conformance verdict per completed result; an empty or short list proves
-            // nothing about the profile.
-            run(StudyResult::Unqualified, used, "UnprovenContext", false)
-        } else if !outcome.raw_verified {
-            run(
-                StudyResult::Unqualified,
-                used,
-                "RawEvidenceUnverified",
-                false,
-            )
-        } else if !outcome.runtime_matched {
-            run(StudyResult::Unqualified, used, "RuntimeUnproven", false)
-        } else if !outcome.context_consistent
-            || outcome.conformance.contains(&ProfileConformance::Unproven)
-        {
-            run(StudyResult::Unqualified, used, "UnprovenContext", false)
-        } else if matches!(study.stage, Stage::Pilot) {
-            match Self::pilot_rule(outcome) {
-                Ok(rule) => StudyRun {
-                    rule: Some(rule),
-                    ..run(StudyResult::Qualified, used, "", false)
-                },
-                Err(reason) => run(StudyResult::Unqualified, used, reason, false),
-            }
-        } else {
-            run(StudyResult::Qualified, used, "", false)
-        }
-    }
-
-    /// The confirmation rule a pilot freezes (the one derivation the verifier also uses).
-    fn pilot_rule(outcome: &AttemptsOutcome) -> Result<FrozenConfirmationRule, &'static str> {
-        super::pilot_rule::rule_from_all_pilots(&outcome.source_order, &outcome.run_fps)
-    }
-
-    /// A feature or action study is not qualified by benchmark attempts alone.
-    fn stage_gap(study: &ChildStudy, outcome: &AttemptsOutcome) -> Option<&'static str> {
-        if outcome.stage_evidence == Some(true) {
-            return None;
-        }
-        match study.stage {
-            // Activation (the treatment reached the game) and function (the feature works) are
-            // separate: the first can be observed, the second needs a functional receipt.
-            Stage::Feature(_) if outcome.activation == Some(true) => {
-                Some(match outcome.functional {
-                    // The game reported the feature off where it should be on (or on where off).
-                    Some(Functional::NotObserved) => "FeatureActivatedButNotFunctional",
-                    // The game's own result carries no report for this factor at all.
-                    Some(Functional::NotObservable) => "FeatureNotObservable",
-                    _ => "FeatureFunctionalUnproven",
-                })
-            }
-            Stage::Feature(_) => Some("FeatureActivationUnproven"),
-            Stage::Action(_) => Some("ActionEvidenceMissing"),
-            Stage::Screen
-            | Stage::Pilot
-            | Stage::Confirm
-            | Stage::Holdout
-            | Stage::MatchedCachyOs => None,
-        }
-    }
-
     /// Restore the profile (if one was applied) and return to idle. `Err` means it is unproven.
     fn restore_if_applied(&mut self, applied: bool) -> Result<(), &'static str> {
         let result = if applied {
@@ -464,7 +462,7 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         if self.restore_if_applied(applied).is_err() {
             return Ok(Some(unresolved(used, "RestoreUnproven")));
         }
-        Ok(Some(Self::judge(study, &outcome)))
+        Ok(Some(judge(study, &outcome)))
     }
 
     /// Stop a running study (a health stop, cancellation, deadline or shutdown): settle its
