@@ -77,6 +77,33 @@ impl ResearchCoordinator {
     }
 
     pub(super) fn report_response(&self, verify: bool, uid: u32) -> String {
+        self.report_response_inner(verify, uid, false, false)
+    }
+
+    /// Read-only evidence reconstruction while the coordinator still holds the restoring lease.
+    pub(super) fn finalization_evidence(&self, uid: u32) -> String {
+        if self.driver.is_some()
+            || !self.active.as_ref().is_some_and(|active| {
+                active.lease.phase() == crate::autotune::research::ResearchPhase::Restoring
+            })
+        {
+            return super::response("blocked", "FinalizationOwnershipUnproven");
+        }
+        self.report_response_inner(true, uid, true, false)
+    }
+
+    /// The first post-release reconstruction creates the receipt that ordinary verification requires.
+    pub(super) fn terminal_finalization_evidence(&self, uid: u32) -> String {
+        self.report_response_inner(true, uid, false, true)
+    }
+
+    fn report_response_inner(
+        &self,
+        verify: bool,
+        uid: u32,
+        preparing: bool,
+        finalizing: bool,
+    ) -> String {
         let Some(dir) = self.open_campaign_study_dir() else {
             return super::response(
                 "blocked",
@@ -90,8 +117,7 @@ impl ResearchCoordinator {
         match crate::autotune::research::report_store::load_and_verify(&dir, uid) {
             Ok(report) if verify => {
                 // The raw native files the sealed records name are reopened and re-hashed too. Each
-                // verification status stands on its own evidence (see `verdict`); the response
-                // stays `IncompleteProvenance` until the final gate is genuinely qualified.
+                // verification status stands on its own evidence (see `verdict`).
                 let (raw, raw_outcome) = self.raw_replay(&dir, uid);
                 let intent =
                     crate::autotune::research::report_store::read_private(&dir, "intent.json", uid)
@@ -160,8 +186,7 @@ impl ResearchCoordinator {
                             })
                         },
                     );
-                let verdict = crate::autotune::research::verdict::judge(
-                    &crate::autotune::research::verdict::VerdictInputs {
+                let inputs = crate::autotune::research::verdict::VerdictInputs {
                         reconstruction_passed: true,
                         raw: raw_outcome.as_ref(),
                         evidence: &evidence,
@@ -258,11 +283,15 @@ impl ResearchCoordinator {
                         // research prefix still carrying an unrestored settings edit. Unknown is false.
                         restoration_verified: restored,
                         health_blocked,
-                    },
-                );
+                    };
+                let verdict = if preparing {
+                    crate::autotune::research::verdict::judge_preparing(&inputs)
+                } else {
+                    crate::autotune::research::verdict::judge(&inputs)
+                };
                 let mut body = serde_json::json!({
                     "status": if verdict.final_gate_qualified { "ok" } else { "blocked" },
-                    "code": if verdict.final_gate_qualified { "Qualified" } else { "IncompleteProvenance" },
+                    "code": if verdict.final_gate_qualified { "QualifiedEndToEnd" } else if verdict.disposition == "AbortedHealth" { "AbortedHealth" } else if verdict.disposition == "PartiallyQualified" { "PartiallyQualified" } else { "BlockedCampaignOrStats" },
                     "reconstruction": "passed",
                     "verdict": verdict,
                     "raw_native_files": raw,
@@ -281,8 +310,28 @@ impl ResearchCoordinator {
                             "status": "not_scored", "reason": reason }),
                     },
                 });
+                if !preparing
+                    && !finalizing
+                    && self.terminal.as_ref().is_some_and(|terminal| {
+                        terminal.phase == crate::autotune::research::ResearchPhase::Completed
+                    })
+                {
+                    if let Err(error) =
+                        super::finalize::verify_completed_receipt(&dir, uid, &report)
+                    {
+                        log::warn!("completed campaign receipt rejected: {error:#}");
+                        body["status"] = "blocked".into();
+                        body["code"] = "TerminalVerificationFailed".into();
+                        body["historical_finalization_verified"] = false.into();
+                        return body.to_string() + "\n";
+                    }
+                    body["historical_finalization_verified"] = true.into();
+                }
                 // The named final artifacts, once, beside the report. A verdict whose bundle could
                 // not be made durable is not a final one: the response says so and is blocked.
+                if preparing || self.active.is_some() {
+                    return body.to_string() + "\n";
+                }
                 match crate::autotune::research::final_bundle::write_reporting(&dir, &report, &body)
                 {
                     Ok(name) => {

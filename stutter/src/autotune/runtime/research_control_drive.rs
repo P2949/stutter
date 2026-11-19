@@ -221,16 +221,10 @@ impl ResearchCoordinator {
                 return;
             }
         };
-        // A complete schedule is not a verified campaign. Persist the report before any
-        // terminal lease transition, and retain the explicit provenance blocker until the
-        // independent verification gate is implemented.
-        let done_code = matches!(step, Step::Done).then(|| {
-            if self.persist_report() {
-                "IncompleteProvenance"
-            } else {
-                "ReportPersistenceFailed"
-            }
-        });
+        if matches!(step, Step::Done) {
+            self.finalize_done(now);
+            return;
+        }
         let Some(active) = self.active.as_mut() else {
             return;
         };
@@ -255,7 +249,7 @@ impl ResearchCoordinator {
                 path.extend([Sealing, Analysing, NextArm, AwaitSafeWindow]);
                 advance(active, &path)
             }
-            Step::Done => advance(active, &[ResearchPhase::Restoring, ResearchPhase::Blocked]),
+            Step::Done => false,
             Step::Expired => {
                 self.on_deadline(now);
                 true
@@ -318,9 +312,7 @@ impl ResearchCoordinator {
                 true
             }
         };
-        if let Some(code) = done_code.filter(|_| ok) {
-            self.settle_terminal(ResearchPhase::Blocked, code);
-        } else if !ok {
+        if !ok {
             if let Some(state) = self.driver.as_mut()
                 && let Err(error) = state.abort_host()
             {
@@ -448,7 +440,7 @@ impl ResearchCoordinator {
         Ok(())
     }
 
-    fn settle(
+    pub(super) fn settle(
         &mut self,
         now: u64,
         terminal: ResearchPhase,
@@ -483,16 +475,23 @@ impl ResearchCoordinator {
                 return;
             }
         }
-        self.settle_terminal(terminal, code);
+        self.settle_terminal(terminal, code, cause);
     }
 
-    fn settle_terminal(&mut self, phase: ResearchPhase, code: &'static str) {
+    fn settle_terminal(
+        &mut self,
+        phase: ResearchPhase,
+        code: &'static str,
+        cause: Option<crate::autotune::research::driver::FailureClass>,
+    ) {
         if let Some(active) = self.active.take() {
             self.terminal = Some(TerminalCampaign {
                 phase,
                 intent_sha256: active.intent_sha256,
                 code,
                 report_persisted: None,
+                finalization_verified: None,
+                primary_cause: cause.map(|class| class.terminal_code()),
             });
         }
         self.driver = None;

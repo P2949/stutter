@@ -207,13 +207,14 @@ fn a_funnel_campaign_walks_the_lease_per_attempt_through_the_real_fence_and_ends
     }
     let terminal = s.coordinator.terminal.as_ref().expect("the funnel ends");
     assert_eq!(terminal.phase, ResearchPhase::Blocked);
-    assert_eq!(terminal.code, "IncompleteProvenance");
+    assert_eq!(terminal.code, "BlockedCampaignOrStats");
+    assert_eq!(terminal.finalization_verified, Some(true));
     // Only the two screens could run: the fake host seals no native evidence, so nothing qualifies
     // and everything that depends on a screen is blocked. Two attempts each, two tools.
     assert_eq!(s.script.lock().unwrap().launches, 4);
     // The campaign's verification reports both children, reconstructed from their own records.
     let verified = send(&mut s.coordinator, ResearchRequest::Verify {}, now + 1);
-    assert!(verified.contains("IncompleteProvenance"), "{verified}");
+    assert!(verified.contains("BlockedCampaignOrStats"), "{verified}");
     let value: serde_json::Value = serde_json::from_str(verified.trim()).unwrap();
     let children = value["child_reports"]["children"].as_array().unwrap();
     assert_eq!(children.len(), 2, "{verified}");

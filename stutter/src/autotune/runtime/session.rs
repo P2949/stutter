@@ -191,7 +191,12 @@ pub async fn run_autotune_controller_session(
                 let now = (crate::audit::unix_nanos_now() / 1_000_000_000)
                     .min(u128::from(u64::MAX)) as u64;
                 let coordinator = research_coordinator.as_mut().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
-                if coordinator.deadline_due(now) {
+                if coordinator.finalization_due() {
+                    let coordinator = research_coordinator.take().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
+                    research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator, now| {
+                        coordinator.drive_finalization(now);
+                    }));
+                } else if coordinator.deadline_due(now) {
                     let coordinator = research_coordinator.take().ok_or_else(|| anyhow::anyhow!("research coordinator unavailable"))?;
                     research_work = Some(spawn_research_work(&mut runtime, coordinator, move |coordinator, now| {
                         coordinator.on_deadline(now);

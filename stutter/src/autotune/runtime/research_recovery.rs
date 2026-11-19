@@ -37,19 +37,102 @@ pub(super) struct RecoveredCampaign {
     pub(super) terminal_code: Option<&'static str>,
 }
 
+fn has_prepared_finalization(
+    campaign: &File,
+    uid: u32,
+    intent_sha256: &str,
+) -> anyhow::Result<bool> {
+    match crate::autotune::research::report_store::read_private(
+        campaign,
+        "finalization-prepared.json",
+        uid,
+    ) {
+        Ok(_) => {
+            super::research_control::finalize::prepared_record(campaign, uid, intent_sha256)?;
+            Ok(true)
+        }
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 impl RecoveryJob {
     pub(super) fn run(self) -> anyhow::Result<RecoveredCampaign> {
         let dir = crate::syscall::open_dir_no_symlinks(&self.dir)?;
+        let mut historical = false;
         let mut lease = match &self.facts {
             // An in-flight phase is only recoverable when witnesses can retire the attempt.
             Some(facts) if self.witnesses.is_some() => {
-                CampaignLease::recover_interrupted_launch(dir, facts, self.now)?
+                match CampaignLease::recover_interrupted_launch(dir.try_clone()?, facts, self.now) {
+                    Ok(lease) => lease,
+                    Err(_) => {
+                        historical = true;
+                        CampaignLease::recover_completed_historical(
+                            dir,
+                            crate::syscall::geteuid(),
+                            self.now,
+                        )?
+                    }
+                }
             }
-            Some(facts) => CampaignLease::recover(dir, facts, self.now)?,
-            None => {
-                CampaignLease::recover_terminal_prelaunch(dir, crate::syscall::geteuid(), self.now)?
-            }
+            Some(facts) => match CampaignLease::recover(dir.try_clone()?, facts, self.now) {
+                Ok(lease) => lease,
+                Err(_) => {
+                    match CampaignLease::recover_interrupted_launch(
+                        dir.try_clone()?,
+                        facts,
+                        self.now,
+                    ) {
+                        Ok(lease)
+                            if !lease.has_started_launch()
+                                && lease.phase() == ResearchPhase::Restoring =>
+                        {
+                            lease
+                        }
+                        _ => {
+                            historical = true;
+                            CampaignLease::recover_completed_historical(
+                                dir,
+                                crate::syscall::geteuid(),
+                                self.now,
+                            )?
+                        }
+                    }
+                }
+            },
+            None => match CampaignLease::recover_terminal_prelaunch(
+                dir.try_clone()?,
+                crate::syscall::geteuid(),
+                self.now,
+            ) {
+                Ok(lease) => lease,
+                Err(_) => {
+                    historical = true;
+                    CampaignLease::recover_completed_historical(
+                        dir,
+                        crate::syscall::geteuid(),
+                        self.now,
+                    )?
+                }
+            },
         };
+        if lease.phase() == ResearchPhase::Completed {
+            // Do not re-admit old facts or run live cleanup for a historical terminal. The
+            // coordinator reserves the action slot until its released artifacts are replayed.
+            open_campaign(&lease, self.study_dir.as_deref())?;
+            return Ok(RecoveredCampaign {
+                facts: if historical { None } else { self.facts },
+                lease,
+                study_dir: self.study_dir,
+                terminal_code: None,
+            });
+        }
         if lease.has_started_launch() {
             // Launch history needs the attempt, the process tree and the worker verified; without a
             // witness factory it stays unsafe, exactly as before.
@@ -73,8 +156,10 @@ impl RecoveryJob {
                 lease.phase(),
                 ResearchPhase::AwaitSafeWindow
                     | ResearchPhase::Paused
+                    | ResearchPhase::Completed
                     | ResearchPhase::Blocked
                     | ResearchPhase::Aborted
+                    | ResearchPhase::Restoring
             ),
             "UnsafeToResume: unsupported recovered phase"
         );
@@ -235,6 +320,12 @@ fn verify_no_attempts(lease: &CampaignLease, study_path: Option<&Path>) -> anyho
         recovered,
         allow_new,
     )?;
+    if lease.phase() == ResearchPhase::Restoring {
+        anyhow::ensure!(
+            has_prepared_finalization(&campaign, crate::syscall::geteuid(), lease.intent_sha256())?,
+            "UnsafeToResume: restoring lease has no prepared finalization"
+        );
+    }
     Ok(())
 }
 
@@ -526,6 +617,12 @@ fn recover_launched(
         ResearchPhase::Completed | ResearchPhase::Blocked | ResearchPhase::Aborted
     );
     record_recovered_children(&campaign, uid, &intent, recovered_children, allow_new)?;
+    if lease.phase() == ResearchPhase::Restoring
+        && has_prepared_finalization(&campaign, uid, lease.intent_sha256())?
+        && terminal.is_none()
+    {
+        return Ok(None);
+    }
     // Every attempt that started is now sealed. Block the campaign through the normal restoring
     // transition so it ends as a recovered, blocked campaign with its report intact.
     if !matches!(
@@ -542,10 +639,15 @@ fn recover_launched(
             ResearchPhase::Blocked
         };
         lease.advance(phase, now)?;
-    } else if terminal == Some(crate::autotune::research::driver::FailureClass::Integrity) {
+    } else if let Some(class) = terminal {
+        let expected = if class == crate::autotune::research::driver::FailureClass::Integrity {
+            ResearchPhase::Aborted
+        } else {
+            ResearchPhase::Blocked
+        };
         anyhow::ensure!(
-            lease.phase() == ResearchPhase::Aborted,
-            "UnsafeToResume: terminal lease contradicts integrity failure"
+            lease.phase() == expected,
+            "UnsafeToResume: terminal lease contradicts the recorded failure"
         );
     }
     Ok(terminal.map(|class| class.terminal_code()))

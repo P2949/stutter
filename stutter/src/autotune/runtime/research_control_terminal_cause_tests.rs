@@ -62,6 +62,10 @@ fn a_prelaunch_health_halt_survives_restart_in_the_lease() {
         restarted.terminal.as_ref().unwrap().code,
         "BlockedGpuStability"
     );
+    assert_eq!(
+        restarted.terminal.as_ref().unwrap().primary_cause,
+        Some("BlockedGpuStability")
+    );
 }
 
 #[test]
@@ -155,6 +159,7 @@ fn a_sealed_urgent_failure_survives_interruption_before_the_next_tick() {
             }
         );
         assert_eq!(terminal.code, class.terminal_code());
+        assert_eq!(terminal.primary_cause, Some(class.terminal_code()));
         assert_eq!(terminal.report_persisted, Some(!report_conflict));
         assert_eq!(script.lock().unwrap().launches, 1);
     }

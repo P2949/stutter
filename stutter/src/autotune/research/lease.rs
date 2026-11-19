@@ -431,8 +431,29 @@ impl CampaignLease {
         let lease = Self::recover(dir, &header.facts, now)?;
         anyhow::ensure!(
             !lease.ever_launched
-                && matches!(lease.phase, ResearchPhase::Blocked | ResearchPhase::Aborted),
+                && matches!(
+                    lease.phase,
+                    ResearchPhase::Completed | ResearchPhase::Blocked | ResearchPhase::Aborted
+                ),
             "campaign is not a settled prelaunch terminal"
+        );
+        Ok(lease)
+    }
+
+    /// A completed lease is historical evidence, not permission to resume under its old facts.
+    pub(crate) fn recover_completed_historical(
+        dir: OwnedFd,
+        owner_uid: u32,
+        now: u64,
+    ) -> anyhow::Result<Self> {
+        let opened = File::from(dir.try_clone()?);
+        let header: Header =
+            serde_json::from_slice(&read_file(&opened, owner_uid, "intent.json")?)?;
+        anyhow::ensure!(header.facts.uid == owner_uid, "campaign owner mismatch");
+        let lease = Self::recover_with(dir, &header.facts, now, true)?;
+        anyhow::ensure!(
+            lease.phase == ResearchPhase::Completed,
+            "campaign is not completed"
         );
         Ok(lease)
     }

@@ -69,6 +69,15 @@ pub struct VerdictInputs<'a> {
 }
 
 pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
+    judge_inner(inputs, false)
+}
+
+/// Judge the scientific evidence while the caller still owns its restoring lease.
+pub(crate) fn judge_preparing(inputs: &VerdictInputs<'_>) -> Verdict {
+    judge_inner(inputs, true)
+}
+
+fn judge_inner(inputs: &VerdictInputs<'_>, preparing: bool) -> Verdict {
     let raw_files_verified = if inputs.funnel {
         inputs.child_reports_verified
     } else {
@@ -92,7 +101,7 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
             .child_studies
             .iter()
             .all(|study| study.result == Some(StudyResult::Qualified));
-    let gates = super::gate_verdict::gates(&super::gate_verdict::GateInputs {
+    let gate_inputs = super::gate_verdict::GateInputs {
         raw_files_verified,
         loaded_runtime_qualified,
         child_studies: inputs.child_studies,
@@ -108,7 +117,12 @@ pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
         deployment_attested: inputs.deployment_attested,
         lease: inputs.lease,
         host: inputs.host,
-    });
+    };
+    let gates = if preparing {
+        super::gate_verdict::gates_preparing(&gate_inputs)
+    } else {
+        super::gate_verdict::gates(&gate_inputs)
+    };
     // The overall result is the conjunction of the study-backed facts and every gate: a campaign
     // whose host baseline, lease receipts, telemetry, fault matrix or deployment receipt is not attested
     // cannot be `Qualified`, however clean its studies are.

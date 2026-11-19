@@ -25,6 +25,8 @@ use super::research_recovery::{RecoveredCampaign, RecoveryJob};
 mod commands;
 #[path = "research_control_drive.rs"]
 mod drive;
+#[path = "research_control_finalize.rs"]
+pub(super) mod finalize;
 #[path = "research_funnel.rs"]
 mod funnel;
 #[cfg(feature = "wayland-probe")]
@@ -64,6 +66,8 @@ struct TerminalCampaign {
     intent_sha256: String,
     code: &'static str,
     report_persisted: Option<bool>,
+    finalization_verified: Option<bool>,
+    primary_cause: Option<&'static str>,
 }
 
 /// Controller-owned admission and management state. The production controller supplies host
@@ -78,6 +82,7 @@ pub(super) struct ResearchCoordinator {
     context_blocker: &'static str,
     active: Option<ActiveCampaign>,
     terminal: Option<TerminalCampaign>,
+    terminal_recheck_pending: bool,
     submitted: bool,
     recovery_pending: bool,
     /// A sent launch request is unresolved: no abort, seal or retry may run until recovery.
@@ -100,7 +105,9 @@ pub(super) struct ResearchCoordinator {
 
 impl ResearchCoordinator {
     pub(super) fn owns_action_slot(&self) -> bool {
-        self.active.is_some() || self.storage_blocker == Some("UnsafeToResume")
+        self.active.is_some()
+            || self.terminal_recheck_pending
+            || self.storage_blocker == Some("UnsafeToResume")
     }
 
     pub(super) fn host_refresh_complete(&self) -> bool {
@@ -128,6 +135,7 @@ impl ResearchCoordinator {
             context_blocker,
             active: None,
             terminal: None,
+            terminal_recheck_pending: false,
             submitted: false,
             recovery_pending: false,
             launch_unresolved: false,
@@ -259,21 +267,29 @@ impl ResearchCoordinator {
         self.storage_blocker = None;
         if matches!(
             lease.phase(),
-            ResearchPhase::Blocked | ResearchPhase::Aborted
+            ResearchPhase::Completed | ResearchPhase::Blocked | ResearchPhase::Aborted
         ) {
             self.terminal = Some(TerminalCampaign {
                 phase: lease.phase(),
                 intent_sha256: digest,
                 report_persisted: None,
+                finalization_verified: None,
+                primary_cause: recovered.terminal_code.or_else(|| {
+                    (lease.block_reason() == Some(CampaignBlockReason::GpuHealthIncident))
+                        .then_some("BlockedGpuStability")
+                }),
                 code: recovered.terminal_code.unwrap_or(
                     match (lease.phase(), lease.block_reason()) {
                         (_, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",
                         (_, Some(CampaignBlockReason::GpuHealthIncident)) => "BlockedGpuStability",
+                        (ResearchPhase::Completed, _) => "CompletedNeedsVerification",
                         (ResearchPhase::Aborted, _) => "Cancelled",
                         _ => "RecoveredBlocked",
                     },
                 ),
             });
+            self.terminal_recheck_pending = lease.phase() == ResearchPhase::Completed
+                || (lease.phase() == ResearchPhase::Blocked && self.terminal_preparation_exists());
         } else {
             let deadline_unix_seconds = lease.deadline_unix_seconds();
             self.active = Some(ActiveCampaign {

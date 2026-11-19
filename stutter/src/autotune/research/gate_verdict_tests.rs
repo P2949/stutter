@@ -32,6 +32,26 @@ const ADMITTED: crate::autotune::research::lease_inspect::Admission =
         admitted_in_window: true,
     };
 
+#[test]
+fn preparation_requires_a_live_nonterminal_lease_and_terminal_verification_requires_release() {
+    let mut lease = LeaseFacts {
+        chain_valid: true,
+        transitions_valid: true,
+        header_matches_intent: true,
+        terminal: false,
+        for_this_campaign: true,
+        owner_live: Some(true),
+        admission: ADMITTED,
+    };
+    assert!(lease_blockers(Some(lease), true).is_empty());
+    assert!(lease_blockers(Some(lease), false).contains(&"LeaseNotSettled"));
+    lease.owner_live = Some(false);
+    assert!(lease_blockers(Some(lease), true).contains(&"LeaseOwnerNotHeld"));
+    lease.terminal = true;
+    assert!(lease_blockers(Some(lease), false).is_empty());
+    assert!(lease_blockers(Some(lease), true).contains(&"LeaseAlreadyTerminal"));
+}
+
 fn full(result: Option<StudyResult>) -> Vec<Disposition> {
     let mut studies = Vec::new();
     // The plan's comparison stages exist for both performance profiles.

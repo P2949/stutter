@@ -167,7 +167,7 @@ fn host_blockers(host: Option<HostFacts>) -> Vec<&'static str> {
 /// G1 from the lease inspection: the sealed records hold together, end in a terminal phase and belong
 /// to this campaign. The authenticated-IPC and single-owner properties are tested elsewhere and are
 /// not claimed here.
-fn lease_blockers(lease: Option<LeaseFacts>) -> Vec<&'static str> {
+fn lease_blockers(lease: Option<LeaseFacts>, preparing: bool) -> Vec<&'static str> {
     let Some(lease) = lease else {
         return vec!["LeaseNotInspected"];
     };
@@ -193,18 +193,30 @@ fn lease_blockers(lease: Option<LeaseFacts>) -> Vec<&'static str> {
     if !lease.admission.admitted_in_window {
         blockers.push("LeaseAdmittedOutsideIntentWindow");
     }
-    match lease.owner_live {
-        Some(false) => {}
-        Some(true) => blockers.push("LeaseOwnerStillLive"),
-        None => blockers.push("LeaseOwnerUnknown"),
+    match (preparing, lease.owner_live) {
+        (false, Some(false)) | (true, Some(true)) => {}
+        (false, Some(true)) => blockers.push("LeaseOwnerStillLive"),
+        (true, Some(false)) => blockers.push("LeaseOwnerNotHeld"),
+        (_, None) => blockers.push("LeaseOwnerUnknown"),
     }
-    if !lease.terminal {
+    if preparing && lease.terminal {
+        blockers.push("LeaseAlreadyTerminal");
+    } else if !preparing && !lease.terminal {
         blockers.push("LeaseNotSettled");
     }
     blockers
 }
 
 pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
+    gates_inner(inputs, false)
+}
+
+/// Evaluate a verified, still-owned restoring lease before a terminal decision is persisted.
+pub(super) fn gates_preparing(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
+    gates_inner(inputs, true)
+}
+
+fn gates_inner(inputs: &GateInputs<'_>, preparing: bool) -> Vec<GateVerdict> {
     let studies = inputs.child_studies;
     let health = |mut blockers: Vec<&'static str>| {
         if inputs.health_blocked {
@@ -300,7 +312,7 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
         gate("G1", {
             // The lease records, and the control socket that every request must pass through: private,
             // owned by the user, and held by a live controller.
-            let mut blockers = lease_blockers(inputs.lease);
+            let mut blockers = lease_blockers(inputs.lease, preparing);
             blockers.extend(super::control_socket::blockers(inputs.control_socket));
             health_free(blockers)
         }),

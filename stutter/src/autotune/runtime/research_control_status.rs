@@ -71,11 +71,14 @@ impl ResearchCoordinator {
         }
         if let Some(terminal) = &self.terminal {
             return serde_json::json!({
-                "status": "ok",
+                "status": if self.terminal_recheck_pending || terminal.finalization_verified == Some(false) { "blocked" } else { "ok" },
                 "phase": terminal.phase,
                 "intent_sha256": terminal.intent_sha256,
                 "code": terminal.code,
                 "report_persisted": terminal.report_persisted,
+                "finalization_verified": terminal.finalization_verified,
+                "primary_cause": terminal.primary_cause,
+                "finalization_pending": self.terminal_recheck_pending,
             })
             .to_string()
                 + "\n";

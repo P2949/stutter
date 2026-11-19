@@ -261,6 +261,156 @@ fn restart_refuses_changed_identity_and_any_unverified_launch_history() {
 }
 
 #[test]
+fn a_recovered_completed_lease_stays_terminal_until_artifacts_are_verified() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let (intent, facts) = fixture();
+    let mut changed_facts = facts.clone();
+    changed_facts.boot_id = "later-boot".into();
+    let mut lease = CampaignLease::create(
+        crate::syscall::open_dir_no_symlinks(dir.path()).unwrap(),
+        intent,
+        facts,
+        100,
+        std::process::id(),
+        1,
+    )
+    .unwrap();
+    for phase in [
+        ResearchPhase::Preflight,
+        ResearchPhase::Prepared,
+        ResearchPhase::AwaitSafeWindow,
+        ResearchPhase::Restoring,
+        ResearchPhase::Completed,
+    ] {
+        lease.advance(phase, 101).unwrap();
+    }
+    drop(lease);
+    let mut restarted =
+        ResearchCoordinator::new(Some(dir.path().to_path_buf()), None, "BlockedSteamLogin");
+    let job = restarted.prepare_recovery(102).unwrap();
+    restarted.finish_recovery(job.run());
+    let terminal = restarted.terminal.as_ref().unwrap();
+    assert_eq!(terminal.phase, ResearchPhase::Completed);
+    assert_eq!(terminal.code, "CompletedNeedsVerification");
+    assert!(restarted.owns_action_slot());
+    assert!(restarted.finalization_due());
+    restarted.drive_finalization(103);
+    assert_eq!(
+        restarted.terminal.as_ref().unwrap().code,
+        "TerminalVerificationFailed"
+    );
+    assert!(restarted.owns_action_slot());
+    drop(restarted);
+    let mut historical =
+        ResearchCoordinator::new(Some(dir.path().to_path_buf()), Some(changed_facts), "Ready");
+    let job = historical.prepare_recovery(104).unwrap();
+    historical.finish_recovery(job.run());
+    assert_eq!(
+        historical.terminal.as_ref().unwrap().phase,
+        ResearchPhase::Completed
+    );
+    assert_eq!(
+        historical.terminal.as_ref().unwrap().code,
+        "CompletedNeedsVerification"
+    );
+}
+
+#[test]
+fn a_prepared_restoring_lease_is_scheduled_for_reverification_after_restart() {
+    use crate::autotune::research::{
+        ProtonSource, ResearchJournal, ResearchTool,
+        driver::build_schedule,
+        report_store::{build_from_dirs, write_new, write_report},
+    };
+    let lease_dir = tempfile::tempdir().unwrap();
+    let study_root = tempfile::tempdir().unwrap();
+    for dir in [&lease_dir, &study_root] {
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let meta = std::fs::metadata(study_root.path()).unwrap();
+    let root = crate::autotune::research::StudyRootIdentity {
+        device: std::os::unix::fs::MetadataExt::dev(&meta),
+        inode: std::os::unix::fs::MetadataExt::ino(&meta),
+    };
+    let (mut intent, mut facts) = fixture();
+    intent.study_root = Some(root);
+    facts.study_root = Some(root);
+    intent.tools.push(ResearchTool {
+        source: ProtonSource::ValveStable,
+        identity_sha256: "b".repeat(64),
+    });
+    facts.tools = intent.tools.clone();
+    intent.max_attempts = 4;
+    let digest = intent.digest().unwrap();
+    let campaign = study_root.path().join(&digest[..16]);
+    for path in [
+        &campaign,
+        &campaign.join("journal"),
+        &campaign.join("dispatch"),
+        &campaign.join("evidence"),
+    ] {
+        std::fs::create_dir(path).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let campaign_file = File::open(&campaign).unwrap();
+    write_new(
+        &campaign_file,
+        "intent.json",
+        &serde_json::to_vec(&intent).unwrap(),
+    )
+    .unwrap();
+    let journal = ResearchJournal::open(
+        crate::syscall::open_dir_no_symlinks(&campaign.join("journal")).unwrap(),
+        intent.uid,
+        build_schedule(&intent).unwrap(),
+    )
+    .unwrap();
+    let report = build_from_dirs(
+        &intent,
+        &journal,
+        &File::open(campaign.join("evidence")).unwrap(),
+    )
+    .unwrap();
+    drop(journal);
+    write_report(&campaign_file, &report).unwrap();
+    let report_bytes = std::fs::read(campaign.join("report.json")).unwrap();
+    write_new(&campaign_file, "finalization-prepared.json", &serde_json::to_vec(&serde_json::json!({
+        "schema": 1, "intent_sha256": digest, "report_sha256": stutter_core::hash::sha256_hex(&report_bytes),
+        "target_phase": "blocked", "verdict": {},
+    })).unwrap()).unwrap();
+    let mut lease = CampaignLease::create(
+        crate::syscall::open_dir_no_symlinks(lease_dir.path()).unwrap(),
+        intent,
+        facts.clone(),
+        100,
+        std::process::id(),
+        1,
+    )
+    .unwrap();
+    for phase in [
+        ResearchPhase::Preflight,
+        ResearchPhase::Prepared,
+        ResearchPhase::AwaitSafeWindow,
+        ResearchPhase::Restoring,
+    ] {
+        lease.advance(phase, 101).unwrap();
+    }
+    drop(lease);
+    let mut restarted =
+        ResearchCoordinator::new(Some(lease_dir.path().to_path_buf()), Some(facts), "Ready");
+    restarted.set_study_dir(Some(study_root.path().to_path_buf()));
+    let job = restarted.prepare_recovery(102).unwrap();
+    restarted.finish_recovery(job.run());
+    assert_eq!(
+        restarted.active.as_ref().unwrap().lease.phase(),
+        ResearchPhase::Restoring
+    );
+    assert!(restarted.finalization_due());
+    assert!(restarted.owns_action_slot());
+}
+
+#[test]
 fn restart_waits_for_existing_actions_and_expires_a_safe_boundary() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();

@@ -449,6 +449,125 @@ pub fn write(dir: &File, report: &Value, response: &Value) -> anyhow::Result<Str
     Ok(name)
 }
 
+/// Reopen every published artifact and compare it with the deterministic bundle and manifest.
+pub(crate) fn verify_written(
+    dir: &File,
+    uid: u32,
+    report: &Value,
+    response: &Value,
+    name: &str,
+) -> anyhow::Result<()> {
+    use std::os::{
+        fd::{AsFd, AsRawFd},
+        unix::fs::MetadataExt,
+    };
+    let files = build(report, response);
+    let manifest = files
+        .last()
+        .ok_or_else(|| anyhow::anyhow!("bundle manifest missing"))?;
+    let expected_name = format!(
+        "bundle-{}",
+        &stutter_core::hash::sha256_hex(&manifest.1)[..16]
+    );
+    anyhow::ensure!(name == expected_name, "bundle identity differs");
+    let bundle = File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), name)?);
+    let metadata = bundle.metadata()?;
+    anyhow::ensure!(
+        metadata.uid() == uid && metadata.mode() & 0o077 == 0,
+        "untrusted bundle directory"
+    );
+    let actual = std::fs::read_dir(format!("/proc/self/fd/{}", bundle.as_raw_fd()))?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .len();
+    anyhow::ensure!(actual == files.len(), "bundle entries differ");
+    for (file, bytes) in files {
+        anyhow::ensure!(
+            super::report_store::read_private(&bundle, file, uid)? == bytes,
+            "bundle artifact differs"
+        );
+    }
+    Ok(())
+}
+
+/// Verify a historical bundle from its manifest, including its report and recorded verdict.
+pub(crate) fn verify_manifest(
+    dir: &File,
+    uid: u32,
+    name: &str,
+    report: &Value,
+    verdict: &Value,
+) -> anyhow::Result<()> {
+    use std::{
+        collections::BTreeSet,
+        os::{
+            fd::{AsFd, AsRawFd},
+            unix::fs::MetadataExt,
+        },
+    };
+    anyhow::ensure!(
+        name.len() == 23
+            && name.starts_with("bundle-")
+            && name[7..]
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "invalid bundle name"
+    );
+    let bundle = File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), name)?);
+    let metadata = bundle.metadata()?;
+    anyhow::ensure!(
+        metadata.uid() == uid && metadata.mode() & 0o077 == 0,
+        "untrusted bundle directory"
+    );
+    let manifest = super::report_store::read_private(&bundle, "manifest-and-hashes.txt", uid)?;
+    anyhow::ensure!(
+        name == format!(
+            "bundle-{}",
+            &stutter_core::hash::sha256_hex(&manifest)[..16]
+        ),
+        "bundle identity differs"
+    );
+    let expected: BTreeSet<_> = build(&Value::Null, &Value::Null)
+        .into_iter()
+        .map(|(file, _)| file)
+        .filter(|file| *file != "manifest-and-hashes.txt")
+        .collect();
+    let mut seen = BTreeSet::new();
+    for line in std::str::from_utf8(&manifest)?.lines() {
+        let (digest, file) = line
+            .split_once("  ")
+            .ok_or_else(|| anyhow::anyhow!("invalid bundle manifest"))?;
+        anyhow::ensure!(
+            expected.contains(file) && seen.insert(file.to_owned()),
+            "unexpected bundle entry"
+        );
+        let bytes = super::report_store::read_private(&bundle, file, uid)?;
+        anyhow::ensure!(
+            stutter_core::hash::sha256_hex(&bytes) == digest,
+            "bundle artifact hash differs"
+        );
+        if file == "report.json" {
+            anyhow::ensure!(
+                serde_json::from_slice::<Value>(&bytes)? == *report,
+                "bundle report differs"
+            );
+        }
+        if file == "verify-result.json" {
+            anyhow::ensure!(
+                serde_json::from_slice::<Value>(&bytes)? == *verdict,
+                "bundle verdict differs"
+            );
+        }
+    }
+    let actual = std::fs::read_dir(format!("/proc/self/fd/{}", bundle.as_raw_fd()))?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .len();
+    anyhow::ensure!(
+        seen.len() == expected.len() && actual == expected.len() + 1,
+        "bundle entries differ"
+    );
+    Ok(())
+}
+
 /// Write the bundle for a verified report and say what happened. A verdict with no durable bundle is
 /// not a final one, so a failure is returned for the response to carry, not merely logged.
 pub fn write_reporting(

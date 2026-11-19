@@ -130,9 +130,14 @@ fn a_tampered_file_in_an_existing_bundle_is_refused_on_replay() {
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let handle = File::open(dir.path()).unwrap();
     let name = write(&handle, &json!({}), &response()).unwrap();
+    let uid = crate::syscall::geteuid();
+    verify_written(&handle, uid, &json!({}), &response(), &name).unwrap();
+    verify_manifest(&handle, uid, &name, &json!({}), &response()["verdict"]).unwrap();
     let file = dir.path().join(&name).join("verify-result.json");
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     std::fs::write(&file, b"{}\n").unwrap();
+    assert!(verify_written(&handle, uid, &json!({}), &response(), &name).is_err());
+    assert!(verify_manifest(&handle, uid, &name, &json!({}), &response()["verdict"]).is_err());
     let error = write(&handle, &json!({}), &response())
         .unwrap_err()
         .to_string();

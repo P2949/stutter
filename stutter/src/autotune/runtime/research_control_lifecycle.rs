@@ -72,6 +72,8 @@ impl ResearchCoordinator {
             phase,
             intent_sha256: active.intent_sha256.clone(),
             report_persisted,
+            finalization_verified: None,
+            primary_cause: cause.map(|class| class.terminal_code()),
             code: if let Some(class) = cause {
                 class.terminal_code()
             } else if report_failed {
@@ -141,6 +143,8 @@ impl ResearchCoordinator {
             phase,
             intent_sha256: active.intent_sha256.clone(),
             report_persisted,
+            finalization_verified: None,
+            primary_cause: cause.map(|class| class.terminal_code()),
             code: if let Some(class) = cause {
                 class.terminal_code()
             } else {

@@ -181,12 +181,33 @@ fn finished_schedule_is_blocked_until_verified(report_conflict: bool) {
         if report_conflict {
             "ReportPersistenceFailed"
         } else {
-            "IncompleteProvenance"
+            "BlockedCampaignOrStats"
         }
     );
     if report_conflict {
         return;
     }
+    let dir = coordinator.open_campaign_study_dir().unwrap();
+    let prepared: serde_json::Value = serde_json::from_slice(
+        &crate::autotune::research::report_store::read_private(
+            &dir,
+            "finalization-prepared.json",
+            crate::syscall::geteuid(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let receipt: serde_json::Value = serde_json::from_slice(
+        &crate::autotune::research::report_store::read_private(
+            &dir,
+            "finalization-verified.json",
+            crate::syscall::geteuid(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(prepared["target_phase"], "blocked");
+    assert_eq!(receipt["terminal_phase"], "blocked");
     let report = send(&mut coordinator, ResearchRequest::Report {}, 201);
     assert!(
         report.contains("\"code\":\"Report\"") && report.contains("arms"),
@@ -194,7 +215,7 @@ fn finished_schedule_is_blocked_until_verified(report_conflict: bool) {
     );
     let verified = send(&mut coordinator, ResearchRequest::Verify {}, 202);
     assert!(
-        verified.contains("IncompleteProvenance")
+        verified.contains("BlockedCampaignOrStats")
             && verified.contains("\"reconstruction\":\"passed\""),
         "{verified}"
     );
