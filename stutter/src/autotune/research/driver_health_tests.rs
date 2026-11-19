@@ -26,7 +26,7 @@ fn a_gpu_reset_stops_the_whole_campaign_and_nothing_launches_again() {
     for step in 2..8 {
         assert_eq!(
             driver.tick(&mut host, now + step).unwrap(),
-            Step::Halted("BlockedGpuStability")
+            Step::Stopped(FailureClass::Health)
         );
     }
     assert_eq!(host.launches, 1);
@@ -40,7 +40,7 @@ fn a_durable_health_stop_blocks_the_first_launch_after_a_controller_restart() {
     let now = intent.issued_unix_seconds + 1;
     assert_eq!(
         driver.tick(&mut host, now).unwrap(),
-        Step::Halted("BlockedGpuStability")
+        Step::Stopped(FailureClass::Health)
     );
     assert_eq!(host.launches, 0);
 }
@@ -133,7 +133,7 @@ mod production_like {
         for step in 2..6 {
             assert_eq!(
                 driver.tick(&mut live, now + step).unwrap(),
-                Step::Halted("BlockedGpuStability")
+                Step::Stopped(FailureClass::Health)
             );
         }
         assert_eq!(live.inner.launches, 1);
@@ -145,7 +145,7 @@ mod production_like {
             again
                 .tick(&mut restarted, intent2.issued_unix_seconds + 1)
                 .unwrap(),
-            Step::Halted("BlockedGpuStability")
+            Step::Stopped(FailureClass::Health)
         );
         assert_eq!(restarted.inner.launches, 0);
     }

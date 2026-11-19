@@ -21,9 +21,9 @@ const MAX_FILE: u64 = 64 * 1024;
 // plan's ordinary screening and confirmation campaign long before its attempt budget.
 const EVENTS_PER_ATTEMPT: usize = 16;
 const EXTRA_EVENTS: usize = 256;
-const MAX_EVENTS: usize = 1_000 * EVENTS_PER_ATTEMPT + EXTRA_EVENTS;
+pub(super) const MAX_EVENTS: usize = 1_000 * EVENTS_PER_ATTEMPT + EXTRA_EVENTS;
 
-fn event_limit(intent: &ResearchIntentV1) -> usize {
+pub(super) fn event_limit(intent: &ResearchIntentV1) -> usize {
     intent.max_attempts as usize * EVENTS_PER_ATTEMPT + EXTRA_EVENTS
 }
 
@@ -133,20 +133,40 @@ struct Header {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Event {
-    sequence: u32,
-    from: ResearchPhase,
-    to: ResearchPhase,
-    previous_sha256: String,
-    at_unix_seconds: u64,
+pub(super) struct Event {
+    pub(super) sequence: u32,
+    pub(super) from: ResearchPhase,
+    pub(super) to: ResearchPhase,
+    pub(super) previous_sha256: String,
+    pub(super) at_unix_seconds: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    block_reason: Option<CampaignBlockReason>,
+    pub(super) block_reason: Option<CampaignBlockReason>,
+}
+
+impl Event {
+    pub(super) fn semantically_valid(
+        &self,
+        phase: ResearchPhase,
+        last: u64,
+        deadline: u64,
+        now: Option<u64>,
+    ) -> bool {
+        self.from == phase
+            && phase.permits(self.to)
+            && (self.block_reason.is_none() || self.to == ResearchPhase::Blocked)
+            && (self.block_reason != Some(CampaignBlockReason::DeadlineExpired)
+                || self.at_unix_seconds >= deadline)
+            && self.at_unix_seconds >= last
+            && now.is_none_or(|now| self.at_unix_seconds <= now)
+            && (self.at_unix_seconds < deadline || is_cleanup(self.to))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CampaignBlockReason {
     DeadlineExpired,
+    GpuHealthIncident,
 }
 
 /// A lease locks one private campaign directory; a separate resident/global lock is also needed.
@@ -351,16 +371,13 @@ impl CampaignLease {
             let event: Event = serde_json::from_slice(&bytes)?;
             anyhow::ensure!(
                 event.sequence == sequence
-                    && event.from == phase
                     && event.previous_sha256 == previous
-                    && phase.permits(event.to)
-                    && (event.block_reason.is_none() || event.to == ResearchPhase::Blocked)
-                    && (event.block_reason != Some(CampaignBlockReason::DeadlineExpired)
-                        || event.at_unix_seconds >= header.intent.deadline_unix_seconds)
-                    && event.at_unix_seconds >= last_unix_seconds
-                    && event.at_unix_seconds <= now
-                    && (event.at_unix_seconds < header.intent.deadline_unix_seconds
-                        || is_cleanup(event.to)),
+                    && event.semantically_valid(
+                        phase,
+                        last_unix_seconds,
+                        header.intent.deadline_unix_seconds,
+                        Some(now)
+                    ),
                 "campaign event chain mismatch"
             );
             phase = event.to;
@@ -453,6 +470,7 @@ impl CampaignLease {
         let mut last_unix_seconds = header.admitted_unix_seconds;
         let mut phase = ResearchPhase::Requested;
         let mut ever_launched = false;
+        let mut block_reason = None;
         for sequence in 1..=self.sequence {
             let name = format!("event-{sequence:04}.json");
             anyhow::ensure!(names.remove(&name), "campaign event missing");
@@ -460,18 +478,18 @@ impl CampaignLease {
             let event: Event = serde_json::from_slice(&bytes)?;
             anyhow::ensure!(
                 event.sequence == sequence
-                    && event.from == phase
                     && event.previous_sha256 == previous
-                    && phase.permits(event.to)
-                    && (event.block_reason.is_none() || event.to == ResearchPhase::Blocked)
-                    && (event.block_reason != Some(CampaignBlockReason::DeadlineExpired)
-                        || event.at_unix_seconds >= self.deadline_unix_seconds)
-                    && event.at_unix_seconds >= last_unix_seconds
-                    && (event.at_unix_seconds < self.deadline_unix_seconds || is_cleanup(event.to)),
+                    && event.semantically_valid(
+                        phase,
+                        last_unix_seconds,
+                        self.deadline_unix_seconds,
+                        None
+                    ),
                 "campaign event chain changed"
             );
             phase = event.to;
             ever_launched |= event.to == ResearchPhase::Launching;
+            block_reason = event.block_reason;
             last_unix_seconds = event.at_unix_seconds;
             previous = stutter_core::hash::sha256_hex(&bytes);
         }
@@ -482,6 +500,7 @@ impl CampaignLease {
                 && header.intent.deadline_unix_seconds == self.deadline_unix_seconds
                 && header.intent_sha256 == self.intent_sha256
                 && ever_launched == self.ever_launched
+                && block_reason == self.block_reason
                 && event_limit(&header.intent) == self.event_limit
                 && last_unix_seconds == self.last_unix_seconds,
             "campaign record changed or contains unknown entries"
@@ -504,6 +523,15 @@ impl CampaignLease {
             ResearchPhase::Blocked,
             now,
             Some(CampaignBlockReason::DeadlineExpired),
+        )
+    }
+
+    /// Record a health stop independently of attempt journals, including before the first launch.
+    pub fn block_for_health(&mut self, now: u64) -> anyhow::Result<()> {
+        self.advance_inner(
+            ResearchPhase::Blocked,
+            now,
+            Some(CampaignBlockReason::GpuHealthIncident),
         )
     }
 

@@ -268,6 +268,7 @@ impl ResearchCoordinator {
                 code: recovered.terminal_code.unwrap_or(
                     match (lease.phase(), lease.block_reason()) {
                         (_, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",
+                        (_, Some(CampaignBlockReason::GpuHealthIncident)) => "BlockedGpuStability",
                         (ResearchPhase::Aborted, _) => "Cancelled",
                         _ => "RecoveredBlocked",
                     },

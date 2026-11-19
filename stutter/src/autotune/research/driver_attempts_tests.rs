@@ -5,7 +5,7 @@ use crate::autotune::research::{
     ProtonSource, ResearchTool,
     child_study::plan,
     dispatch_context::{ArmSpec, DispatchContextV1},
-    driver::Progress,
+    driver::{FailureClass, Progress},
     journal::AttemptSlot,
     report::AttemptEvidenceV1,
     tests::intent,
@@ -513,7 +513,7 @@ mod funnel {
         host.health = true;
         let (_root, mut driver, _) = funnel(host, 1);
         let step = driver.tick(&mut || Ok(())).unwrap();
-        assert_eq!(step, Step::Halted("BlockedGpuStability"));
+        assert_eq!(step, Step::Stopped(FailureClass::Health));
         assert!(driver.dispositions().iter().all(|d| d.result.is_none()));
     }
 

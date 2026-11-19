@@ -592,16 +592,11 @@ impl StudyAttempts for DriverStudyAttempts {
             .map_err(|_| "InterruptedBudgetPersistenceFailed")?;
         let terminal = match &step {
             Step::Stopped(class) => Some(*class),
-            Step::Halted(_) => Some(super::driver::FailureClass::Health),
             Step::Sealed(record) => record.outcome.terminal_failure(),
             _ => None,
         };
         if let Some(class) = terminal {
-            self.last_step = Some(if class == super::driver::FailureClass::Health {
-                Step::Halted("BlockedGpuStability")
-            } else {
-                Step::Stopped(class)
-            });
+            self.last_step = Some(Step::Stopped(class));
         }
         let outcome = self
             .outcome(

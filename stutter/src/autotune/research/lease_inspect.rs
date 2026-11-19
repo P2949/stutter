@@ -7,20 +7,11 @@
 
 use std::{fs::File, path::Path};
 
-use serde::Deserialize;
-
-use super::{ResearchIntentV1, ResearchPhase, report_store::read_private};
-
-/// A campaign has a bounded number of transitions; more is not a lease.
-const MAX_EVENTS: usize = 4096;
-
-#[derive(Deserialize)]
-struct Event {
-    sequence: u32,
-    from: ResearchPhase,
-    to: ResearchPhase,
-    previous_sha256: String,
-}
+use super::{
+    ResearchIntentV1, ResearchPhase,
+    lease::{CampaignBlockReason, Event, MAX_EVENTS, event_limit},
+    report_store::read_private,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct LeaseInspection {
@@ -35,6 +26,7 @@ pub struct LeaseInspection {
     /// The intent digest the lease was created for.
     pub intent_sha256: String,
     pub final_phase: ResearchPhase,
+    pub block_reason: Option<CampaignBlockReason>,
     /// The campaign ended (completed, blocked or aborted) rather than stopping mid-way.
     pub terminal: bool,
     /// What the header recorded of the campaign's admission over the control socket.
@@ -155,6 +147,14 @@ pub fn inspect(dir: &Path, uid: u32) -> anyhow::Result<LeaseInspection> {
     let mut previous = stutter_core::hash::sha256_hex(&header_bytes);
     let mut phase = ResearchPhase::Requested;
     let (mut chain_valid, mut transitions_valid, mut count) = (true, true, 0u32);
+    let mut last = header["admitted_unix_seconds"]
+        .as_u64()
+        .ok_or_else(|| anyhow::anyhow!("lease admission time missing"))?;
+    transitions_valid &= last >= intent.issued_unix_seconds && last < intent.deadline_unix_seconds;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let mut block_reason = None;
     // Every event record present, by sequence, read from the directory itself rather than probed one
     // name at a time: a gap, a record past the end or an `event-` entry that is not a well-formed
     // record cannot hide behind a read that happened to fail.
@@ -181,15 +181,18 @@ pub fn inspect(dir: &Path, uid: u32) -> anyhow::Result<LeaseInspection> {
     let contiguous = (1..=MAX_EVENTS)
         .take_while(|sequence| present.contains(sequence))
         .count();
-    chain_valid &= !stray && present.len() == contiguous;
+    chain_valid &= !stray && present.len() == contiguous && contiguous <= event_limit(&intent);
     for sequence in 1..=contiguous {
         // A record that is present but cannot be read is an error, not the end of the chain.
         let bytes = read_private(&handle, &event_name(sequence), uid)?;
         let event: Event = serde_json::from_slice(&bytes)?;
         chain_valid &= event.sequence as usize == sequence && event.previous_sha256 == previous;
-        transitions_valid &= event.from == phase && event.from.permits(event.to);
+        transitions_valid &=
+            event.semantically_valid(phase, last, intent.deadline_unix_seconds, Some(now));
         previous = stutter_core::hash::sha256_hex(&bytes);
         phase = event.to;
+        last = event.at_unix_seconds;
+        block_reason = event.block_reason;
         count += 1;
     }
     Ok(LeaseInspection {
@@ -201,6 +204,7 @@ pub fn inspect(dir: &Path, uid: u32) -> anyhow::Result<LeaseInspection> {
         header_matches_intent,
         intent_sha256: claimed,
         final_phase: phase,
+        block_reason,
         terminal: matches!(
             phase,
             ResearchPhase::Completed | ResearchPhase::Blocked | ResearchPhase::Aborted

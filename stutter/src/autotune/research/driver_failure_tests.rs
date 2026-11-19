@@ -33,7 +33,7 @@ fn urgent_observations_survive_simultaneous_cancellation_and_deadline() {
                         .tick(&mut host, intent.deadline_unix_seconds + 1)
                         .unwrap(),
                     if class == FailureClass::Health {
-                        Step::Halted("BlockedGpuStability")
+                        Step::Stopped(FailureClass::Health)
                     } else {
                         Step::Stopped(class)
                     }
@@ -74,7 +74,7 @@ fn typed_attempt_failures_stop_or_continue_without_interpreting_their_message() 
             let next = driver.tick(&mut host, now + 2).unwrap();
             match class {
                 FailureClass::Incompatible => assert_eq!(next, Step::Running(1)),
-                FailureClass::Health => assert_eq!(next, Step::Halted("BlockedGpuStability")),
+                FailureClass::Health => assert_eq!(next, Step::Stopped(FailureClass::Health)),
                 _ => assert_eq!(next, Step::Stopped(class)),
             }
         }
@@ -161,7 +161,7 @@ fn a_restarted_driver_reconstructs_a_terminal_class_from_the_sealed_journal() {
             File::from(crate::syscall::open_dir_no_symlinks(&dir.path().join("evidence")).unwrap());
         let mut recovered = Driver::new(journal, intent, root, evidence, len);
         let expected = if class == FailureClass::Health {
-            Step::Halted("BlockedGpuStability")
+            Step::Stopped(FailureClass::Health)
         } else {
             Step::Stopped(class)
         };
@@ -195,7 +195,7 @@ fn typed_launch_failures_stop_after_settlement_and_unresolved_ownership_is_retai
             assert_eq!(
                 next,
                 if class == FailureClass::Health {
-                    Step::Halted("BlockedGpuStability")
+                    Step::Stopped(FailureClass::Health)
                 } else {
                     Step::Stopped(class)
                 }

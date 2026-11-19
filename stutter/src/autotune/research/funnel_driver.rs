@@ -280,10 +280,9 @@ impl FunnelDriver {
 
     /// Take an urgent terminal cause observed while settling an interrupted child.
     pub(crate) fn take_terminal_failure(&mut self) -> Option<super::driver::FailureClass> {
-        use super::{child_runner::StudyExecutor, driver::FailureClass};
+        use super::child_runner::StudyExecutor;
         match self.executor.take_step() {
             Some(Step::Stopped(class)) => Some(class),
-            Some(Step::Halted("BlockedGpuStability")) => Some(FailureClass::Health),
             Some(Step::Sealed(record)) => record.outcome.terminal_failure(),
             _ => None,
         }
@@ -331,6 +330,7 @@ impl FunnelDriver {
         Ok(match step {
             RunnerStep::Halted(code) => match inner {
                 Some(Step::Stopped(class)) => Step::Stopped(class),
+                _ if blocked => Step::Stopped(super::driver::FailureClass::Health),
                 _ => Step::Halted(code),
             },
             RunnerStep::OwnershipUnresolved(code) => Step::OwnershipUnresolved(code),

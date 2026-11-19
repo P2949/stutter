@@ -60,7 +60,11 @@ impl ResearchCoordinator {
             return response("denied", "NoCampaign");
         };
         if active.lease.advance(ResearchPhase::Restoring, now).is_err()
-            || active.lease.advance(phase, now).is_err()
+            || if cause == Some(crate::autotune::research::driver::FailureClass::Health) {
+                active.lease.block_for_health(now).is_err()
+            } else {
+                active.lease.advance(phase, now).is_err()
+            }
         {
             return response("blocked", "CancellationPersistenceFailed");
         }
@@ -122,7 +126,9 @@ impl ResearchCoordinator {
             return;
         };
         if active.lease.advance(ResearchPhase::Restoring, now).is_err()
-            || if cause.is_some() {
+            || if cause == Some(crate::autotune::research::driver::FailureClass::Health) {
+                active.lease.block_for_health(now).is_err()
+            } else if cause.is_some() {
                 active.lease.advance(phase, now).is_err()
             } else {
                 active.lease.block_for_deadline(now).is_err()
@@ -141,6 +147,7 @@ impl ResearchCoordinator {
                 match (report_failed, active.lease.block_reason()) {
                     (true, _) => "ReportPersistenceFailed",
                     (false, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",
+                    (false, Some(CampaignBlockReason::GpuHealthIncident)) => "BlockedGpuStability",
                     (false, None) => "Blocked",
                 }
             },

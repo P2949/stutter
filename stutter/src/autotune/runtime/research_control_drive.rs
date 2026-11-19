@@ -266,7 +266,7 @@ impl ResearchCoordinator {
                 } else {
                     "ReportPersistenceFailed"
                 };
-                self.settle(now, ResearchPhase::Blocked, code);
+                self.settle(now, ResearchPhase::Blocked, code, None);
                 true
             }
             // A durable GPU health stop: preserve what was sealed, leave the rest of the schedule
@@ -294,7 +294,7 @@ impl ResearchCoordinator {
                 } else {
                     ResearchPhase::Blocked
                 };
-                self.settle(now, terminal, class.terminal_code());
+                self.settle(now, terminal, class.terminal_code(), Some(class));
                 if let Some(terminal) = self.terminal.as_mut() {
                     terminal.report_persisted = Some(report_persisted);
                 }
@@ -302,7 +302,7 @@ impl ResearchCoordinator {
             }
             Step::Halted(code) => {
                 let report_persisted = self.persist_report();
-                self.settle(now, ResearchPhase::Blocked, code);
+                self.settle(now, ResearchPhase::Blocked, code, None);
                 if let Some(terminal) = self.terminal.as_mut() {
                     terminal.report_persisted = Some(report_persisted);
                 }
@@ -314,7 +314,7 @@ impl ResearchCoordinator {
                 } else {
                     "ReportPersistenceFailed"
                 };
-                self.settle(now, ResearchPhase::Aborted, code);
+                self.settle(now, ResearchPhase::Aborted, code, None);
                 true
             }
         };
@@ -390,11 +390,6 @@ impl ResearchCoordinator {
                 })? {
                 Step::Sealed(record) => return Ok(record.outcome.terminal_failure()),
                 Step::Stopped(class) => return Ok(Some(class)),
-                Step::Halted("BlockedGpuStability") => {
-                    return Ok(Some(
-                        crate::autotune::research::driver::FailureClass::Health,
-                    ));
-                }
                 Step::Cancelled | Step::Halted(_) => {}
                 _ => anyhow::bail!("research attempt settlement unproven"),
             }
@@ -440,7 +435,7 @@ impl ResearchCoordinator {
         } else {
             ResearchPhase::Aborted
         };
-        self.settle(now, phase, code);
+        self.settle(now, phase, code, cause);
         if let Some(terminal) = self.terminal.as_mut() {
             terminal.report_persisted = Some(report_persisted);
         }
@@ -453,7 +448,13 @@ impl ResearchCoordinator {
         Ok(())
     }
 
-    fn settle(&mut self, now: u64, terminal: ResearchPhase, code: &'static str) {
+    fn settle(
+        &mut self,
+        now: u64,
+        terminal: ResearchPhase,
+        code: &'static str,
+        cause: Option<crate::autotune::research::driver::FailureClass>,
+    ) {
         if let Some(active) = self.active.as_mut() {
             let phase = active.lease.phase();
             if !matches!(
@@ -462,7 +463,17 @@ impl ResearchCoordinator {
             ) {
                 let restoring = phase == ResearchPhase::Restoring
                     || active.lease.advance(ResearchPhase::Restoring, now).is_ok();
-                if !restoring || active.lease.advance(terminal, now).is_err() {
+                if !restoring {
+                    self.storage_blocker = Some("UnsafeToResume");
+                    return;
+                }
+                let terminal_result =
+                    if cause == Some(crate::autotune::research::driver::FailureClass::Health) {
+                        active.lease.block_for_health(now)
+                    } else {
+                        active.lease.advance(terminal, now)
+                    };
+                if terminal_result.is_err() {
                     self.storage_blocker = Some("UnsafeToResume");
                     return;
                 }

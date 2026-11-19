@@ -66,6 +66,87 @@ fn a_real_settled_lease_is_consistent_and_terminal() {
 }
 
 #[test]
+fn a_self_consistent_last_event_cannot_hide_bad_time_or_block_reason() {
+    for corrupt in ["time", "reason"] {
+        let (dir, uid) = settled();
+        let path = dir.path().join("event-0005.json");
+        let mut event: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        match corrupt {
+            "time" => event["at_unix_seconds"] = 0.into(),
+            _ => event["block_reason"] = "gpu_health_incident".into(),
+        }
+        std::fs::write(path, serde_json::to_vec(&event).unwrap()).unwrap();
+        let inspection = inspect(dir.path(), uid).unwrap();
+        assert!(
+            inspection.chain_valid,
+            "the unchanged prior digest still links"
+        );
+        assert!(!inspection.transitions_valid, "accepted {corrupt}");
+    }
+}
+
+#[test]
+fn a_self_consistent_preflight_event_after_authorization_expires_is_invalid() {
+    let (dir, intent, facts) = setup();
+    let uid = intent.uid;
+    let now = intent.issued_unix_seconds + 1;
+    let mut lease = CampaignLease::create(fd(&dir), intent.clone(), facts, now, 123, 456).unwrap();
+    lease.advance(ResearchPhase::Preflight, now).unwrap();
+    drop(lease);
+    let path = dir.path().join("event-0001.json");
+    let mut event: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    event["at_unix_seconds"] = intent.deadline_unix_seconds.into();
+    std::fs::write(path, serde_json::to_vec(&event).unwrap()).unwrap();
+    let inspection = inspect(dir.path(), uid).unwrap();
+    assert!(inspection.chain_valid);
+    assert!(!inspection.transitions_valid);
+}
+
+#[test]
+fn a_self_consistent_chain_cannot_exceed_its_intent_event_limit() {
+    let (dir, intent, facts) = setup();
+    let uid = intent.uid;
+    let now = intent.issued_unix_seconds + 1;
+    let limit = event_limit(&intent);
+    let mut lease = CampaignLease::create(fd(&dir), intent, facts, now, 123, 456).unwrap();
+    for phase in [
+        ResearchPhase::Preflight,
+        ResearchPhase::Prepared,
+        ResearchPhase::AwaitSafeWindow,
+    ] {
+        lease.advance(phase, now).unwrap();
+    }
+    drop(lease);
+    let mut previous =
+        stutter_core::hash::sha256_hex(&std::fs::read(dir.path().join("event-0003.json")).unwrap());
+    let mut phase = ResearchPhase::AwaitSafeWindow;
+    for sequence in 4..=limit + 1 {
+        let next = match phase {
+            ResearchPhase::AwaitSafeWindow => ResearchPhase::Launching,
+            ResearchPhase::Launching => ResearchPhase::Sealing,
+            ResearchPhase::Sealing => ResearchPhase::Analysing,
+            ResearchPhase::Analysing => ResearchPhase::NextArm,
+            ResearchPhase::NextArm => ResearchPhase::AwaitSafeWindow,
+            _ => unreachable!(),
+        };
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "sequence": sequence, "from": phase, "to": next,
+            "previous_sha256": previous, "at_unix_seconds": now,
+        }))
+        .unwrap();
+        let path = dir.path().join(format!("event-{sequence:04}.json"));
+        std::fs::write(&path, &bytes).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        previous = stutter_core::hash::sha256_hex(&bytes);
+        phase = next;
+    }
+    let inspection = inspect(dir.path(), uid).unwrap();
+    assert!(!inspection.chain_valid);
+}
+
+#[test]
 fn an_interrupted_lease_is_consistent_but_not_settled() {
     let (dir, intent, facts) = setup();
     let uid = intent.uid;

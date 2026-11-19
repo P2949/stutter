@@ -424,11 +424,7 @@ impl Driver {
         }
         self.last_tick_seconds = Some(now);
         if let Some(class) = self.terminal_failure {
-            return Ok(if class == FailureClass::Health {
-                Step::Halted("BlockedGpuStability")
-            } else {
-                Step::Stopped(class)
-            });
+            return Ok(Step::Stopped(class));
         }
         if !self.fresh_journal_checked {
             let records = self.journal.verify()?;
@@ -438,11 +434,7 @@ impl Driver {
             {
                 self.terminal_failure = Some(class);
                 self.fresh_journal_checked = true;
-                return Ok(if class == FailureClass::Health {
-                    Step::Halted("BlockedGpuStability")
-                } else {
-                    Step::Stopped(class)
-                });
+                return Ok(Step::Stopped(class));
             }
             anyhow::ensure!(
                 records.is_empty(),
@@ -593,7 +585,7 @@ impl Driver {
             };
         }
         if host.health_blocked() {
-            return Ok(Step::Halted("BlockedGpuStability"));
+            return Ok(Step::Stopped(FailureClass::Health));
         }
         if self.cancel {
             return Ok(Step::Cancelled);
