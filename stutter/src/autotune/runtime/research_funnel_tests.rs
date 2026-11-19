@@ -141,6 +141,28 @@ fn failed_profile_rollback_retains_the_real_coordinator_lease_and_mutation_slot(
 }
 
 #[test]
+fn a_sealed_child_integrity_failure_survives_coordinator_cancellation() {
+    use crate::autotune::research::driver::FailureClass;
+    let mut script = Script {
+        safe: true,
+        ..Default::default()
+    };
+    script.polls.push_back(Progress::Failed {
+        class: FailureClass::Integrity,
+        code: "Mismatch".into(),
+    });
+    let mut s = setup(script, 40, true);
+    s.coordinator.drive_attempts(101);
+    s.coordinator.drive_attempts(102);
+    send(&mut s.coordinator, ResearchRequest::Cancel {}, 103);
+    let terminal = s.coordinator.terminal.as_ref().unwrap();
+    assert_eq!(terminal.phase, ResearchPhase::Aborted);
+    assert_eq!(terminal.code, "AbortedIntegrity");
+    assert_eq!(terminal.report_persisted, Some(true));
+    assert_eq!(s.script.lock().unwrap().launches, 1);
+}
+
+#[test]
 fn a_child_launch_with_a_lost_acknowledgement_keeps_the_resident_lease() {
     let mut s = setup(
         Script {
