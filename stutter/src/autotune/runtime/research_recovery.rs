@@ -162,14 +162,22 @@ fn verify_no_attempts(lease: &CampaignLease, study_path: Option<&Path>) -> anyho
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(error.into()),
     };
+    let mut recovered = Vec::new();
     if let Some(studies) = studies {
+        let plan = crate::autotune::research::child_study::plan(&intent)?;
         for entry in std::fs::read_dir(format!("/proc/self/fd/{}", studies.as_raw_fd()))? {
-            let study = File::from(crate::syscall::openat_dir_nofollow(
-                studies.as_fd(),
-                &entry?.file_name().to_string_lossy(),
-            )?);
-            for name in ["journal", "dispatch"] {
-                let dir = File::from(crate::syscall::openat_dir_nofollow(study.as_fd(), name)?);
+            let name = entry?
+                .file_name()
+                .into_string()
+                .map_err(|_| anyhow::anyhow!("invalid child study name"))?;
+            let study = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), &name)?);
+            let metadata = study.metadata()?;
+            anyhow::ensure!(
+                metadata.uid() == crate::syscall::geteuid() && metadata.mode() & 0o077 == 0,
+                "untrusted child study directory"
+            );
+            for part in ["journal", "dispatch", "evidence"] {
+                let dir = File::from(crate::syscall::openat_dir_nofollow(study.as_fd(), part)?);
                 anyhow::ensure!(
                     std::fs::read_dir(format!("/proc/self/fd/{}", dir.as_raw_fd()))?
                         .next()
@@ -177,11 +185,63 @@ fn verify_no_attempts(lease: &CampaignLease, study_path: Option<&Path>) -> anyho
                     "UnsafeToResume: child study records require settlement verification"
                 );
             }
+            let uid = crate::syscall::geteuid();
+            let child: ResearchIntentV1 = serde_json::from_slice(
+                &crate::autotune::research::report_store::read_private(&study, "intent.json", uid)?,
+            )?;
+            anyhow::ensure!(
+                crate::autotune::research::child_verify::derived_from(&child, &intent, &name),
+                "UnsafeToResume: a child study intent differs"
+            );
+            let planned = plan
+                .iter()
+                .find(|item| item.study_sha256.get(..16) == Some(name.as_str()))
+                .ok_or_else(|| anyhow::anyhow!("UnsafeToResume: child study is not planned"))?
+                .clone();
+            let journal = ResearchJournal::open(
+                crate::syscall::openat_dir_nofollow(study.as_fd(), "journal")?,
+                uid,
+                build_schedule(&child)?,
+            )?;
+            let evidence = File::from(crate::syscall::openat_dir_nofollow(
+                study.as_fd(),
+                "evidence",
+            )?);
+            let report = crate::autotune::research::report_store::build_from_dirs(
+                &child, &journal, &evidence,
+            )?;
+            recovered.push(RecoveredChild {
+                dir: study,
+                study: planned,
+                report,
+            });
         }
+        recovered.sort_by_key(|item| {
+            plan.iter()
+                .position(|study| study.study_sha256 == item.study.study_sha256)
+                .unwrap_or(usize::MAX)
+        });
     }
     // Even without a launch, a funnel may have applied a profile while awaiting a safe window.
     restore_profiles(study_path, &intent)?;
+    let allow_new = !matches!(
+        lease.phase(),
+        ResearchPhase::Completed | ResearchPhase::Blocked | ResearchPhase::Aborted
+    );
+    record_recovered_children(
+        &campaign,
+        crate::syscall::geteuid(),
+        &intent,
+        recovered,
+        allow_new,
+    )?;
     Ok(())
+}
+
+struct RecoveredChild {
+    dir: File,
+    study: crate::autotune::research::child_study::ChildStudy,
+    report: crate::autotune::research::report::ResearchReportV1,
 }
 
 /// Settle every child study of a funnel campaign: each child's own journal is recovered with the
@@ -197,10 +257,13 @@ fn recover_children(
 ) -> anyhow::Result<(
     Option<crate::autotune::research::driver::FailureClass>,
     bool,
+    Vec<RecoveredChild>,
 )> {
     let studies = match crate::syscall::openat_dir_nofollow(campaign.as_fd(), "studies") {
         Ok(dir) => File::from(dir),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((None, false)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((None, false, Vec::new()));
+        }
         Err(error) => return Err(error.into()),
     };
     let mut names = Vec::new();
@@ -215,6 +278,7 @@ fn recover_children(
     });
     let mut terminal = None;
     let mut any_attempts = false;
+    let mut recovered = Vec::new();
     for name in names {
         let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), &name)?);
         let metadata = dir.metadata()?;
@@ -222,6 +286,11 @@ fn recover_children(
             metadata.uid() == uid && metadata.mode() & 0o077 == 0,
             "untrusted child study directory"
         );
+        let study = plan
+            .iter()
+            .find(|study| study.study_sha256.get(..16) == Some(name.as_str()))
+            .ok_or_else(|| anyhow::anyhow!("UnsafeToResume: child study is not planned"))?
+            .clone();
         let child: ResearchIntentV1 = serde_json::from_slice(
             &crate::autotune::research::report_store::read_private(&dir, "intent.json", uid)?,
         )?;
@@ -266,8 +335,84 @@ fn recover_children(
         {
             terminal = Some(class);
         }
+        recovered.push(RecoveredChild {
+            dir,
+            study,
+            report: driver.finalize()?,
+        });
     }
-    Ok((terminal, any_attempts))
+    Ok((terminal, any_attempts, recovered))
+}
+
+/// Once all owners and profiles are settled, keep each recovered child's independently rebuilt
+/// report and record the observed sealed count. Missing budget and telemetry stay unknown.
+fn record_recovered_children(
+    campaign: &File,
+    uid: u32,
+    parent: &ResearchIntentV1,
+    children: Vec<RecoveredChild>,
+    allow_new: bool,
+) -> anyhow::Result<()> {
+    use crate::autotune::research::{
+        child_ledger::open_ledger,
+        child_study::StudyResult,
+        report_store::{read_private, write_new},
+    };
+    if children.is_empty() {
+        return Ok(());
+    }
+    let mut ledger = open_ledger(campaign, uid, parent, allow_new)?;
+    for child in children {
+        let bytes = serde_json::to_vec(&child.report)?;
+        let existing = ledger
+            .dispositions()
+            .into_iter()
+            .find(|item| item.study_sha256 == child.study.study_sha256)
+            .ok_or_else(|| anyhow::anyhow!("UnsafeToResume: recovered study is not planned"))?;
+        anyhow::ensure!(
+            !matches!(
+                existing.result,
+                Some(StudyResult::Blocked | StudyResult::DeferredBudget)
+            ),
+            "UnsafeToResume: unexecuted decision has a child directory"
+        );
+        anyhow::ensure!(
+            allow_new || existing.result.is_some(),
+            "UnsafeToResume: terminal campaign lacks a child decision"
+        );
+        if !allow_new {
+            anyhow::ensure!(
+                read_private(&child.dir, "report.json", uid)? == bytes,
+                "UnsafeToResume: terminal child report differs"
+            );
+        } else {
+            match write_new(&child.dir, "report.json", &bytes) {
+                Ok(()) => {}
+                Err(error)
+                    if error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+                {
+                    anyhow::ensure!(
+                        read_private(&child.dir, "report.json", uid)? == bytes,
+                        "UnsafeToResume: recovered child report differs"
+                    );
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        let count = u32::try_from(child.report.attempts_sealed)?;
+        match ledger.attempts_for(&child.study.study_sha256) {
+            Some(recorded) => anyhow::ensure!(
+                recorded == count,
+                "UnsafeToResume: recovered child attempt count differs"
+            ),
+            None => {
+                ledger.record_run(&child.study, StudyResult::Failed, "InterruptedStudy", count)?
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Put back the settings of any graphics profile a crash left applied, once every attempt is
@@ -352,7 +497,7 @@ fn recover_launched(
     // The child studies of a funnel campaign are settled first, each through the same independent
     // witnesses, before the campaign may be retired.
     let parent_has_attempts = adopted.is_some() || !journal.verify()?.is_empty();
-    let (child_terminal, child_attempts) = recover_children(
+    let (child_terminal, child_attempts, recovered_children) = recover_children(
         &campaign,
         uid,
         &intent,
@@ -376,6 +521,11 @@ fn recover_launched(
         .or(child_terminal);
     // Both child and parent launch ownership must be settled before any settings are restored.
     restore_profiles(study_path, &intent)?;
+    let allow_new = !matches!(
+        lease.phase(),
+        ResearchPhase::Completed | ResearchPhase::Blocked | ResearchPhase::Aborted
+    );
+    record_recovered_children(&campaign, uid, &intent, recovered_children, allow_new)?;
     // Every attempt that started is now sealed. Block the campaign through the normal restoring
     // transition so it ends as a recovered, blocked campaign with its report intact.
     if !matches!(

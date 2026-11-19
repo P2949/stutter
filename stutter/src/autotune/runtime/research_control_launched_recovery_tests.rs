@@ -341,6 +341,55 @@ mod funnel_campaign {
             settled.terminal.as_ref().unwrap().phase,
             ResearchPhase::Blocked
         );
+        let child_report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(studies[0].join("report.json")).unwrap())
+                .unwrap();
+        assert_eq!(child_report["attempts_sealed"].as_u64(), Some(1));
+        let campaign_study = File::open(study.path().join(&digest[..16])).unwrap();
+        let counts = crate::autotune::research::child_ledger::read_attempt_counts(
+            &campaign_study,
+            intent.uid,
+            &intent,
+        )
+        .unwrap();
+        assert_eq!(counts.values().copied().collect::<Vec<_>>(), vec![1]);
+        let replay = crate::autotune::research::child_verify::verify_children(
+            &campaign_study,
+            intent.uid,
+            &intent,
+            &|_| std::path::PathBuf::from("/nonexistent"),
+        )
+        .unwrap();
+        assert_eq!(replay.children.len(), 1);
+        assert!(
+            replay.children[0].reconstruction,
+            "{:?}",
+            replay.children[0].problem
+        );
+        assert!(
+            !studies[0].join("budget.json").exists(),
+            "unknown crash spend must not be recorded as measured"
+        );
+        let spent = crate::autotune::research::campaign_budget::spent(
+            &File::open(study.path().join(&digest[..16]).join("studies")).unwrap(),
+            intent.uid,
+            u64::from(intent.max_active_seconds),
+        )
+        .unwrap();
+        assert!(spent.active_seconds >= u64::from(intent.max_active_seconds));
+        drop(settled);
+        let mut again = restart(witnesses(true));
+        let result = again.prepare_recovery(104).unwrap().run();
+        assert!(
+            result.is_ok(),
+            "recovery must replay idempotently: {:?}",
+            result.as_ref().err()
+        );
+        drop(result);
+        drop(again);
+        std::fs::write(studies[0].join("report.json"), b"{}").unwrap();
+        let mut corrupted = restart(witnesses(true));
+        assert!(corrupted.prepare_recovery(105).unwrap().run().is_err());
     }
     #[test]
     fn a_child_integrity_failure_is_reconstructed_after_the_controller_crashes() {
@@ -463,12 +512,29 @@ mod funnel_waiting {
         drop(first);
         let digest = intent.digest().unwrap();
         assert!(study.path().join(&digest[..16]).join("studies").exists());
-        // A restarted controller finds records but no attempt: recovery is read-only and succeeds.
+        // A restarted controller finds no launch and records the interrupted child with zero attempts.
         let mut restarted =
             ResearchCoordinator::new(Some(campaign.path().to_path_buf()), Some(facts), "Ready");
         restarted.set_study_dir(Some(study.path().to_path_buf()));
         let result = restarted.prepare_recovery(102).unwrap().run();
         assert!(result.is_ok(), "{:?}", result.as_ref().err());
+        let campaign_study = study.path().join(&digest[..16]);
+        let child = std::fs::read_dir(campaign_study.join("studies"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(child.join("report.json")).unwrap()).unwrap();
+        assert_eq!(report["attempts_sealed"].as_u64(), Some(0));
+        let counts = crate::autotune::research::child_ledger::read_attempt_counts(
+            &File::open(campaign_study).unwrap(),
+            intent.uid,
+            &intent,
+        )
+        .unwrap();
+        assert_eq!(counts.values().copied().collect::<Vec<_>>(), vec![0]);
     }
 }
 

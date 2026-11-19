@@ -216,6 +216,10 @@ impl ChildLedger {
         self.spent
     }
 
+    pub(crate) fn attempts_for(&self, study_sha256: &str) -> Option<u32> {
+        self.attempts.get(study_sha256).copied()
+    }
+
     fn checked_spend(&self, attempts: u32) -> anyhow::Result<u32> {
         let total = self
             .spent
@@ -367,7 +371,7 @@ pub fn unexecutable_reason(study: &ChildStudy) -> Option<&'static str> {
     })
 }
 
-fn open_ledger(
+pub(crate) fn open_ledger(
     campaign: &File,
     uid: u32,
     intent: &super::ResearchIntentV1,
