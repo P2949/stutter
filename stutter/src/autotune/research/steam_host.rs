@@ -153,10 +153,14 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
     }
 
     fn arm_spec(&mut self, slot: &AttemptSlot) -> anyhow::Result<ArmSpec> {
+        use super::driver_failure::{FailureClass, LaunchFailure};
         // (a within-source study applies its factor only to the attempts treated On)
         let (steamapps, proton_manifest) = self.port.library_paths();
         Ok(ArmSpec {
-            tool_dir: self.port.tool_dir(slot)?,
+            tool_dir: self.port.tool_dir(slot).map_err(|_| LaunchFailure {
+                class: FailureClass::Integrity,
+                code: "ScheduledToolUnavailable",
+            })?,
             // Every arm runs in its own private prefix below the study compatdata root.
             study_compat_data: self.port.study_compat_data().join(slot.arm.dir_name()),
             // Only the factors this study enabled (none for screening): a blocked or conflicting
@@ -172,9 +176,18 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
     }
 
     fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()> {
-        anyhow::ensure!(self.current.is_none(), "an attempt is already launched");
+        use super::driver_failure::{FailureClass, LaunchFailure};
+        LaunchFailure::require(
+            self.current.is_none(),
+            FailureClass::OwnershipUnresolved,
+            "SettlementUnproven",
+        )?;
+        let tool_dir = self.port.tool_dir(slot).map_err(|_| LaunchFailure {
+            class: FailureClass::Integrity,
+            code: "ScheduledToolUnavailable",
+        })?;
         self.current = Some(slot.index);
-        self.tool_dir = self.port.tool_dir(slot).ok();
+        self.tool_dir = Some(tool_dir);
         self.port.launch(slot, context)
     }
 
@@ -279,6 +292,7 @@ mod tests {
         states: Vec<GameState>,
         launches: u32,
         stops: u32,
+        tool_missing: bool,
     }
 
     impl SteamPort for Port {
@@ -288,6 +302,7 @@ mod tests {
             self.safe
         }
         fn tool_dir(&mut self, _: &AttemptSlot) -> anyhow::Result<PathBuf> {
+            anyhow::ensure!(!self.tool_missing, "tool disappeared");
             Ok("/tools/GE".into())
         }
         fn study_compat_data(&self) -> PathBuf {
@@ -324,7 +339,23 @@ mod tests {
             states,
             launches: 0,
             stops: 0,
+            tool_missing: false,
         })
+    }
+
+    #[test]
+    fn a_missing_scheduled_tool_is_an_integrity_failure_during_arming() {
+        let mut host = host(vec![]);
+        host.port.tool_missing = true;
+        let error = host.arm_spec(&slot()).unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<super::super::driver_failure::LaunchFailure>()
+                .unwrap()
+                .class,
+            super::super::driver_failure::FailureClass::Integrity,
+        );
+        assert_eq!(host.port.launches, 0);
     }
 
     #[test]
