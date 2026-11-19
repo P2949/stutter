@@ -119,6 +119,14 @@ pub trait StudyAttempts {
     /// Cancel the running attempt and independently settle it. `Ok` only when no game or worker
     /// owner remains (the settlement witness agrees); anything unproven is an `Err`.
     fn abort(&mut self) -> Result<(), &'static str>;
+    /// Settle and retain a durable outcome when an interrupted study created artifacts.
+    fn abort_outcome(
+        &mut self,
+        _study: &ChildStudy,
+    ) -> Result<Option<AttemptsOutcome>, &'static str> {
+        self.abort()?;
+        Ok(None)
+    }
     /// After a restart: independently settle whatever an interrupted study left running, before
     /// anything is restored. `Ok` only when no owner remains.
     fn settle_interrupted(&mut self, study: &ChildStudy) -> Result<(), &'static str>;
@@ -380,20 +388,18 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
             let interrupted = self.attempts.has_progress(study);
             if interrupted && self.attempts.settle_interrupted(study).is_err() {
                 self.state = State::Unresolved;
-                return Ok(Some(unresolved(study.min_attempts, "SettlementUnproven")));
+                return Ok(Some(unresolved(0, "SettlementUnproven")));
             }
             // Settings left edited by a crash are restored before anything else is decided.
             if self.profiles.recover().is_err() {
                 self.state = State::Unresolved;
-                return Ok(Some(unresolved(study.min_attempts, "RecoveryUnproven")));
+                return Ok(Some(unresolved(0, "RecoveryUnproven")));
             }
             if interrupted {
-                return Ok(Some(run(
-                    StudyResult::Failed,
-                    study.min_attempts,
-                    "InterruptedStudy",
-                    true,
-                )));
+                // A settled prior owner is not evidence of its attempt count. Independent
+                // journal and accounting recovery must resolve it before ownership is released.
+                self.state = State::Unresolved;
+                return Ok(Some(unresolved(0, "InterruptedAccountingUnproven")));
             }
             if self.attempts.required_attempts(study)? > remaining_attempts {
                 return Ok(Some(run(
@@ -424,26 +430,41 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         };
         let outcome = match self.attempts.poll_fenced(study, remaining_attempts, fence) {
             Ok(None) => return Ok(None),
-            Ok(Some(outcome)) => Ok(outcome),
+            Ok(Some(outcome)) => outcome,
             Err(error) => {
                 // The attempt may still own a game: settle it first. If that cannot be proven the
                 // settings are left as they are (the durable snapshot recovers them later) and the
                 // campaign stops; they are never restored under an unresolved owner.
-                if self.attempts.abort().is_err() {
-                    self.state = State::Unresolved;
-                    return Ok(Some(unresolved(study.min_attempts, "SettlementUnproven")));
+                let recovered = match self.attempts.abort_outcome(study) {
+                    Ok(recovered) => recovered,
+                    Err(reason) => {
+                        self.state = State::Unresolved;
+                        return Ok(Some(unresolved(0, reason)));
+                    }
+                };
+                if self.restore_if_applied(applied).is_err() {
+                    return Ok(Some(unresolved(
+                        recovered.as_ref().map_or(0, |o| o.attempts_used),
+                        "RestoreUnproven",
+                    )));
                 }
-                Err(error)
+                return match recovered {
+                    Some(outcome) => Ok(Some(run(
+                        StudyResult::Failed,
+                        outcome.attempts_used,
+                        "ExecutorError",
+                        true,
+                    ))),
+                    None => Err(error),
+                };
             }
         };
-        let used = outcome
-            .as_ref()
-            .map_or(study.min_attempts, |o| o.attempts_used);
+        let used = outcome.attempts_used;
         // A study that ended normally has settled its own attempts; the profile is restored now.
         if self.restore_if_applied(applied).is_err() {
             return Ok(Some(unresolved(used, "RestoreUnproven")));
         }
-        Ok(Some(Self::judge(study, &outcome?)))
+        Ok(Some(Self::judge(study, &outcome)))
     }
 
     /// Stop a running study (a health stop, cancellation, deadline or shutdown): settle its
@@ -461,6 +482,32 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         }
         self.restore_if_applied(applied)
             .map_err(|_| "RestoreUnproven")
+    }
+
+    fn abort_study(&mut self, study: &ChildStudy) -> Result<Option<StudyRun>, &'static str> {
+        if matches!(self.state, State::Unresolved) {
+            return Err("OwnershipUnresolved");
+        }
+        let State::Running { applied } = self.state else {
+            return Ok(None);
+        };
+        let outcome = match self.attempts.abort_outcome(study) {
+            Ok(outcome) => outcome,
+            Err(reason) => {
+                self.state = State::Unresolved;
+                return Err(reason);
+            }
+        };
+        self.restore_if_applied(applied)
+            .map_err(|_| "RestoreUnproven")?;
+        Ok(outcome.map(|outcome| {
+            run(
+                StudyResult::Failed,
+                outcome.attempts_used,
+                "InterruptedStudy",
+                true,
+            )
+        }))
     }
 }
 

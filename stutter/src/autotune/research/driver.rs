@@ -451,6 +451,17 @@ impl Driver {
             self.fresh_journal_checked = true;
         }
         if let Some((slot, started, monotonic_start)) = self.active.clone() {
+            let progress = host.poll();
+            // Observe urgent failures before cancellation or a budget boundary can mask them.
+            let urgent = matches!(
+                &progress,
+                Progress::Failed {
+                    class: FailureClass::Integrity
+                        | FailureClass::Health
+                        | FailureClass::OwnershipUnresolved,
+                    ..
+                }
+            ) || matches!(&progress, Progress::Finished { evidence } if evidence.validate_for(&slot, &self.intent).is_err());
             let failure = if self.cancel {
                 Some("Cancelled")
             } else if now >= self.intent.deadline_unix_seconds {
@@ -467,22 +478,10 @@ impl Driver {
             } else {
                 None
             };
-            if let Some(code) = failure {
+            if let Some(code) = failure.filter(|_| !urgent) {
                 host.abort()?;
                 return self.seal(slot, AttemptOutcome::Failed { code: code.into() }, now);
             }
-            let progress = host.poll();
-            // Integrity, health and unresolved-ownership observations outrank a simultaneous
-            // deadline or budget boundary; the latter must not erase the real terminal cause.
-            let urgent = matches!(
-                &progress,
-                Progress::Failed {
-                    class: FailureClass::Integrity
-                        | FailureClass::Health
-                        | FailureClass::OwnershipUnresolved,
-                    ..
-                }
-            );
             if !urgent
                 && now
                     .saturating_add(tick_started.elapsed().as_secs())

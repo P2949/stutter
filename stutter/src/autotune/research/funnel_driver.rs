@@ -273,8 +273,9 @@ impl FunnelDriver {
 
     /// Stop now (controller shutdown): settle, restore and prove it. `Err` is unproven.
     pub fn shutdown(&mut self) -> Result<(), &'static str> {
-        use super::child_runner::StudyExecutor;
-        self.executor.abort()
+        self.runner
+            .abort(&mut self.executor)
+            .map_err(|_| "InterruptedDecisionPersistenceFailed")?
     }
 
     /// One controller tick at the controller's own time, which also governs the child driver.
@@ -291,8 +292,11 @@ impl FunnelDriver {
     pub fn tick(&mut self, fence: &mut dyn FnMut() -> anyhow::Result<()>) -> anyhow::Result<Step> {
         use super::child_runner::StudyExecutor;
         if self.cancelled {
-            return Ok(match self.executor.abort() {
-                Ok(()) => Step::Cancelled,
+            return Ok(match self.runner.abort(&mut self.executor)? {
+                Ok(()) => match self.executor.take_step() {
+                    Some(step @ (Step::Stopped(_) | Step::Halted(_))) => step,
+                    _ => Step::Cancelled,
+                },
                 Err(reason) => Step::OwnershipUnresolved(reason),
             });
         }

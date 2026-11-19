@@ -559,6 +559,62 @@ impl StudyAttempts for DriverStudyAttempts {
         Ok(())
     }
 
+    fn abort_outcome(
+        &mut self,
+        study: &ChildStudy,
+    ) -> Result<Option<AttemptsOutcome>, &'static str> {
+        let Some((digest, driver)) = self.running.as_mut() else {
+            self.host.abort().map_err(|_| "SettlementUnproven")?;
+            return Ok(None);
+        };
+        if digest != &study.study_sha256 {
+            return Err("InterruptedStudyMismatch");
+        }
+        driver.cancel();
+        let now = self
+            .override_now
+            .take()
+            .unwrap_or_else(|| (self.clock)())
+            .max(driver.last_tick_seconds().unwrap_or(0));
+        let step = driver
+            .tick_with_launch_fence(self.host.as_mut(), now, || {
+                anyhow::bail!("cancellation must not launch an attempt")
+            })
+            .map_err(|_| "SettlementUnproven")?;
+        if !matches!(
+            step,
+            Step::Sealed(_) | Step::Cancelled | Step::Stopped(_) | Step::Halted(_)
+        ) {
+            return Err("SettlementUnproven");
+        }
+        let (_, driver) = self.running.as_ref().ok_or("SettlementUnproven")?;
+        self.record_budget(study, driver)
+            .map_err(|_| "InterruptedBudgetPersistenceFailed")?;
+        let terminal = match &step {
+            Step::Stopped(class) => Some(*class),
+            Step::Halted(_) => Some(super::driver::FailureClass::Health),
+            Step::Sealed(record) => record.outcome.terminal_failure(),
+            _ => None,
+        };
+        if let Some(class) = terminal {
+            self.last_step = Some(if class == super::driver::FailureClass::Health {
+                Step::Halted("BlockedGpuStability")
+            } else {
+                Step::Stopped(class)
+            });
+        }
+        let outcome = self
+            .outcome(
+                study,
+                driver,
+                terminal == Some(super::driver::FailureClass::Health),
+                terminal,
+            )
+            .map_err(|_| "InterruptedReportPersistenceFailed")?;
+        self.running = None;
+        Ok(Some(outcome))
+    }
+
     fn settle_interrupted(&mut self, _study: &ChildStudy) -> Result<(), &'static str> {
         // An in-memory host has no authority to reconstruct a prior driver's claimed tickets,
         // launcher state, worker tokens and process witnesses. The resident recovery job does

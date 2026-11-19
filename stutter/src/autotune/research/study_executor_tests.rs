@@ -469,7 +469,7 @@ fn a_study_found_mid_run_after_a_restart_is_failed_and_halts_never_replayed() {
     let outcome = exec.poll(&study, 100).unwrap().unwrap();
     assert_eq!(
         (outcome.result, outcome.reason, outcome.halt),
-        (StudyResult::Failed, "InterruptedStudy", true)
+        (StudyResult::Failed, "InterruptedAccountingUnproven", true)
     );
     assert_eq!(
         *log.borrow(),
@@ -566,7 +566,8 @@ fn an_interrupted_study_is_settled_before_recovery_and_an_unproven_settlement_to
     let (mut settled, log) = executor(Ok(true), Ok(()), Ok(good(&study)));
     settled.attempts.progress = true;
     let outcome = settled.poll(&study, 100).unwrap().unwrap();
-    assert_eq!(outcome.reason, "InterruptedStudy");
+    assert_eq!(outcome.reason, "InterruptedAccountingUnproven");
+    assert_eq!(outcome.attempts_used, 0);
     assert_eq!(*log.borrow(), ["settle", "recover"]);
 }
 

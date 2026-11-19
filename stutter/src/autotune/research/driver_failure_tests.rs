@@ -1,6 +1,49 @@
 use super::*;
 
 #[test]
+fn urgent_observations_survive_simultaneous_cancellation_and_deadline() {
+    for class in [
+        FailureClass::Integrity,
+        FailureClass::Health,
+        FailureClass::OwnershipUnresolved,
+    ] {
+        for cancel in [false, true] {
+            let (_dir, mut driver, intent) = setup(4);
+            let mut host = fake();
+            let now = intent.issued_unix_seconds + 1;
+            assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+            host.polls.push_back(Progress::Failed {
+                class,
+                code: "Urgent".into(),
+            });
+            if cancel {
+                driver.cancel();
+            }
+            let step = driver
+                .tick(&mut host, intent.deadline_unix_seconds)
+                .unwrap();
+            if class == FailureClass::OwnershipUnresolved {
+                assert!(matches!(step, Step::OwnershipUnresolved(_)));
+            } else {
+                assert!(
+                    matches!(step, Step::Sealed(ref record) if matches!(record.outcome, AttemptOutcome::ClassifiedFailure { class: found, .. } if found == class))
+                );
+                assert_eq!(
+                    driver
+                        .tick(&mut host, intent.deadline_unix_seconds + 1)
+                        .unwrap(),
+                    if class == FailureClass::Health {
+                        Step::Halted("BlockedGpuStability")
+                    } else {
+                        Step::Stopped(class)
+                    }
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn typed_attempt_failures_stop_or_continue_without_interpreting_their_message() {
     for class in [
         FailureClass::Incompatible,
@@ -63,6 +106,24 @@ fn rejected_evidence_is_sealed_then_latches_an_integrity_stop() {
         Step::Stopped(FailureClass::Integrity)
     );
     assert_eq!(host.launches, 1);
+}
+
+#[test]
+fn rejected_evidence_is_not_hidden_by_cancellation() {
+    let (_dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    host.polls
+        .push_back(Progress::Finished { evidence: ev(999) });
+    driver.cancel();
+    assert!(
+        matches!(driver.tick(&mut host, now + 1).unwrap(), Step::Sealed(ref record) if matches!(record.outcome, AttemptOutcome::ClassifiedFailure { class: FailureClass::Integrity, .. }))
+    );
+    assert_eq!(
+        driver.tick(&mut host, now + 2).unwrap(),
+        Step::Stopped(FailureClass::Integrity)
+    );
 }
 
 #[test]

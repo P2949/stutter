@@ -234,7 +234,7 @@ fn a_health_stop_ends_the_funnel_without_deciding_what_it_prevented() {
 }
 
 #[test]
-fn an_executor_error_is_charged_recorded_failed_and_never_replayed() {
+fn an_executor_error_retains_unknown_consumption_and_never_replays() {
     let root = tempfile::tempdir().unwrap();
     let plan = studies();
     let mut runner = StageRunner::new(open(&root, plan.clone()), 100);
@@ -246,19 +246,21 @@ fn an_executor_error_is_charged_recorded_failed_and_never_replayed() {
     let step = runner.step(&mut exec, &no_blocker, &mut || false).unwrap();
     assert_eq!(step, RunnerStep::OwnershipUnresolved("ExecutorError"));
     let first = &runner.ledger().dispositions()[0];
-    assert_eq!(first.result, Some(StudyResult::Failed));
-    assert_eq!(first.reason, "ExecutorError");
-    assert_eq!(runner.ledger().spent_attempts(), plan[0].min_attempts);
-    // The next step moves on (and blocks the dependents); the failed study is not asked again.
+    assert_eq!(first.result, None);
+    assert_eq!(runner.ledger().spent_attempts(), 0);
+    // Unknown consumption retains ownership and cannot authorize another attempt.
     let mut healthy = Script {
         run: clean,
         asked: Vec::new(),
         aborts: 0,
     };
-    runner
-        .step(&mut healthy, &no_blocker, &mut || false)
-        .unwrap();
-    assert!(!healthy.asked.contains(&(Profile::Cpu, Stage::Screen)));
+    assert_eq!(
+        runner
+            .step(&mut healthy, &no_blocker, &mut || false)
+            .unwrap(),
+        RunnerStep::OwnershipUnresolved("ExecutorError")
+    );
+    assert!(healthy.asked.is_empty());
 }
 
 #[test]

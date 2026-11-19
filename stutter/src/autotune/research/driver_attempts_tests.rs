@@ -518,17 +518,61 @@ mod funnel {
     }
 
     #[test]
-    fn a_cancel_settles_and_ends_the_funnel_without_deciding_what_it_prevented() {
-        let (_root, mut driver, _) = funnel(Host::finishing(), 1);
+    fn a_cancel_records_the_interrupted_child_and_leaves_later_studies_undecided() {
+        let (root, mut driver, parent) = funnel(Host::finishing(), 1);
         assert!(matches!(
             driver.tick(&mut || Ok(())).unwrap(),
             Step::Waiting | Step::Running(_)
         ));
         driver.cancel();
         assert_eq!(driver.tick(&mut || Ok(())).unwrap(), Step::Cancelled);
-        assert!(driver.dispositions().iter().all(|d| d.result.is_none()));
-        // Shutdown after a cancel has nothing left to settle.
+        let dispositions = driver.dispositions();
+        assert_eq!(
+            dispositions
+                .iter()
+                .filter(|d| d.result == Some(StudyResult::Failed))
+                .count(),
+            1
+        );
+        assert_eq!(
+            dispositions.iter().filter(|d| d.result.is_some()).count(),
+            1
+        );
+        let failed = dispositions
+            .iter()
+            .find(|d| d.result == Some(StudyResult::Failed))
+            .unwrap();
+        let study = root.path().join("studies").join(&failed.study_sha256[..16]);
+        assert!(study.join("report.json").is_file());
+        assert!(study.join("budget.json").is_file());
+        // Shutdown after a cancel has nothing left to settle, and releases the ledger lock.
         assert_eq!(driver.shutdown(), Ok(()));
+        drop(driver);
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(study.join("report.json")).unwrap()).unwrap();
+        let counts = crate::autotune::research::child_ledger::read_attempt_counts(
+            &File::open(root.path()).unwrap(),
+            parent.uid,
+            &parent,
+        )
+        .unwrap();
+        assert_eq!(
+            u64::from(counts[&failed.study_sha256]),
+            report["attempts_sealed"].as_u64().unwrap()
+        );
+        let verified = crate::autotune::research::child_verify::verify_children(
+            &File::open(root.path()).unwrap(),
+            parent.uid,
+            &parent,
+            &|_| std::path::PathBuf::from("/nonexistent"),
+        )
+        .unwrap();
+        assert_eq!(verified.children.len(), 1);
+        assert!(
+            verified.children[0].reconstruction,
+            "{:?}",
+            verified.children[0].problem
+        );
     }
 
     #[test]
@@ -567,7 +611,7 @@ mod funnel {
             }
         }
         // The runner records the failed executor and halts; nothing else may run.
-        assert_eq!(step, Step::OwnershipUnresolved("ExecutorError"));
+        assert_eq!(step, Step::Halted("ExecutorError"));
         let first = &driver.dispositions()[0];
         assert_eq!(first.result, Some(StudyResult::Failed));
         assert_eq!(first.reason, "ExecutorError");

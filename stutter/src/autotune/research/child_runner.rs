@@ -66,6 +66,11 @@ pub trait StudyExecutor {
     /// attempt and prove no owner remains, then restore whatever it changed. `Err` means that is
     /// unproven, which ends the campaign.
     fn abort(&mut self) -> Result<(), &'static str>;
+    /// Stop an in-flight study, returning its durable interrupted decision if it created artifacts.
+    fn abort_study(&mut self, _study: &ChildStudy) -> Result<Option<StudyRun>, &'static str> {
+        self.abort()?;
+        Ok(None)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -91,14 +96,47 @@ pub struct StageRunner {
     /// The study being polled. Not persisted: after a restart the first undecided study is chosen
     /// again and the executor adopts its journal.
     in_flight: Option<ChildStudy>,
+    /// Retain the settled decision across a failed ledger write; never release it silently.
+    pending_abort: Option<StudyRun>,
+    unresolved: Option<&'static str>,
 }
 
 impl StageRunner {
+    /// Settle the actual in-flight study and record any durable interrupted outcome.
+    pub fn abort(
+        &mut self,
+        executor: &mut dyn StudyExecutor,
+    ) -> anyhow::Result<Result<(), &'static str>> {
+        if let Some(reason) = self.unresolved {
+            return Ok(Err(reason));
+        }
+        let Some(study) = self.in_flight.as_ref() else {
+            return Ok(executor.abort());
+        };
+        if self.pending_abort.is_none() {
+            self.pending_abort = match executor.abort_study(study) {
+                Ok(outcome) => outcome,
+                Err(reason) => {
+                    self.unresolved = Some(reason);
+                    return Ok(Err(reason));
+                }
+            };
+        }
+        if let Some(run) = &self.pending_abort {
+            self.ledger
+                .record_run(study, run.result, run.reason, run.attempts_used)?;
+        }
+        self.pending_abort = None;
+        self.in_flight = None;
+        Ok(Ok(()))
+    }
     pub fn new(ledger: ChildLedger, max_attempts: u32) -> Self {
         Self {
             ledger,
             max_attempts,
             in_flight: None,
+            pending_abort: None,
+            unresolved: None,
         }
     }
 
@@ -149,12 +187,14 @@ impl StageRunner {
         health_blocked: &mut dyn FnMut() -> bool,
         fence: &mut dyn FnMut() -> anyhow::Result<()>,
     ) -> anyhow::Result<RunnerStep> {
+        if let Some(reason) = self.unresolved {
+            return Ok(RunnerStep::OwnershipUnresolved(reason));
+        }
         if health_blocked() {
             // A health stop is not permission to leave a profile applied or a game unsettled: the
             // running study is settled and its settings restored first, and that proof is what the
             // halt reports when it fails.
-            self.in_flight = None;
-            return Ok(match executor.abort() {
+            return Ok(match self.abort(executor)? {
                 Ok(()) => RunnerStep::Halted("BlockedGpuStability"),
                 Err(reason) => RunnerStep::OwnershipUnresolved(reason),
             });
@@ -174,18 +214,19 @@ impl StageRunner {
                 return Ok(RunnerStep::Pending);
             }
             Err(error) => {
-                // The study may have started games: it is charged its minimum, recorded failed
-                // and the funnel stops; it is never replayed or silently dropped.
+                // Consumption and ownership are unknown. Do not fabricate an observed count;
+                // retain the study and prevent any further execution until recovery resolves it.
                 log::error!("child study executor failed: {error:#}");
-                self.ledger.record_run(
-                    &study,
-                    StudyResult::Failed,
-                    "ExecutorError",
-                    study.min_attempts,
-                )?;
+                self.in_flight = Some(study);
+                self.unresolved = Some("ExecutorError");
                 return Ok(RunnerStep::OwnershipUnresolved("ExecutorError"));
             }
         };
+        if run.ownership == Ownership::Unresolved {
+            self.in_flight = Some(study);
+            self.unresolved = Some(run.reason);
+            return Ok(RunnerStep::OwnershipUnresolved(run.reason));
+        }
         // Qualified evidence needs at least the study's own attempts.
         let minimum = if matches!(study.stage, super::child_study::Stage::Pilot) {
             (2 * super::pilot_rule::MIN_PILOT_RUNS) as u32
