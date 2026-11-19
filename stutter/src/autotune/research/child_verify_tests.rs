@@ -65,6 +65,73 @@ fn name(study: &ChildStudy) -> String {
 }
 
 #[test]
+fn ledger_attempt_counts_must_match_the_independently_rebuilt_child_report() {
+    use crate::autotune::research::{child_ledger::Disposition, child_study::StudyResult};
+    let study = plan(&parent()).unwrap().remove(0);
+    let mut disposition = Disposition {
+        study_sha256: study.study_sha256.clone(),
+        profile: study.profile,
+        stage: study.stage,
+        result: Some(StudyResult::Qualified),
+        reason: String::new(),
+    };
+    let report = serde_json::json!({"attempts_sealed": 6});
+    let mut counts = std::collections::BTreeMap::from([(study.study_sha256.clone(), 6)]);
+    assert!(attempt_count_matches(&counts, &[disposition.clone()], &name(&study), &report).is_ok());
+    counts.insert(study.study_sha256.clone(), 5);
+    assert!(
+        attempt_count_matches(&counts, &[disposition.clone()], &name(&study), &report).is_err()
+    );
+    counts.insert(study.study_sha256.clone(), 6);
+    disposition.result = Some(StudyResult::DeferredBudget);
+    assert!(attempt_count_matches(&counts, &[disposition], &name(&study), &report).is_err());
+    assert!(attempt_count_matches(&Default::default(), &[], &name(&study), &report).is_err());
+}
+
+#[test]
+fn every_planned_holdout_needs_its_own_reconstructed_replication() {
+    use crate::autotune::research::{child_ledger::Disposition, child_study::StudyResult};
+    let planned: Vec<_> = plan(&parent())
+        .unwrap()
+        .into_iter()
+        .filter(|study| study.stage == Stage::Holdout)
+        .map(|study| Disposition {
+            study_sha256: study.study_sha256,
+            profile: study.profile,
+            stage: study.stage,
+            result: Some(StudyResult::Qualified),
+            reason: String::new(),
+        })
+        .collect();
+    assert_eq!(planned.len(), 2);
+    let child = |study: &Disposition| ChildVerification {
+        study: study.study_sha256[..16].into(),
+        reconstruction: true,
+        raw_files_verified: true,
+        runtime_matched: true,
+        problem: None,
+        report: None,
+        action_receipts: None,
+        prefix_cohort: None,
+        replication: Some("reproduced".into()),
+        telemetry_receipts: None,
+        completed_attempts: Vec::new(),
+        completed_processes: Vec::new(),
+    };
+    let mut result = ChildrenVerification {
+        children: vec![child(&planned[0])],
+        missing: Vec::new(),
+    };
+    assert_eq!(result.holdout_replication(&planned), None);
+    result.children.push(child(&planned[1]));
+    assert_eq!(result.holdout_replication(&planned), Some(true));
+    result.children[1].replication = Some("contradicted".into());
+    assert_eq!(result.holdout_replication(&planned), Some(false));
+    result.children[1].reconstruction = false;
+    assert_eq!(result.holdout_replication(&planned), None);
+}
+
+#[test]
 fn every_stage_of_a_real_shaped_plan_is_derived_from_its_parent() {
     let parent = parent();
     for study in plan(&parent).unwrap() {
@@ -152,7 +219,7 @@ fn a_study_the_ledger_decided_after_running_it_must_have_its_directory() {
         .unwrap();
     // A study decided without running it needs no directory.
     ledger
-        .record(&plan[1], StudyResult::Blocked, "PredecessorNotQualified")
+        .record(&plan[1], StudyResult::Blocked, "BlockedProfileApplier")
         .unwrap();
     let result = verify_children(&campaign, uid, &parent, &|_| "/nonexistent".into()).unwrap();
     assert_eq!(result.missing, vec![plan[0].study_sha256[..16].to_owned()]);

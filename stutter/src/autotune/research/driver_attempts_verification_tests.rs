@@ -4,7 +4,21 @@ use crate::autotune::research::child_verify::verify_children;
 /// Run the first study to the end and return the campaign directory with its parent intent.
 fn finished() -> (tempfile::TempDir, ResearchIntentV1, ChildStudy) {
     let (root, mut runner, study, parent) = attempts(Host::finishing());
-    run_to_end(&mut runner, &study);
+    let outcome = run_to_end(&mut runner, &study);
+    let mut ledger = crate::autotune::research::child_ledger::open_for_campaign(
+        &campaign(&root),
+        crate::syscall::geteuid(),
+        &parent,
+    )
+    .unwrap();
+    ledger
+        .record_run(
+            &study,
+            crate::autotune::research::child_study::StudyResult::Unqualified,
+            "RawEvidenceUnverified",
+            outcome.attempts_used,
+        )
+        .unwrap();
     (root, parent, study)
 }
 

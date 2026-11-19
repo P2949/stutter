@@ -326,6 +326,22 @@ fn independent_screen_replay_accepts_compatibility_failures_but_not_integrity_fa
         .map_err(|error| error.to_string());
         if checked.is_ok() {
             let campaign = File::open(root.path()).unwrap();
+            let mut ledger = crate::autotune::research::child_ledger::open_for_campaign(
+                &campaign, child.uid, &parent,
+            )
+            .unwrap();
+            ledger
+                .record_run(&study, StudyResult::Qualified, "", study.min_attempts + 1)
+                .unwrap();
+            drop(ledger);
+            let verification =
+                verify_children(&campaign, child.uid, &parent, &|_| "/nonexistent".into()).unwrap();
+            assert!(
+                verification.children[0]
+                    .problem
+                    .as_deref()
+                    .is_some_and(|reason| reason.contains("attempt count disagrees"))
+            );
             let viable =
                 crate::autotune::research::arm_selection::screen_fps(&campaign, child.uid, &study)
                     .unwrap();

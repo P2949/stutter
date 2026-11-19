@@ -2,6 +2,69 @@ use std::{fs::File, os::fd::AsFd};
 
 use super::{ResearchIntentV1, report_store::read_private};
 
+/// Compare the ledger's claimed consumption with the independently rebuilt child report.
+pub(super) fn attempt_count_matches(
+    counts: &std::collections::BTreeMap<String, u32>,
+    dispositions: &[super::child_ledger::Disposition],
+    name: &str,
+    report: &serde_json::Value,
+) -> anyhow::Result<()> {
+    use super::child_study::StudyResult;
+    let study = dispositions
+        .iter()
+        .find(|study| study.study_sha256.starts_with(name))
+        .ok_or_else(|| anyhow::anyhow!("child is outside the frozen plan"))?;
+    anyhow::ensure!(
+        matches!(
+            study.result,
+            Some(StudyResult::Qualified | StudyResult::Unqualified | StudyResult::Failed)
+        ),
+        "child has no recorded executed disposition"
+    );
+    let claimed = counts
+        .get(&study.study_sha256)
+        .ok_or_else(|| anyhow::anyhow!("child attempt count is absent from the ledger"))?;
+    anyhow::ensure!(
+        report["attempts_sealed"].as_u64() == Some(u64::from(*claimed)),
+        "child attempt count disagrees with its verified journal"
+    );
+    Ok(())
+}
+
+/// Every planned holdout must have its own independently reconstructed replication judgement.
+pub(super) fn holdout_replication(
+    children: &[super::child_verify::ChildVerification],
+    planned: &[super::child_ledger::Disposition],
+) -> Option<bool> {
+    use super::child_study::{Stage, StudyResult};
+    let holdouts: Vec<_> = planned
+        .iter()
+        .filter(|study| study.stage == Stage::Holdout)
+        .collect();
+    if holdouts.is_empty() {
+        return None;
+    }
+    let mut replicates = true;
+    for study in holdouts {
+        if study.result != Some(StudyResult::Qualified) {
+            return None;
+        }
+        let matching: Vec<_> = children
+            .iter()
+            .filter(|child| study.study_sha256.get(..16) == Some(child.study.as_str()))
+            .collect();
+        let [child] = matching.as_slice() else {
+            return None;
+        };
+        if !child.reconstruction {
+            return None;
+        }
+        let judgement = child.replication.as_deref()?;
+        replicates &= super::replication::Replication::name_supports(judgement);
+    }
+    Some(replicates)
+}
+
 /// Every receipt names the permitted action, the frozen process (start time and owner), its
 /// experiment, and shows the same placement before and after: the same cgroup and leader CPUs, the
 /// same process identity, and every thread the original saw (that still exists) back where it was.

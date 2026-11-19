@@ -47,15 +47,19 @@ fn validate_next(
         study.study_sha256 == record.study_sha256,
         "ledger decision is out of plan order"
     );
-    if record.result != StudyResult::Blocked {
-        let prior = results
-            .iter()
-            .map(|(digest, (result, _))| (digest.clone(), *result))
-            .collect();
+    let prior = results
+        .iter()
+        .map(|(digest, (result, _))| (digest.clone(), *result))
+        .collect();
+    let ready = super::child_study::ready_to_start(study, &prior).is_ok();
+    if record.result == StudyResult::Blocked {
+        anyhow::ensure!(!record.reason.is_empty(), "blocked decision has no reason");
         anyhow::ensure!(
-            super::child_study::ready_to_start(study, &prior).is_ok(),
-            "ledger decision has an unqualified prerequisite"
+            (record.reason == "PredecessorNotQualified") != ready,
+            "blocked decision contradicts its prerequisites"
         );
+    } else {
+        anyhow::ensure!(ready, "ledger decision has an unqualified prerequisite");
     }
     if record.result == StudyResult::Qualified {
         anyhow::ensure!(
@@ -65,6 +69,15 @@ fn validate_next(
         if matches!(study.stage, Stage::Pilot) {
             anyhow::ensure!(record.rule.is_some(), "qualified pilot has no frozen rule");
         }
+    }
+    if matches!(
+        record.result,
+        StudyResult::Blocked | StudyResult::DeferredBudget
+    ) {
+        anyhow::ensure!(
+            record.attempts_used == 0,
+            "unexecuted decision claims attempts"
+        );
     }
     if let Some(rule) = &record.rule {
         anyhow::ensure!(
@@ -92,6 +105,7 @@ pub struct ChildLedger {
     dir: File,
     plan: Vec<ChildStudy>,
     results: BTreeMap<String, (StudyResult, String)>,
+    attempts: BTreeMap<String, u32>,
     rules: BTreeMap<String, FrozenConfirmationRule>,
     tip: String,
     next_seq: u32,
@@ -140,6 +154,7 @@ impl ChildLedger {
             dir,
             plan,
             results: BTreeMap::new(),
+            attempts: BTreeMap::new(),
             rules: BTreeMap::new(),
             tip: GENESIS.to_owned(),
             next_seq: 0,
@@ -162,6 +177,9 @@ impl ChildLedger {
                 "ledger names a study that is not in the plan"
             );
             validate_next(&ledger.plan, &ledger.results, &record)?;
+            ledger
+                .attempts
+                .insert(record.study_sha256.clone(), record.attempts_used);
             if let Some(rule) = record.rule.clone() {
                 anyhow::ensure!(
                     record.result == StudyResult::Qualified && rule.is_consistent(),
@@ -262,6 +280,8 @@ impl ChildLedger {
         self.tip = stutter_core::hash::sha256_hex(&bytes);
         self.next_seq += 1;
         self.spent = spent;
+        self.attempts
+            .insert(record.study_sha256.clone(), attempts_used);
         if let Some(rule) = rule {
             self.rules.insert(study.study_sha256.clone(), rule);
         }
@@ -402,6 +422,25 @@ pub fn read_rules(
 ) -> anyhow::Result<BTreeMap<String, FrozenConfirmationRule>> {
     match open_ledger(campaign, uid, intent, false) {
         Ok(ledger) => Ok(ledger.rules),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(BTreeMap::new())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// The per-study counts asserted by the ledger, to be checked against child journals.
+pub(crate) fn read_attempt_counts(
+    campaign: &File,
+    uid: u32,
+    intent: &super::ResearchIntentV1,
+) -> anyhow::Result<BTreeMap<String, u32>> {
+    match open_ledger(campaign, uid, intent, false) {
+        Ok(ledger) => Ok(ledger.attempts),
         Err(error)
             if error
                 .downcast_ref::<std::io::Error>()

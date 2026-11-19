@@ -56,7 +56,7 @@ fn run(studies: &[Disposition], restored: bool, health: bool) -> Vec<GateVerdict
         restoration_verified: restored,
         health_blocked: health,
         telemetry: None,
-        replication: None,
+        replication: Some(true),
         fault_matrix: Err("NoFaultMatrixReceipt"),
         protected_state: Ok(()),
         hardware: Ok(()),
@@ -433,8 +433,7 @@ fn g9_needs_the_holdout_to_reproduce_its_confirmation_not_merely_to_be_a_sound_r
     // A contradicting or inconclusive holdout is a sound measurement that reproduces nothing.
     assert!(g9(Some(false)).contains(&"HoldoutDoesNotReplicate"));
     assert!(!g9(Some(true)).contains(&"HoldoutDoesNotReplicate"));
-    // No holdout judged at all is not a replication blocker of its own.
-    assert!(!g9(None).contains(&"HoldoutDoesNotReplicate"));
+    assert!(g9(None).contains(&"HoldoutReplicationMissing"));
 }
 
 #[test]

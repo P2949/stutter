@@ -273,8 +273,10 @@ pub fn gates(inputs: &GateInputs<'_>) -> Vec<GateVerdict> {
     let mut g9 = profile_blockers(studies, holdout, "NoHoldoutStudy", "HoldoutNotQualified");
     // A sound holdout is not a replication: it must reach its confirmation's conclusion. A
     // contradiction, or an inconclusive repetition, reproduces nothing.
-    if inputs.replication == Some(false) {
-        g9.push("HoldoutDoesNotReplicate");
+    match inputs.replication {
+        Some(true) => {}
+        Some(false) => g9.push("HoldoutDoesNotReplicate"),
+        None => g9.push("HoldoutReplicationMissing"),
     }
     for (name, blockers) in [("G2", &g2), ("G4", &g4), ("G5", &g5), ("G7", &g7)] {
         if !blockers.is_empty() {

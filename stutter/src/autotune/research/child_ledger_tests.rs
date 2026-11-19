@@ -207,7 +207,11 @@ fn a_self_consistent_chain_cannot_reorder_decisions_or_bypass_prerequisites() {
             seq: seq as u32,
             study_sha256: plan[seq].study_sha256.clone(),
             result,
-            reason: String::new(),
+            reason: if result == StudyResult::Blocked {
+                "BlockedProfileApplier".into()
+            } else {
+                String::new()
+            },
             attempts_used: if result == StudyResult::Qualified {
                 plan[seq].min_attempts
             } else {
@@ -273,6 +277,44 @@ fn qualification_requires_attempts_and_a_valid_pilot_rule() {
 }
 
 #[test]
+fn decisions_without_execution_cannot_claim_attempts() {
+    for result in [StudyResult::Blocked, StudyResult::DeferredBudget] {
+        let (_root, handle) = dir();
+        let plan = studies();
+        let mut ledger =
+            ChildLedger::open(handle, crate::syscall::geteuid(), plan.clone()).unwrap();
+        assert!(ledger.record_run(&plan[0], result, "test", 1).is_err());
+        ledger.record(&plan[0], result, "test").unwrap();
+    }
+}
+
+#[test]
+fn blocked_reason_must_agree_with_prerequisite_state() {
+    let (_root, handle) = dir();
+    let plan = studies();
+    let mut ledger = ChildLedger::open(handle, crate::syscall::geteuid(), plan.clone()).unwrap();
+    assert!(
+        ledger
+            .record(&plan[0], StudyResult::Blocked, "PredecessorNotQualified")
+            .is_err()
+    );
+    ledger
+        .record(&plan[0], StudyResult::Blocked, "BlockedProfileApplier")
+        .unwrap();
+    ledger
+        .record_run(&plan[1], StudyResult::Qualified, "", plan[1].min_attempts)
+        .unwrap();
+    assert!(
+        ledger
+            .record(&plan[2], StudyResult::Blocked, "BlockedProfileApplier")
+            .is_err()
+    );
+    ledger
+        .record(&plan[2], StudyResult::Blocked, "PredecessorNotQualified")
+        .unwrap();
+}
+
+#[test]
 fn authorized_attempt_limit_is_enforced_on_write_and_replay() {
     let (root, handle) = dir();
     let plan = studies();
@@ -282,12 +324,16 @@ fn authorized_attempt_limit_is_enforced_on_write_and_replay() {
     ledger
         .record_run(&plan[0], StudyResult::Qualified, "", limit)
         .unwrap();
+    assert_eq!(ledger.attempts.get(&plan[0].study_sha256), Some(&limit));
     assert!(
         ledger
             .record_run(&plan[1], StudyResult::Qualified, "", plan[1].min_attempts)
             .is_err()
     );
     drop(ledger);
+    let restarted = reopen(&root, plan.clone()).unwrap();
+    assert_eq!(restarted.attempts.get(&plan[0].study_sha256), Some(&limit));
+    drop(restarted);
     let handle = File::open(root.path().join("child-studies")).unwrap();
     assert!(ChildLedger::open_with_limit(handle, uid, plan, Some(limit - 1)).is_err());
 }

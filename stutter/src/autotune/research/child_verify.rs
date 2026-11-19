@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ProtonSource, ResearchIntentV1, ResearchJournal,
-    child_verify_rules::{receipts_valid, rule_matches_pilot},
+    child_verify_rules::{attempt_count_matches, receipts_valid, rule_matches_pilot},
     driver::build_schedule,
     raw_verify::verify_raw_evidence,
     report_store::{load_and_verify, read_private},
@@ -171,17 +171,11 @@ impl ChildrenVerification {
     /// Whether every holdout child reproduced its confirmation: `Some(true)` when there is at least
     /// one holdout and all did, `Some(false)` when any contradicted it or reproduced nothing, and
     /// `None` when no holdout was run (that absence is its own blocker).
-    pub fn holdout_replication(&self) -> Option<bool> {
-        let judged: Vec<&str> = self
-            .children
-            .iter()
-            .filter_map(|child| child.replication.as_deref())
-            .collect();
-        (!judged.is_empty()).then(|| {
-            judged
-                .iter()
-                .all(|name| super::replication::Replication::name_supports(name))
-        })
+    pub fn holdout_replication(
+        &self,
+        planned: &[super::child_ledger::Disposition],
+    ) -> Option<bool> {
+        super::child_verify_rules::holdout_replication(&self.children, planned)
     }
 
     pub fn all_verified(&self) -> bool {
@@ -335,6 +329,7 @@ pub fn verify_children(
     names.sort();
     let rules = super::child_ledger::read_rules(campaign, uid, parent)?;
     let dispositions = super::child_ledger::read_dispositions(campaign, uid, parent)?;
+    let counts = super::child_ledger::read_attempt_counts(campaign, uid, parent)?;
     let mut children = Vec::new();
     for name in names {
         let result = if hex16(&name) {
@@ -343,6 +338,7 @@ pub fn verify_children(
                 .map_err(anyhow::Error::from)
                 .and_then(|dir| verify_child(&dir, &name, uid, parent, results_for))
                 .and_then(|checked| {
+                    attempt_count_matches(&counts, &dispositions, &name, &checked.1)?;
                     // A rule the ledger froze for this pilot must follow from the pilot's own runs.
                     rule_matches_pilot(&rules, &name, studies.as_fd(), uid)?;
                     study_checks(&rules, &dispositions, &name, &studies, uid, parent)?;
