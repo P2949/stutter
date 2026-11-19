@@ -63,6 +63,7 @@ struct TerminalCampaign {
     phase: ResearchPhase,
     intent_sha256: String,
     code: &'static str,
+    report_persisted: Option<bool>,
 }
 
 /// Controller-owned admission and management state. The production controller supplies host
@@ -263,6 +264,7 @@ impl ResearchCoordinator {
             self.terminal = Some(TerminalCampaign {
                 phase: lease.phase(),
                 intent_sha256: digest,
+                report_persisted: None,
                 code: recovered.terminal_code.unwrap_or(
                     match (lease.phase(), lease.block_reason()) {
                         (_, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",

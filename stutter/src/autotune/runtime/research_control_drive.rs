@@ -288,26 +288,24 @@ impl ResearchCoordinator {
             }
             Step::Stopped(class) => {
                 use crate::autotune::research::driver::FailureClass;
-                let code = if self.persist_report() {
-                    class.terminal_code()
-                } else {
-                    "ReportPersistenceFailed"
-                };
+                let report_persisted = self.persist_report();
                 let terminal = if class == FailureClass::Integrity {
                     ResearchPhase::Aborted
                 } else {
                     ResearchPhase::Blocked
                 };
-                self.settle(now, terminal, code);
+                self.settle(now, terminal, class.terminal_code());
+                if let Some(terminal) = self.terminal.as_mut() {
+                    terminal.report_persisted = Some(report_persisted);
+                }
                 true
             }
             Step::Halted(code) => {
-                let code = if self.persist_report() {
-                    code
-                } else {
-                    "ReportPersistenceFailed"
-                };
+                let report_persisted = self.persist_report();
                 self.settle(now, ResearchPhase::Blocked, code);
+                if let Some(terminal) = self.terminal.as_mut() {
+                    terminal.report_persisted = Some(report_persisted);
+                }
                 true
             }
             Step::Cancelled => {
@@ -368,17 +366,21 @@ impl ResearchCoordinator {
 
     /// Prove that an attached driver has settled its attempt and any profile it owns.
     /// A lease phase alone is not proof: a funnel can apply a profile before a launch window.
-    pub(super) fn settle_owned_driver(&mut self, now: u64) -> anyhow::Result<()> {
+    pub(super) fn settle_owned_driver(
+        &mut self,
+        now: u64,
+    ) -> anyhow::Result<Option<crate::autotune::research::driver::FailureClass>> {
         if self.launch_unresolved || self.storage_blocker == Some("UnsafeToResume") {
             anyhow::bail!("research ownership requires independent recovery");
         }
         let Some(state) = self.driver.as_mut() else {
-            return Ok(());
+            return Ok(None);
         };
         if let Some(funnel) = state.funnel.as_mut() {
             funnel
                 .shutdown()
                 .map_err(|reason| anyhow::anyhow!("funnel settlement unproven: {reason}"))?;
+            return Ok(funnel.take_terminal_failure());
         } else {
             state.driver.cancel();
             match state
@@ -386,11 +388,18 @@ impl ResearchCoordinator {
                 .tick_with_launch_fence(state.host.as_mut(), now, || {
                     anyhow::bail!("settlement must not launch an attempt")
                 })? {
-                Step::Sealed(_) | Step::Cancelled | Step::Halted(_) | Step::Stopped(_) => {}
+                Step::Sealed(record) => return Ok(record.outcome.terminal_failure()),
+                Step::Stopped(class) => return Ok(Some(class)),
+                Step::Halted("BlockedGpuStability") => {
+                    return Ok(Some(
+                        crate::autotune::research::driver::FailureClass::Health,
+                    ));
+                }
+                Step::Cancelled | Step::Halted(_) => {}
                 _ => anyhow::bail!("research attempt settlement unproven"),
             }
         }
-        Ok(())
+        Ok(None)
     }
 
     pub(super) fn driver_is_quiescent(&self) -> bool {
@@ -415,35 +424,30 @@ impl ResearchCoordinator {
             state.abort_host()?;
             anyhow::bail!("research attempt requires independent recovery");
         }
-        if let Some(funnel) = state.funnel.as_mut() {
-            // Settle the running attempt, then restore and prove the profile; unproven is a refusal.
-            funnel
-                .shutdown()
-                .map_err(|reason| anyhow::anyhow!("research funnel shutdown unproven: {reason}"))?;
-        } else {
-            state.driver.cancel();
-            match state
-                .driver
-                .tick_with_launch_fence(state.host.as_mut(), now, || {
-                    anyhow::bail!("shutdown must not start an attempt")
-                })? {
-                Step::Sealed(_) | Step::Cancelled | Step::Halted(_) | Step::Stopped(_) => {}
-                Step::OwnershipUnresolved(reason) => {
-                    anyhow::bail!("research ownership remains unresolved: {reason}")
-                }
-                _ => anyhow::bail!("research shutdown did not settle the attempt"),
-            }
-        }
-        let code = if self.persist_report() {
+        let cause = self.settle_owned_driver(now)?;
+        let report_persisted = self.persist_report();
+        let code = if let Some(class) = cause {
+            class.terminal_code()
+        } else if report_persisted {
             "ControllerShutdown"
         } else {
             "ReportPersistenceFailed"
         };
-        self.settle(now, ResearchPhase::Aborted, code);
+        let phase = if cause.is_some_and(|class| {
+            class != crate::autotune::research::driver::FailureClass::Integrity
+        }) {
+            ResearchPhase::Blocked
+        } else {
+            ResearchPhase::Aborted
+        };
+        self.settle(now, phase, code);
+        if let Some(terminal) = self.terminal.as_mut() {
+            terminal.report_persisted = Some(report_persisted);
+        }
         anyhow::ensure!(
             self.terminal
                 .as_ref()
-                .is_some_and(|terminal| terminal.phase == ResearchPhase::Aborted),
+                .is_some_and(|terminal| terminal.phase == phase),
             "research lease shutdown was not persisted"
         );
         Ok(())
@@ -477,6 +481,7 @@ impl ResearchCoordinator {
                 phase,
                 intent_sha256: active.intent_sha256,
                 code,
+                report_persisted: None,
             });
         }
         self.driver = None;

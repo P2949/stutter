@@ -278,6 +278,17 @@ impl FunnelDriver {
             .map_err(|_| "InterruptedDecisionPersistenceFailed")?
     }
 
+    /// Take an urgent terminal cause observed while settling an interrupted child.
+    pub(crate) fn take_terminal_failure(&mut self) -> Option<super::driver::FailureClass> {
+        use super::{child_runner::StudyExecutor, driver::FailureClass};
+        match self.executor.take_step() {
+            Some(Step::Stopped(class)) => Some(class),
+            Some(Step::Halted("BlockedGpuStability")) => Some(FailureClass::Health),
+            Some(Step::Sealed(record)) => record.outcome.terminal_failure(),
+            _ => None,
+        }
+    }
+
     /// One controller tick at the controller's own time, which also governs the child driver.
     pub fn tick_at(
         &mut self,

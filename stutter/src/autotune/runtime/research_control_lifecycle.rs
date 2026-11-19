@@ -39,24 +39,38 @@ impl ResearchCoordinator {
         ) {
             return response("blocked", "CancellationNeedsExecutorSettlement");
         }
-        if let Err(error) = self.settle_owned_driver(now) {
-            log::error!("research cancellation could not settle owned resources: {error:#}");
-            self.storage_blocker = Some("UnsafeToResume");
-            return response("blocked", "UnsafeToResume");
-        }
-        let report_failed = self.driver.is_some() && !self.persist_report();
+        let cause = match self.settle_owned_driver(now) {
+            Ok(cause) => cause,
+            Err(error) => {
+                log::error!("research cancellation could not settle owned resources: {error:#}");
+                self.storage_blocker = Some("UnsafeToResume");
+                return response("blocked", "UnsafeToResume");
+            }
+        };
+        let report_persisted = self.driver.is_some().then(|| self.persist_report());
+        let report_failed = report_persisted == Some(false);
+        let phase = if cause.is_some_and(|class| {
+            class != crate::autotune::research::driver::FailureClass::Integrity
+        }) {
+            ResearchPhase::Blocked
+        } else {
+            ResearchPhase::Aborted
+        };
         let Some(active) = self.active.as_mut() else {
             return response("denied", "NoCampaign");
         };
         if active.lease.advance(ResearchPhase::Restoring, now).is_err()
-            || active.lease.advance(ResearchPhase::Aborted, now).is_err()
+            || active.lease.advance(phase, now).is_err()
         {
             return response("blocked", "CancellationPersistenceFailed");
         }
         self.terminal = Some(TerminalCampaign {
-            phase: ResearchPhase::Aborted,
+            phase,
             intent_sha256: active.intent_sha256.clone(),
-            code: if report_failed {
+            report_persisted,
+            code: if let Some(class) = cause {
+                class.terminal_code()
+            } else if report_failed {
                 "ReportPersistenceFailed"
             } else {
                 "Cancelled"
@@ -89,28 +103,46 @@ impl ResearchCoordinator {
         if !self.deadline_due(now) {
             return;
         }
-        if let Err(error) = self.settle_owned_driver(now) {
-            log::error!("research deadline could not settle owned resources: {error:#}");
-            self.storage_blocker = Some("UnsafeToResume");
-            return;
-        }
-        let report_failed = self.driver.is_some() && !self.persist_report();
+        let cause = match self.settle_owned_driver(now) {
+            Ok(cause) => cause,
+            Err(error) => {
+                log::error!("research deadline could not settle owned resources: {error:#}");
+                self.storage_blocker = Some("UnsafeToResume");
+                return;
+            }
+        };
+        let report_persisted = self.driver.is_some().then(|| self.persist_report());
+        let report_failed = report_persisted == Some(false);
+        let phase = if cause == Some(crate::autotune::research::driver::FailureClass::Integrity) {
+            ResearchPhase::Aborted
+        } else {
+            ResearchPhase::Blocked
+        };
         let Some(active) = self.active.as_mut() else {
             return;
         };
         if active.lease.advance(ResearchPhase::Restoring, now).is_err()
-            || active.lease.block_for_deadline(now).is_err()
+            || if cause.is_some() {
+                active.lease.advance(phase, now).is_err()
+            } else {
+                active.lease.block_for_deadline(now).is_err()
+            }
         {
             log::error!("research deadline settlement could not be persisted");
             return;
         }
         self.terminal = Some(TerminalCampaign {
-            phase: ResearchPhase::Blocked,
+            phase,
             intent_sha256: active.intent_sha256.clone(),
-            code: match (report_failed, active.lease.block_reason()) {
-                (true, _) => "ReportPersistenceFailed",
-                (false, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",
-                (false, None) => "Blocked",
+            report_persisted,
+            code: if let Some(class) = cause {
+                class.terminal_code()
+            } else {
+                match (report_failed, active.lease.block_reason()) {
+                    (true, _) => "ReportPersistenceFailed",
+                    (false, Some(CampaignBlockReason::DeadlineExpired)) => "DeadlineExpired",
+                    (false, None) => "Blocked",
+                }
             },
         });
         self.active = None;

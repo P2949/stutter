@@ -75,6 +75,7 @@ impl ResearchCoordinator {
                 "phase": terminal.phase,
                 "intent_sha256": terminal.intent_sha256,
                 "code": terminal.code,
+                "report_persisted": terminal.report_persisted,
             })
             .to_string()
                 + "\n";

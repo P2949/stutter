@@ -26,6 +26,9 @@ struct Script {
     launch_fence_dir: Option<std::path::PathBuf>,
 }
 
+#[path = "research_control_terminal_cause_tests.rs"]
+mod terminal_cause;
+
 struct Fake(Arc<Mutex<Script>>);
 
 impl AttemptHost for Fake {
