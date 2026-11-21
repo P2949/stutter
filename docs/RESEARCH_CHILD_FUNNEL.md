@@ -407,3 +407,20 @@ running game, with a GPU negative control.
 
 Also: three `commands::daemon::status` tests read the live daemon's state snapshot from the default path
 and failed whenever the machine's controller was in another mode; they now read a path that does not exist.
+
+## CP-LONG: what is built and what the remaining composition needs (not built)
+
+Built and tested: `long_session` (work unit, authorized window, `BlockedNoComparableLongWorkUnit`),
+`long_receipt` (the `LongSessionDriver` lifecycle, `UnavailableDriver`, and `verify`, which accepts a session
+record only when it is the authorized unit, whole, inside the window, process-identified, settled and
+phase-covered), and the intent's separately authorized `long_attempt_seconds`.
+
+Not built, and why it is a design question rather than missing code: a long attempt has no native benchmark
+result, yet every study judgement reads raw native files, a matched runtime and conformance
+(`study_executor::judge`, `child_verify`, `raw_verify`). Composing a long session into the funnel therefore
+needs a decision about the *evidence record* of a long attempt (a sealed `LongSessionRecord` replacing the
+native completion in `AttemptEvidenceV1`, with `judge`, `child_judgement`, `raw_verify` and `report` each
+learning that a Long-profile attempt is verified by `long_receipt::verify` instead), the same shape as the
+`Init` study's observation receipt. The host side is then a thin adapter: an `AttemptHost` that launches
+through the ordinary port, polls a `LongSessionDriver`, and settles through the port. The driver that plays a
+route in the game does not exist anywhere in this repository and needs the live game.
