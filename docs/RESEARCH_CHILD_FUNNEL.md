@@ -486,3 +486,16 @@ a GPU negative control, both require launching and driving the game, so neither 
 - Thermal ceilings are no longer fixed guesses: each attempt records its sensors' own critical temperatures
   (`temp1_crit`: 100 C for this CPU, 110 C for this GPU) and is thermally limited within 5 C of them; the
   95 C / 100 C constants remain only as fallbacks for a sensor that reports no limit.
+
+## CP-LONG: the production route driver; only the input backend is missing
+
+`route_driver::RouteDriver` is the production `LongSessionDriver`: it plays a route plan (phase names and
+lengths that must sum to exactly the authorized unit's duration) phase by phase on the clock through a
+`RouteInput`, begins only once the host has attested the game process (`LongSessionDriver::observe_process`),
+requires that very process (pid and start time) for the whole session, closes late polls at the true phase
+boundaries, and records what actually happened. It never claims settlement: `LongAttemptHost` now stops the
+session and the process tree first and only then attests the record settled before `long_receipt::verify`.
+Tests cover the schedule, a refused input, a lost or replaced process, an abort, and a Long action study
+driven end to end by the real driver through the host (qualified, verified offline). The only thing absent is
+the `RouteInput` that sends the route's inputs to the game; the build's input is `UnavailableInput`, so a long
+attempt still fails with the typed `BlockedNoLongSessionDriver` until a physical backend exists.

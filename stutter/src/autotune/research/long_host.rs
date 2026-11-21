@@ -12,7 +12,7 @@ use super::{
     dispatch_context::{ArmSpec, DispatchContextV1},
     driver::{AttemptHost, FailureClass, Progress},
     driver_failure::LaunchFailure,
-    long_receipt::{LongProgress, LongSessionDriver, verify},
+    long_receipt::{LongProgress, LongSessionDriver, SessionProcess, verify},
     long_session::LongWorkUnit,
     report::AttemptEvidenceV1,
 };
@@ -147,21 +147,34 @@ impl<H: AttemptHost, D: LongSessionDriver> AttemptHost for LongAttemptHost<H, D>
             let _ = self.driver.abort();
             return Progress::Failed { class, code };
         }
+        let sighted = self.inner.game_process().map(|target| SessionProcess {
+            pid: target.pid,
+            start_ticks: target.start_ticks,
+            uid: target.uid,
+        });
+        self.driver.observe_process(sighted);
         match self.driver.poll() {
             LongProgress::Running => Progress::Running,
             LongProgress::Failed(code) => self.failed(FailureClass::Incompatible, code),
             LongProgress::Completed(record) => {
-                if let Err(code) = verify(&record, &unit, window) {
-                    return self.failed(FailureClass::Integrity, code);
-                }
                 let Some(index) = self.inner.attempt_index() else {
                     return self.failed(FailureClass::Integrity, "NoLaunchedAttempt");
                 };
                 self.session = None;
+                // A driver cannot know the game is gone: the host stops both halves, and only a proven
+                // settlement lets it attest the record as settled before the record is verified.
                 if self.settle().is_err() {
                     return Progress::Failed {
                         class: FailureClass::OwnershipUnresolved,
                         code: "SettlementUnverified".into(),
+                    };
+                }
+                let mut record = record;
+                record.settled = true;
+                if let Err(code) = verify(&record, &unit, window) {
+                    return Progress::Failed {
+                        class: FailureClass::Integrity,
+                        code: code.into(),
                     };
                 }
                 Progress::Finished {

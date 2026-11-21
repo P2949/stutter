@@ -208,7 +208,11 @@ fn build_guarded_host(
     // typed `BlockedNoLongSessionDriver` (never run on the benchmark). Every other attempt is untouched.
     Ok(Box::new(super::long_host::LongAttemptHost::new(
         SteamAttemptHost::new(port),
-        super::long_receipt::UnavailableDriver,
+        super::route_driver::RouteDriver::new(
+            super::route_driver::UnavailableInput,
+            Vec::new(),
+            Box::new(|| 0),
+        ),
     )))
 }
 

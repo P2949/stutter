@@ -85,6 +85,21 @@ fn build(
     Shared,
     ResearchIntentV1,
 ) {
+    build_with(Route {
+        definition: definition.to_owned(),
+        states: VecDeque::new(),
+    })
+}
+
+fn build_with<D: LongSessionDriver + Send + 'static>(
+    driver: D,
+) -> (
+    tempfile::TempDir,
+    DriverStudyAttempts,
+    ChildStudy,
+    Shared,
+    ResearchIntentV1,
+) {
     let root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut parent = parent();
@@ -111,13 +126,7 @@ fn build(
     let mut inner = Host::finishing();
     inner.process = Some(game());
     inner.treatment = Some(crate::autotune::research::Treatment::On);
-    let host = LongAttemptHost::new(
-        inner,
-        Route {
-            definition: definition.to_owned(),
-            states: VecDeque::new(),
-        },
-    );
+    let host = LongAttemptHost::new(inner, driver);
     let mut now = parent.issued_unix_seconds + 1;
     let attempts = DriverStudyAttempts::new(
         File::open(root.path()).unwrap(),
@@ -199,4 +208,66 @@ fn a_session_that_played_another_unit_cannot_qualify_the_study() {
         StudyResult::Qualified,
         "a record for another unit fails the attempt"
     );
+}
+
+/// Sends nothing anywhere: counts the phases the route entered.
+struct CountingInput(std::sync::Arc<std::sync::atomic::AtomicU32>);
+
+impl crate::autotune::research::route_driver::RouteInput for CountingInput {
+    fn available(&self) -> bool {
+        true
+    }
+    fn begin_phase(&mut self, _: &str) -> Result<(), &'static str> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+    fn stop(&mut self) {}
+}
+
+#[test]
+fn the_real_route_driver_plays_the_unit_through_the_host_and_the_study_qualifies() {
+    use crate::autotune::research::route_driver::{RouteDriver, RouteStep};
+    let phases = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    // Time moves 400 s per look at the clock: the 1200 s route spans a few polls.
+    let mut now = 50_000u64;
+    let route = [("loading", 120), ("travel", 600), ("combat", 480)]
+        .into_iter()
+        .map(|(phase, seconds)| RouteStep {
+            phase: phase.into(),
+            seconds,
+        })
+        .collect();
+    let driver = RouteDriver::new(
+        CountingInput(phases.clone()),
+        route,
+        Box::new(move || {
+            now += 400;
+            now
+        }),
+    );
+    let (root, mut runner, study, gate, parent) = build_with(driver);
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    act(&gate, &parent);
+    let outcome = run_to_end(&mut runner, &study);
+    assert!(outcome.raw_verified && outcome.runtime_matched);
+    assert_eq!(outcome.stage_evidence, Some(true));
+    let run = judge(&study, &outcome);
+    assert_eq!((run.result, run.reason), (StudyResult::Qualified, ""));
+    // Every attempt played all three phases of the route.
+    assert_eq!(
+        phases.load(std::sync::atomic::Ordering::SeqCst),
+        3 * outcome.completed
+    );
+    // The sealed records verify offline against the intent's authorized unit.
+    let dir =
+        std::fs::File::open(root.path().join("studies").join(&study.study_sha256[..16])).unwrap();
+    let (raw, _, runtime) = crate::autotune::research::child_verify::verify_child(
+        &dir,
+        &study.study_sha256[..16],
+        crate::syscall::geteuid(),
+        &parent,
+        &|_| std::path::PathBuf::from("/nonexistent"),
+    )
+    .unwrap();
+    assert!(raw && runtime);
 }

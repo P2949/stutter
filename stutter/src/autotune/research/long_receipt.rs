@@ -59,6 +59,9 @@ pub enum LongProgress {
 /// The lifecycle a producer follows: start the session for a unit, poll it to its end, and abort it
 /// (the abort must prove the game settled, or say it cannot).
 pub trait LongSessionDriver {
+    /// The game process the host has sighted and attested, or `None` when it is not (yet) there. Called on
+    /// every poll; a driver that observes the session uses it, one that does not may ignore it.
+    fn observe_process(&mut self, _process: Option<SessionProcess>) {}
     fn start(&mut self, unit: &LongWorkUnit) -> Result<(), &'static str>;
     fn poll(&mut self) -> LongProgress;
     fn abort(&mut self) -> anyhow::Result<()>;
