@@ -387,3 +387,9 @@ launch authority:
   dependent study blocked).
 - `prefix_init` (the journalled stage contract) remains as a staged module; the earlier standalone stage
   runner, phase and Steam init host were removed in favour of this composition.
+- Authoring the cold-arm list: `stutter research freeze-cold-arms --intent <private intent.json>
+  --study-root <private study dir>` prints the intent with `prefix_init_arms` filled from what each
+  authorized tool's `compatdata/<arm>` prefix is now (cold arms listed in the intent's tool order; a warm
+  prefix is left out; a partly created one is refused). Read-only and local. Run against the real preserved
+  campaign intent and study directory it lists nothing (both arms are warm), so that intent and its digest
+  are unchanged.

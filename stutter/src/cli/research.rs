@@ -52,6 +52,16 @@ enum ResearchCommand {
         #[arg(long)]
         journalctl: PathBuf,
     },
+    /// Print an intent with its cold arms frozen into it (`prefix_init_arms`): each authorized tool's
+    /// compat directory under the study directory is read, read-only. Local only.
+    FreezeColdArms {
+        /// The private intent file to read.
+        #[arg(long)]
+        intent: PathBuf,
+        /// The private study directory (its `compatdata/<arm>` prefixes are observed).
+        #[arg(long)]
+        study_root: PathBuf,
+    },
     /// Record what the Stutter units actually run (binary hash, active state) against an expected
     /// pin, as a receipt in the study directory. Read-only and local.
     DeployReceipt {
@@ -107,6 +117,9 @@ impl From<ResearchArgs> for ResearchClientInput {
                 study_root,
                 journalctl,
             },
+            ResearchCommand::FreezeColdArms { intent, study_root } => {
+                ResearchClientAction::FreezeColdArms { intent, study_root }
+            }
             ResearchCommand::DeployReceipt {
                 study_root,
                 systemctl,

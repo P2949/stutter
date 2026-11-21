@@ -34,6 +34,11 @@ pub enum ResearchClientAction {
         study_root: PathBuf,
         journalctl: PathBuf,
     },
+    /// Print the intent with its cold arms frozen into it. Read-only and local.
+    FreezeColdArms {
+        intent: PathBuf,
+        study_root: PathBuf,
+    },
     /// Read what the Stutter units actually run (binary path and hash, active state) and compare it
     /// with the expected pin; write the receipt into the study directory. Read-only and local.
     DeployReceipt {
@@ -59,6 +64,36 @@ pub enum ResearchClientAction {
 pub struct ResearchClientInput {
     pub socket_dir: Option<PathBuf>,
     pub action: ResearchClientAction,
+}
+
+/// Print an intent with its cold arms frozen into it. Both inputs must be private and owned by this user.
+fn freeze_cold_arms(
+    intent: &std::path::Path,
+    study_root: &std::path::Path,
+    uid: u32,
+) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let private = |path: &std::path::Path, dir: bool| -> anyhow::Result<()> {
+        let meta = std::fs::symlink_metadata(path)?;
+        anyhow::ensure!(
+            (if dir { meta.is_dir() } else { meta.is_file() })
+                && meta.uid() == uid
+                && meta.mode() & 0o077 == 0,
+            "{} must be private and owned by this user",
+            path.display()
+        );
+        Ok(())
+    };
+    private(intent, false)?;
+    private(study_root, true)?;
+    let parsed: crate::autotune::research::ResearchIntentV1 =
+        serde_json::from_slice(&std::fs::read(intent)?)?;
+    let frozen = crate::autotune::research::prefix_freeze::with_cold_arms(
+        &parsed,
+        &study_root.join("compatdata"),
+    )?;
+    println!("{}", serde_json::to_string_pretty(&frozen)?);
+    Ok(())
 }
 
 /// Inspect GPU health against the real journal and print the result as JSON.
@@ -155,6 +190,9 @@ fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchReq
         }
         ResearchClientAction::DeployReceipt { .. } => {
             anyhow::bail!("deploy-receipt does not use the resident socket")
+        }
+        ResearchClientAction::FreezeColdArms { .. } => {
+            anyhow::bail!("freeze-cold-arms does not use the resident socket")
         }
         ResearchClientAction::Submit(path) => {
             let parent = path
@@ -275,6 +313,9 @@ pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     } = &input.action
     {
         return health_check(study_root, journalctl, uid);
+    }
+    if let ResearchClientAction::FreezeColdArms { intent, study_root } = &input.action {
+        return freeze_cold_arms(intent, study_root, uid);
     }
     if let ResearchClientAction::DeployReceipt {
         study_root,
