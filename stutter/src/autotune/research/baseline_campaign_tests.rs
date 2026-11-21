@@ -184,6 +184,7 @@ impl AttemptHost for NativeHost {
             self.initialized = self.warms_prefix;
             return Progress::Finished {
                 evidence: AttemptEvidenceV1 {
+                    long_session: None,
                     schema_version: 1,
                     slot_index: slot.index,
                     average_fps: 1.0,
@@ -194,6 +195,7 @@ impl AttemptHost for NativeHost {
         let native = self.write_result(&slot);
         Progress::Finished {
             evidence: AttemptEvidenceV1 {
+                long_session: None,
                 schema_version: 1,
                 slot_index: slot.index,
                 average_fps: native.metrics.average_fps,

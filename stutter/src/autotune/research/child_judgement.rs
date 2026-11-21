@@ -49,6 +49,9 @@ pub(super) fn verify_qualification(
     let conformance = evidence
         .values()
         .map(|item| {
+            if item.long_session.is_some() {
+                return ProfileConformance::NotSpecified;
+            }
             item.native_completion
                 .as_deref()
                 .and_then(|native| native.context.as_ref())

@@ -49,6 +49,18 @@ pub fn verify_raw_evidence(
     records: &[AttemptRecord],
     results_for: &dyn Fn(ProtonSource) -> PathBuf,
 ) -> anyhow::Result<RawVerification> {
+    verify_raw_evidence_for(evidence_dir, uid, records, results_for, None)
+}
+
+/// As `verify_raw_evidence`; an attempt whose evidence is a sealed CP-LONG session record (no native result)
+/// is verified by `long_receipt::verify` against `long`, the intent's authorized unit and window.
+pub fn verify_raw_evidence_for(
+    evidence_dir: &File,
+    uid: u32,
+    records: &[AttemptRecord],
+    results_for: &dyn Fn(ProtonSource) -> PathBuf,
+    long: Option<(&super::long_session::LongWorkUnit, u32)>,
+) -> anyhow::Result<RawVerification> {
     let evidence = read_evidence(evidence_dir, uid)?;
     let mut report = RawVerification {
         completed: 0,
@@ -77,6 +89,21 @@ pub fn verify_raw_evidence(
                 item.digest()? == *evidence_sha256,
                 "evidence differs from the digest the journal sealed"
             );
+            if let Some(session) = item.long_session.as_deref() {
+                anyhow::ensure!(
+                    item.native_completion.is_none(),
+                    "a long attempt cannot also carry a native benchmark result"
+                );
+                let (unit, window) = long.ok_or_else(|| {
+                    anyhow::anyhow!("no long work unit is authorized for this study")
+                })?;
+                anyhow::ensure!(
+                    session.process.uid == uid,
+                    "the long session ran under another user"
+                );
+                return super::long_receipt::verify(session, unit, window)
+                    .map_err(|code| anyhow::anyhow!("{code}"));
+            }
             let completion = item
                 .native_completion
                 .as_deref()

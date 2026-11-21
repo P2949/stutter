@@ -109,6 +109,7 @@ impl AttemptHost for Host {
             .pop_front()
             .unwrap_or_else(|| Progress::Finished {
                 evidence: AttemptEvidenceV1 {
+                    long_session: None,
                     schema_version: 1,
                     slot_index: self.current,
                     average_fps: 60.0 + f64::from(self.launches),
@@ -639,3 +640,6 @@ mod budget;
 
 #[path = "baseline_campaign_tests.rs"]
 mod baseline_campaign;
+
+#[path = "driver_attempts_long_tests.rs"]
+mod long;

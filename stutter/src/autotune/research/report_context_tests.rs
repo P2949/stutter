@@ -54,6 +54,7 @@ fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
         (
             index,
             AttemptEvidenceV1 {
+                long_session: None,
                 schema_version: 1,
                 slot_index: index,
                 average_fps: 60.0,

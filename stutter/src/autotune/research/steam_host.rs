@@ -251,6 +251,7 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
                 }
                 Progress::Finished {
                     evidence: AttemptEvidenceV1 {
+                        long_session: None,
                         schema_version: 1,
                         slot_index: index,
                         average_fps: completion.metrics.average_fps,

@@ -28,6 +28,10 @@ pub struct AttemptEvidenceV1 {
     /// Native file hashes and declared process identity; independent attribution is still required.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_completion: Option<Box<super::cyberpunk::CyberpunkBenchmarkCompletion>>,
+    /// A CP-LONG attempt's sealed session record, in place of a native benchmark result (never both): a
+    /// long session is verified by `long_receipt::verify` against the intent's authorized unit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_session: Option<Box<super::long_receipt::LongSessionRecord>>,
 }
 
 impl AttemptEvidenceV1 {
@@ -547,5 +551,14 @@ pub(super) fn evidence_context_consistent(
     evidence: &BTreeMap<u32, AttemptEvidenceV1>,
     treatment: Option<&super::TreatmentSpec>,
 ) -> bool {
+    // Long sessions carry no graphics context: they are consistent when every one played the same unit.
+    if !evidence.is_empty() && evidence.values().all(|item| item.long_session.is_some()) {
+        let mut units = evidence
+            .values()
+            .filter_map(|item| item.long_session.as_deref())
+            .map(|s| (s.unit_id.as_str(), s.definition_sha256.as_str()));
+        let first = units.next();
+        return units.all(|unit| Some(unit) == first);
+    }
     context_state_with_treatment(evidence, treatment) == ContextState::Consistent
 }

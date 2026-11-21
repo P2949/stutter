@@ -17,7 +17,6 @@ use super::{
         receipts_valid, rule_matches_pilot, study_file,
     },
     driver::build_schedule,
-    raw_verify::verify_raw_evidence,
     report_store::{load_and_verify, read_private},
 };
 
@@ -306,16 +305,25 @@ pub(crate) fn verify_child(
     // results directory the campaign does not control; an older study is replayed from `results_for`.
     let records = journal.verify()?;
     // An initialization child measured nothing: it has no native files to replay and no runtime to match.
-    let nothing_measured = child.initialization
-        && super::report_store::read_evidence(&evidence, uid)?
-            .values()
-            .all(|item| item.native_completion.is_none());
+    let items = super::report_store::read_evidence(&evidence, uid)?;
+    let nothing_measured =
+        child.initialization && items.values().all(|item| item.native_completion.is_none());
+    // A long session is verified by its own sealed record and has no runtime to match.
+    let long_session = !items.is_empty() && items.values().all(|item| item.long_session.is_some());
+    let long = child
+        .long_work_unit
+        .as_ref()
+        .map(|unit| (unit, child.max_attempt_seconds));
     let raw = if super::raw_archive::exists(dir) {
-        verify_raw_evidence(&evidence, uid, &records, &|source| {
-            super::raw_archive::arm_root(dir, source)
-        })?
+        super::raw_verify::verify_raw_evidence_for(
+            &evidence,
+            uid,
+            &records,
+            &|source| super::raw_archive::arm_root(dir, source),
+            long,
+        )?
     } else {
-        verify_raw_evidence(&evidence, uid, &records, results_for)?
+        super::raw_verify::verify_raw_evidence_for(&evidence, uid, &records, results_for, long)?
     }
     .passed()
         || nothing_measured;
@@ -325,6 +333,7 @@ pub(crate) fn verify_child(
         .map(|native| native.runtime_binding)
         .collect();
     let runtime = nothing_measured
+        || long_session
         || (!bindings.is_empty()
             && bindings
                 .iter()

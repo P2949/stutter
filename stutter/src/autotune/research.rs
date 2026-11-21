@@ -120,6 +120,7 @@ pub(crate) mod launch_txn;
 mod lease;
 pub(crate) mod lease_inspect;
 pub(crate) mod loaded_runtime;
+pub(crate) mod long_host;
 #[cfg_attr(
     not(test),
     expect(
@@ -496,6 +497,10 @@ pub struct ResearchIntentV1 {
     /// Only on the intent of the `Init` child study: its attempts initialize a prefix and measure nothing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub initialization: bool,
+    /// The one long work unit the operator authorized (CP-LONG, PLAN section 7), frozen with the intent so
+    /// that what a long session must have played can be checked offline. Requires `long_attempt_seconds`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_work_unit: Option<long_session::LongWorkUnit>,
 }
 
 impl ResearchIntentV1 {
@@ -511,6 +516,15 @@ impl ResearchIntentV1 {
                     == self.prefix_init_arms.len()
                 && (!self.initialization || self.child_study_sha256.is_some()),
             "invalid prefix initialization arms"
+        );
+        anyhow::ensure!(
+            self.long_work_unit.as_ref().is_none_or(|unit| {
+                unit.validate().is_ok()
+                    && self
+                        .long_attempt_seconds
+                        .is_some_and(|window| unit.duration_seconds <= window)
+            }),
+            "the long work unit is invalid or does not fit the authorized long window"
         );
         anyhow::ensure!(
             self.app_id == 1_091_500 && self.build_id != 0,

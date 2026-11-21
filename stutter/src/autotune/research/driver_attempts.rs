@@ -16,7 +16,6 @@ use super::{
     loaded_runtime::RuntimeBinding,
     native_context::ProfileConformance,
     pilot_rule::FrozenConfirmationRule,
-    raw_verify::verify_raw_evidence,
     report::{AttemptEvidenceV1, evidence_context_consistent},
     report_store::{read_evidence, write_new, write_report},
     study_executor::{AttemptsOutcome, StudyAttempts},
@@ -428,6 +427,9 @@ impl DriverStudyAttempts {
         let conformance = evidence
             .values()
             .map(|item| {
+                if item.long_session.is_some() {
+                    return ProfileConformance::NotSpecified;
+                }
                 item.native_completion
                     .as_deref()
                     .and_then(|native| native.context.as_ref())
@@ -440,17 +442,25 @@ impl DriverStudyAttempts {
         // they are copied), then replay them against the sealed records from that copy, and require every
         // completed result to carry a matched runtime.
         super::raw_archive::archive(&study_dir, &evidence, &*self.results_for)?;
-        let raw = verify_raw_evidence(
+        let long_unit = driver
+            .intent()
+            .long_work_unit
+            .as_ref()
+            .map(|unit| (unit, driver.intent().max_attempt_seconds));
+        let raw = super::raw_verify::verify_raw_evidence_for(
             &evidence_dir,
             self.parent.uid,
             &driver.records()?,
             &|source| super::raw_archive::arm_root(&study_dir, source),
+            long_unit,
         )?;
+        // A long session has no loaded runtime to match: its record is what verifies it.
         let runtime_matched = !evidence.is_empty()
             && evidence.values().all(|item| {
-                item.native_completion
-                    .as_deref()
-                    .is_some_and(|native| native.runtime_binding == Some(RuntimeBinding::Matched))
+                item.long_session.is_some()
+                    || item.native_completion.as_deref().is_some_and(|native| {
+                        native.runtime_binding == Some(RuntimeBinding::Matched)
+                    })
             });
         let (tail_metric, run_fps) = super::metric_plan::run_values(
             evidence

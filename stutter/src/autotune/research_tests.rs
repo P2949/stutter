@@ -48,6 +48,7 @@ pub(super) fn intent() -> ResearchIntentV1 {
         prefix_cohort: None,
         prefix_init_arms: Vec::new(),
         initialization: false,
+        long_work_unit: None,
         treatment: None,
     }
 }

@@ -90,6 +90,7 @@ fn check(receipts: &[serde_json::Value], drop_completion_of: Option<u32>) -> any
     let evidence = File::open(dir.join("evidence")).unwrap();
     for index in 0..study.min_attempts {
         let item = AttemptEvidenceV1 {
+            long_session: None,
             schema_version: 1,
             slot_index: index,
             average_fps: 60.0,
@@ -278,6 +279,7 @@ fn independent_screen_replay_accepts_compatibility_failures_but_not_integrity_fa
                     sha256: "d".repeat(64),
                 }];
                 let item = AttemptEvidenceV1 {
+                    long_session: None,
                     schema_version: 1,
                     slot_index: slot.index,
                     average_fps: 60.0,

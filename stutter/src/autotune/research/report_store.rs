@@ -251,6 +251,7 @@ mod budget_tests {
 
     fn item(index: u32) -> AttemptEvidenceV1 {
         AttemptEvidenceV1 {
+            long_session: None,
             schema_version: 1,
             slot_index: index,
             average_fps: 60.0,

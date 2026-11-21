@@ -41,6 +41,7 @@ impl<P: SteamPort> SteamAttemptHost<P> {
         self.warm_since = None;
         Progress::Finished {
             evidence: AttemptEvidenceV1 {
+                long_session: None,
                 schema_version: 1,
                 slot_index: index,
                 // No measurement exists; the record only has to be a valid, positive placeholder.

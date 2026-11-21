@@ -204,7 +204,12 @@ fn build_guarded_host(
         )?),
         study_root_for_health,
     );
-    Ok(Box::new(SteamAttemptHost::new(port)))
+    // Long attempts are played by a `LongSessionDriver`; this build has none, so one fails with the
+    // typed `BlockedNoLongSessionDriver` (never run on the benchmark). Every other attempt is untouched.
+    Ok(Box::new(super::long_host::LongAttemptHost::new(
+        SteamAttemptHost::new(port),
+        super::long_receipt::UnavailableDriver,
+    )))
 }
 
 #[cfg(test)]

@@ -81,6 +81,7 @@ impl AttemptHost for Fake {
                 let slot_index = script.current;
                 return Progress::Finished {
                     evidence: AttemptEvidenceV1 {
+                        long_session: None,
                         schema_version: 1,
                         slot_index,
                         average_fps: 60.0 + f64::from(slot_index % 3),

@@ -15,7 +15,8 @@ pub const MIN_LONG_SESSION_SECONDS: u32 = 20 * 60;
 pub const MAX_LONG_SESSION_SECONDS: u32 = 60 * 60;
 
 /// One repeatable long session, identified by what makes two runs of it comparable.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LongWorkUnit {
     /// A stable name for the session (for example a save-and-route label).
     pub id: String,

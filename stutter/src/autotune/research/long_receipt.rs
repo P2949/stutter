@@ -16,7 +16,8 @@ use super::long_session::LongWorkUnit;
 const MIN_PHASE_COVERAGE_PERCENT: u64 = 90;
 
 /// One observed phase of the route (for example loading, travel, combat), inside the session.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Phase {
     pub name: String,
     pub started_unix: u64,
@@ -24,7 +25,8 @@ pub struct Phase {
 }
 
 /// The game process the session ran in, as the controller attested it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionProcess {
     pub pid: stutter_core::ids::Pid,
     pub start_ticks: u64,
@@ -32,7 +34,8 @@ pub struct SessionProcess {
 }
 
 /// What a completed session leaves.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LongSessionRecord {
     pub unit_id: String,
     /// The work unit's definition digest, as the driver says it played it.
