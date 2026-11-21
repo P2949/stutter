@@ -449,3 +449,12 @@ begins on 2026-11-11, at least five days after the last archived observation, an
 situations were never run under an injected cause. Zero seconds overlap (evidence:
 `StutterProtonStudies/real-history-ground-truth-2026-11-21.json`). A real diagnosis score needs a live
 capture with a known injected cause.
+
+## Why the remaining items cannot be started now (observed 2026-11-21)
+
+`stutter research status` against the resident controller answers `{"code":"UnsafeToResume","status":"blocked"}`:
+the GPU incident file on disk has no acknowledgement (`gpu-stability-acks` does not exist; acknowledging is
+human-only), the game is installed but not running, and the audit forbids any game launch, dispatcher
+selection or GPU stress while that halt stands. A long-session driver, and a causal action apply/restore with
+a GPU negative control, both require launching and driving the game, so neither can begin. Evidence:
+`StutterProtonStudies/live-items-blocked-2026-11-21.json`.
