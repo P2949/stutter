@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     ProtonSource, ResearchIntentV1, ResearchJournal,
-    child_verify_rules::{attempt_count_matches, receipts_valid, rule_matches_pilot},
+    child_verify_rules::{
+        attempt_count_matches, missing_children, receipts_valid, rule_matches_pilot,
+    },
     driver::build_schedule,
     raw_verify::verify_raw_evidence,
     report_store::{load_and_verify, read_private},
@@ -685,23 +687,6 @@ fn selection_check(
         );
     }
     Ok(())
-}
-
-fn missing_children(
-    campaign: &File,
-    uid: u32,
-    parent: &ResearchIntentV1,
-    present: &[String],
-) -> anyhow::Result<Vec<String>> {
-    use super::child_study::StudyResult::{Failed, Qualified, Unqualified};
-    Ok(
-        super::child_ledger::read_dispositions(campaign, uid, parent)?
-            .into_iter()
-            .filter(|study| matches!(study.result, Some(Qualified | Unqualified | Failed)))
-            .map(|study| study.study_sha256[..16].to_owned())
-            .filter(|name| !present.contains(name))
-            .collect(),
-    )
 }
 
 #[cfg(test)]

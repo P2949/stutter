@@ -169,3 +169,21 @@ pub(super) fn rule_matches_pilot(
     );
     Ok(())
 }
+
+/// Studies the ledger decided after running them whose directory is absent.
+pub(super) fn missing_children(
+    campaign: &File,
+    uid: u32,
+    parent: &ResearchIntentV1,
+    present: &[String],
+) -> anyhow::Result<Vec<String>> {
+    use super::child_study::StudyResult::{Failed, Qualified, Unqualified};
+    Ok(
+        super::child_ledger::read_dispositions(campaign, uid, parent)?
+            .into_iter()
+            .filter(|study| matches!(study.result, Some(Qualified | Unqualified | Failed)))
+            .map(|study| study.study_sha256[..16].to_owned())
+            .filter(|name| !present.contains(name))
+            .collect(),
+    )
+}

@@ -114,13 +114,11 @@ pub fn archive(
                     "the archived copy differs from the sealed file"
                 ),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    let parent = File::open(target.parent().unwrap())?;
-                    write_new_bounded(
-                        &parent,
-                        &target.file_name().unwrap().to_string_lossy(),
-                        &bytes,
-                        MAX_FILE_BYTES,
-                    )?;
+                    let (Some(folder), Some(leaf)) = (target.parent(), target.file_name()) else {
+                        anyhow::bail!("a native file has no folder or name");
+                    };
+                    let parent = File::open(folder)?;
+                    write_new_bounded(&parent, &leaf.to_string_lossy(), &bytes, MAX_FILE_BYTES)?;
                 }
                 Err(error) => return Err(error.into()),
             }
