@@ -467,6 +467,7 @@ impl DriverStudyAttempts {
                 .values()
                 .filter_map(|item| item.native_completion.as_deref()),
         );
+        self.feature_receipt(&study_dir)?;
         let activation = self.feature_activation(study, u32::try_from(report.attempts_completed)?);
         let functional = self.feature_functional(study, &evidence);
         // The game's enum cannot establish the exact backend or functional fork-specific activation.

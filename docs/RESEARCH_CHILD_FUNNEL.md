@@ -428,3 +428,14 @@ and failed whenever the machine's controller was in another mode; they now read 
   restoration and verifies offline through `verify_child`; a record for another unit does not qualify).
 - What remains needs the live game: a `LongSessionDriver` that plays a route inside Cyberpunk, and its work
   unit's save, route and in-game conditions.
+
+## Feature observation replay (thirteenth audit, priority 6)
+
+A feature study records `feature-observation.json` beside itself: per completed attempt, the treatment it ran
+and whether that treatment was seen in the sighted game process's own environment. `child_judgement` now also
+replays a feature study that was *not* qualified: the receipt must name exactly the completed slots, each with
+the treatment the intent's own schedule (`treatments_of`) gives that slot; activation is rebuilt from it and
+the functional report from the sealed native contexts, and the replayed reason must equal the recorded one
+(`UnqualifiedFeatureJudgementContradicted` otherwise). A missing or inconsistent receipt replays as unproven
+and disagrees with any stronger recorded reason. Feature studies themselves stay unqualifiable offline (the
+game's enum cannot identify the exact backend); this makes every reason they carry independently replayable.

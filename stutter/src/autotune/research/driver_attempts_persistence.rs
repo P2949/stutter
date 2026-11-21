@@ -104,6 +104,30 @@ impl DriverStudyAttempts {
         )
     }
 
+    /// A feature study's per-attempt observation, recorded once beside the study (an existing record wins).
+    pub(super) fn feature_receipt(&self, study_dir: &std::fs::File) -> anyhow::Result<()> {
+        if self.feature_observed.is_empty() {
+            return Ok(());
+        }
+        let bytes =
+            crate::autotune::research::init_receipt::feature_receipt_bytes(&self.feature_observed)?;
+        match write_new(
+            study_dir,
+            crate::autotune::research::init_receipt::FEATURE_RECEIPT,
+            &bytes,
+        ) {
+            Ok(()) => Ok(()),
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// The initialization observation, recorded once beside the study so an independent verification reads
     /// exactly what the live judgement stood on. An existing record wins (a retry never re-decides it).
     pub(super) fn init_receipt(&self, study_dir: &std::fs::File) -> anyhow::Result<Option<bool>> {

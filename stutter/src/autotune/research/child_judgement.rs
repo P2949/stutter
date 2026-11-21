@@ -23,7 +23,12 @@ pub(super) fn verify_qualification(
     raw_verified: bool,
     runtime_matched: bool,
 ) -> anyhow::Result<()> {
-    if disposition.result != Some(StudyResult::Qualified) {
+    let qualified = disposition.result == Some(StudyResult::Qualified);
+    // A feature study that was not qualified is replayed too: its reason must follow from its sealed
+    // records and its recorded per-attempt observation, never from a live boolean.
+    let feature_unqualified = disposition.result == Some(StudyResult::Unqualified)
+        && matches!(disposition.stage, Stage::Feature(_));
+    if !qualified && !feature_unqualified {
         return Ok(());
     }
     let study = super::child_study::plan(parent)?
@@ -65,6 +70,7 @@ pub(super) fn verify_qualification(
             .values()
             .filter_map(|item| item.native_completion.as_deref()),
     );
+    let (activation, functional) = feature_replay(dir, uid, &intent, &study, &evidence);
     let outcome = AttemptsOutcome {
         planned_attempts: intent.max_attempts,
         source_order: intent.tools.iter().map(|tool| tool.source).collect(),
@@ -96,14 +102,74 @@ pub(super) fn verify_qualification(
         } else {
             matches!(study.stage, Stage::Feature(_) | Stage::Action(_)).then_some(false)
         },
-        activation: None,
-        functional: None,
+        activation,
+        functional,
     };
     let replayed = judge(&study, &outcome);
-    anyhow::ensure!(
-        replayed.result == StudyResult::Qualified && disposition.reason.is_empty(),
-        "QualifiedStudyJudgementContradicted: {}",
-        replayed.reason
-    );
+    if qualified {
+        anyhow::ensure!(
+            replayed.result == StudyResult::Qualified && disposition.reason.is_empty(),
+            "QualifiedStudyJudgementContradicted: {}",
+            replayed.reason
+        );
+    } else {
+        anyhow::ensure!(
+            replayed.result == StudyResult::Unqualified && replayed.reason == disposition.reason,
+            "UnqualifiedFeatureJudgementContradicted: {} vs {}",
+            replayed.reason,
+            disposition.reason
+        );
+    }
     Ok(())
+}
+
+/// A feature study's activation and function, rebuilt without the live run: the recorded per-attempt
+/// observation must name exactly the completed slots with the treatments the intent's own schedule gives
+/// them, and the game's report comes from the sealed native contexts. Anything missing or inconsistent is
+/// `(None, None)`, which the judgement reads as unproven.
+fn feature_replay(
+    dir: &File,
+    uid: u32,
+    intent: &ResearchIntentV1,
+    study: &super::child_study::ChildStudy,
+    evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+) -> (Option<bool>, Option<super::functional_probe::Functional>) {
+    use super::Treatment;
+    let Stage::Feature(factor) = study.stage else {
+        return (None, None);
+    };
+    let replayed = (|| {
+        let observed = super::init_receipt::read_feature_receipt(
+            &read_private(dir, super::init_receipt::FEATURE_RECEIPT, uid).ok()?,
+        )?;
+        let schedule = super::treatment::treatments_of(intent).ok()??;
+        // The same slots as the completed evidence, each with its scheduled treatment.
+        if observed.keys().ne(evidence.keys())
+            || observed
+                .iter()
+                .any(|(slot, (treatment, _))| schedule.get(*slot as usize) != Some(treatment))
+        {
+            return None;
+        }
+        let both = [Treatment::Off, Treatment::On]
+            .iter()
+            .all(|wanted| observed.values().any(|(t, _)| t == wanted));
+        let activation = both && observed.values().all(|(_, reached)| *reached);
+        let attempts: Vec<_> = evidence
+            .iter()
+            .map(|(slot, item)| {
+                (
+                    observed[slot].0,
+                    item.native_completion
+                        .as_deref()
+                        .and_then(|native| native.context.as_ref()),
+                )
+            })
+            .collect();
+        Some((
+            Some(activation),
+            Some(super::functional_probe::probe(factor, &attempts)),
+        ))
+    })();
+    replayed.unwrap_or((None, None))
 }

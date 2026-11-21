@@ -22,6 +22,11 @@ struct Host {
     abort_fails: bool,
     launch_unresolved: bool,
     treatment: Option<crate::autotune::research::Treatment>,
+    /// Per-attempt treatments (by slot), when a test follows the intent's own schedule.
+    scheduled: Option<Vec<crate::autotune::research::Treatment>>,
+    /// Where the host publishes the schedule the driver gave it (a test reads the real one).
+    schedule_out:
+        Option<std::sync::Arc<std::sync::Mutex<Vec<crate::autotune::research::Treatment>>>>,
     prefix_refusal: Option<&'static str>,
     /// After this many launches the sighted game process is the given one (a new launch, a new process).
     switch_process: Option<(u32, crate::autotune::research::action_child::ChildTarget)>,
@@ -46,6 +51,8 @@ impl Host {
             abort_fails: false,
             launch_unresolved: false,
             treatment: None,
+            scheduled: None,
+            schedule_out: None,
             prefix_refusal: None,
             switch_process: None,
         }
@@ -65,8 +72,18 @@ impl AttemptHost for Host {
     fn attempt_index(&mut self) -> Option<u32> {
         Some(self.current)
     }
+    fn set_treatments(&mut self, treatments: Option<Vec<crate::autotune::research::Treatment>>) {
+        // Only a test that asked to follow the driver's own schedule does; the others keep a fixed treatment.
+        if let (Some(shared), Some(schedule)) = (&self.schedule_out, &treatments) {
+            *shared.lock().unwrap() = schedule.clone();
+            self.scheduled = treatments;
+        }
+    }
     fn attempt_treatment(&mut self) -> Option<crate::autotune::research::Treatment> {
-        self.treatment
+        self.scheduled
+            .as_ref()
+            .and_then(|schedule| schedule.get(self.current as usize).copied())
+            .or(self.treatment)
     }
     fn check_prefixes(
         &mut self,
@@ -643,3 +660,6 @@ mod baseline_campaign;
 
 #[path = "driver_attempts_long_tests.rs"]
 mod long;
+
+#[path = "driver_attempts_feature_replay_tests.rs"]
+mod feature_replay;
