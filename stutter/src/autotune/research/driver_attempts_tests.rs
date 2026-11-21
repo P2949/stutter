@@ -639,3 +639,6 @@ mod budget;
 
 #[path = "funnel_init_tests.rs"]
 mod funnel_init;
+
+#[path = "baseline_campaign_tests.rs"]
+mod baseline_campaign;

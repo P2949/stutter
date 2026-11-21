@@ -24,19 +24,20 @@ pub fn child_intent(
         parent.child_study_sha256.is_none(),
         "a child study cannot be nested in another"
     );
-    // The child's tools are the selected arms, in the campaign's own order and with its frozen
-    // identities; nothing outside the authorization can be introduced.
-    let tools: Vec<_> = arms
+    // The child's tools are the selected arms, in the campaign's own order (whatever order the selector
+    // named them in) and with its frozen identities; nothing outside the authorization can be introduced.
+    for arm in arms {
+        anyhow::ensure!(
+            parent.tools.iter().any(|tool| tool.source == *arm),
+            "tool for arm {arm:?} not found"
+        );
+    }
+    let tools: Vec<_> = parent
+        .tools
         .iter()
-        .map(|arm| {
-            parent
-                .tools
-                .iter()
-                .find(|tool| tool.source == *arm)
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("tool for arm {arm:?} not found"))
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .filter(|tool| arms.contains(&tool.source))
+        .cloned()
+        .collect();
     let minimum = if study.arms() == StudyArms::Single {
         1
     } else {

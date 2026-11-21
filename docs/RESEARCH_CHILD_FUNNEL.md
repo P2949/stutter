@@ -323,3 +323,15 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   real campaign `fdf5ba08ff2acfac` still replays and bundles).
 - Remaining for the metric: the pilot/confirmation rule and the screen/pilot selectors still read average
   FPS; they move to the same plan when frame statistics are recorded for live runs.
+
+## Production-composed synthetic baseline campaign (thirteenth audit, priority 3)
+
+`driver_attempts_tests/baseline_campaign_tests.rs` runs the real `FunnelDriver`, journals, child studies,
+selection, per-study reports and `child_verify::verify_children` over a host that injects only the world:
+each launch writes a real native result folder (agreeing summary and frame file, 64.25 s scene, sealed
+hashes, matched runtime) under a per-arm results directory. All eight baseline studies (two profiles
+across screen, pilot, confirmation, holdout) qualify, every child verifies from disk (reconstruction, raw
+files, matched runtime, cohort, rule, replication), and flipping one byte of a frame file after sealing is
+found by independent verification. This exposed a real defect: a child's tools followed the selector's
+order while the verifier demands the campaign's order; `child_intent` now always uses the campaign's own
+order. Feature and action studies are not in this intent (no factors or actions authorized).

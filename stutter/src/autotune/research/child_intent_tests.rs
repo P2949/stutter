@@ -323,3 +323,32 @@ mod holdout {
         assert!(child_intent(&parent, &holdout, &pair(), None).is_err());
     }
 }
+
+#[test]
+fn a_selector_naming_the_arms_in_any_order_still_yields_the_campaigns_own_tool_order() {
+    let parent = parent();
+    let confirm = plan(&parent)
+        .unwrap()
+        .into_iter()
+        .find(|study| study.stage == Stage::Confirm)
+        .unwrap();
+    // The selector names the control first, the candidate second: the reverse of the campaign's order.
+    let child = build(
+        &parent,
+        &confirm,
+        &[ProtonSource::Ge, ProtonSource::ValveStable],
+    )
+    .unwrap();
+    let in_parent_order: Vec<_> = parent
+        .tools
+        .iter()
+        .filter(|tool| [ProtonSource::Ge, ProtonSource::ValveStable].contains(&tool.source))
+        .cloned()
+        .collect();
+    assert_eq!(child.tools, in_parent_order);
+    // And the verifier, which demands exactly that order, accepts it.
+    let name = &confirm.study_sha256[..16];
+    assert!(crate::autotune::research::child_verify::derived_from(
+        &child, &parent, name
+    ));
+}
