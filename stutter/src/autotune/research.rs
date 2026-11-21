@@ -99,6 +99,14 @@ pub(crate) mod host_hardware;
     not(test),
     expect(
         dead_code,
+        reason = "staged: the funnel driver adopts the phase when a launch host is supplied"
+    )
+)]
+pub(crate) mod init_phase;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "consumed by the resident capture once a live game source is qualified"
     )
 )]
@@ -178,6 +186,14 @@ pub(crate) mod pilot_rule;
     )
 )]
 pub(crate) mod prefix_init;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged: the production composition supplies the authenticated launch host"
+    )
+)]
+pub(crate) mod prefix_init_stage;
 pub(crate) mod profile_mappings;
 pub(crate) mod protected_state;
 pub(crate) mod replication;

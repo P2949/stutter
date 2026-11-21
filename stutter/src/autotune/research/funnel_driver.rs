@@ -201,6 +201,11 @@ pub struct FunnelDriver {
     gate: Option<SharedActionGate>,
     /// What the resident runtime sees of the game, shared with it (absent: none kept).
     telemetry: Option<SharedTelemetry>,
+    /// Prefix initialization for cold arms, run to completion before any study (absent: none needed).
+    init: Option<super::init_phase::InitPhase>,
+    /// The controller's `now` for this tick, when it supplied one.
+    now: Option<u64>,
+    finished_init: Vec<super::init_phase::ArmOutcome>,
 }
 
 impl FunnelDriver {
@@ -222,6 +227,9 @@ impl FunnelDriver {
             rules,
             gate: None,
             telemetry: None,
+            init: None,
+            now: None,
+            finished_init: Vec::new(),
         })
     }
 
@@ -229,6 +237,27 @@ impl FunnelDriver {
     pub fn with_selection_blocker(mut self, selection: SelectionBlocker) -> Self {
         self.selection = Some(selection);
         self
+    }
+
+    /// Initialize the cold arms' prefixes first, through this phase, before any study runs.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "staged: the production launch host is not yet supplied"
+        )
+    )]
+    pub fn with_init_phase(mut self, phase: super::init_phase::InitPhase) -> Self {
+        self.init = Some(phase);
+        self
+    }
+
+    /// What the initialization phase did to each arm so far.
+    #[cfg_attr(not(test), expect(dead_code, reason = "staged: the report adopts it"))]
+    pub fn init_outcomes(&self) -> Vec<super::init_phase::ArmOutcome> {
+        self.init
+            .as_ref()
+            .map_or_else(|| self.finished_init.clone(), |p| p.outcomes().to_vec())
     }
 
     /// Share the action gate the attempts arm, so the runtime can consult it.
@@ -269,10 +298,21 @@ impl FunnelDriver {
     /// ends the funnel without deciding what it prevented.
     pub fn cancel(&mut self) {
         self.cancelled = true;
+        if let Some(init) = self.init.as_mut() {
+            init.cancel();
+        }
     }
 
     /// Stop now (controller shutdown): settle, restore and prove it. `Err` is unproven.
     pub fn shutdown(&mut self) -> Result<(), &'static str> {
+        if let Some(init) = self.init.as_mut() {
+            let now = self.now.unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| elapsed.as_secs())
+            });
+            init.shutdown(now)?;
+        }
         self.runner
             .abort(&mut self.executor)
             .map_err(|_| "InterruptedDecisionPersistenceFailed")?
@@ -295,12 +335,30 @@ impl FunnelDriver {
         fence: &mut dyn FnMut() -> anyhow::Result<()>,
     ) -> anyhow::Result<Step> {
         self.executor.attempts.set_now(now);
+        self.now = Some(now);
         self.tick(fence)
     }
 
     /// One controller tick.
     pub fn tick(&mut self, fence: &mut dyn FnMut() -> anyhow::Result<()>) -> anyhow::Result<Step> {
         use super::child_runner::StudyExecutor;
+        if let Some(init) = self.init.as_mut() {
+            let now = self.now.take().unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| elapsed.as_secs())
+            });
+            match init.tick(now, fence) {
+                super::init_phase::PhaseStep::Pending => return Ok(Step::Waiting),
+                super::init_phase::PhaseStep::Unresolved(reason) => {
+                    return Ok(Step::OwnershipUnresolved(reason));
+                }
+                super::init_phase::PhaseStep::Finished => {
+                    self.finished_init = init.outcomes().to_vec();
+                    self.init = None;
+                }
+            }
+        }
         if self.cancelled {
             return Ok(match self.runner.abort(&mut self.executor)? {
                 Ok(()) => match self.executor.take_step() {

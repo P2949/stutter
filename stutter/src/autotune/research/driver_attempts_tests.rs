@@ -437,7 +437,7 @@ mod funnel {
         None
     }
 
-    fn funnel(
+    pub(super) fn funnel(
         host: Host,
         clock_offset: u64,
     ) -> (tempfile::TempDir, FunnelDriver, ResearchIntentV1) {
@@ -469,7 +469,6 @@ mod funnel {
         .unwrap();
         (root, driver, parent)
     }
-
     #[test]
     fn the_funnel_is_driven_one_tick_at_a_time_through_the_lease_visible_driver_steps() {
         let (_root, mut driver, _) = funnel(Host::finishing(), 1);
@@ -637,3 +636,6 @@ mod feature;
 
 #[path = "driver_attempts_budget_tests.rs"]
 mod budget;
+
+#[path = "funnel_init_tests.rs"]
+mod funnel_init;

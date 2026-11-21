@@ -287,3 +287,19 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
 - Telemetry receipts are frozen under the observer's lock, written outside it, and acknowledged by count.
 - Scene length: a benchmark whose frames/averageFps differs by more than 5% from the others marks the
   native context `Drifted`.
+
+## Prefix initialization stage (thirteenth audit, priority 2)
+
+- `prefix_init_stage::InitStageRunner` runs one arm's journalled stage (`Planned -> Launched -> Settled ->
+  Verified | Abandoned`) tick by tick over an injected `InitHost` (launch, observe, terminate-and-prove).
+  It never replays a launch: one found unfinished after a restart is only settled. A launch needs the
+  whole 15-minute bound authorized (never shortened) and an overdue one is terminated and proven gone.
+- `init_phase::InitPhase` walks the cold arms in turn (warm or already-verified arms are skipped, an
+  indeterminate prefix is not touched), calls the controller's launch fence before each launch, charges
+  the elapsed seconds against the authorized initialization time, and abandons an arm that does not
+  initialize (it stays cold, so the profile hook blocks its studies). Only an unprovable settlement ends
+  the campaign.
+- `FunnelDriver::with_init_phase` runs the phase before any study: ticks show `Waiting` until it is
+  finished; cancellation and shutdown cancel and settle a launch in flight.
+- The production `InitHost` over the authenticated Steam launcher (non-measurement launch purpose) is
+  the remaining step; the stage and phase are exercised against synthetic hosts only.
