@@ -9,6 +9,7 @@ fn reading(cpu: i32, gpu: i32) -> ThermalReading {
 
 fn context(start: (i32, i32), end: (i32, i32)) -> Option<ThermalContext> {
     Some(ThermalContext {
+        limit: ThermalReading::default(),
         start: reading(start.0, start.1),
         end: reading(end.0, end.1),
     })
@@ -67,6 +68,7 @@ fn a_hot_start_a_throttled_end_or_a_missing_record_is_not_one_comparison() {
     );
     // A reading the host could not take is unknown, so the comparison is unproven.
     let blind = Some(ThermalContext {
+        limit: ThermalReading::default(),
         start: ThermalReading {
             cpu_mc: Some(50_000),
             gpu_mc: None,
@@ -74,4 +76,37 @@ fn a_hot_start_a_throttled_end_or_a_missing_record_is_not_one_comparison() {
         end: reading(60_000, 60_000),
     });
     assert_eq!(state(&[blind, blind]), ThermalState::Unproven);
+}
+
+#[test]
+fn the_ceiling_comes_from_the_sensors_own_critical_temperature() {
+    let with_limit = |cpu_end: i32, cpu_crit: i32| {
+        Some(ThermalContext {
+            start: reading(50_000, 45_000),
+            end: reading(cpu_end, 60_000),
+            limit: ThermalReading {
+                cpu_mc: Some(cpu_crit),
+                gpu_mc: Some(110_000),
+            },
+        })
+    };
+    // A CPU rated for 100 C is limited from 95 C; one rated for 85 C from 80 C.
+    assert_eq!(
+        state(&[with_limit(94_000, 100_000), with_limit(94_000, 100_000)]),
+        ThermalState::Consistent
+    );
+    assert_eq!(
+        state(&[with_limit(81_000, 85_000), with_limit(81_000, 85_000)]),
+        ThermalState::Drifted
+    );
+}
+
+#[test]
+fn the_real_limits_are_read_from_temp1_crit() {
+    let root = tempfile::tempdir().unwrap();
+    hwmon(root.path(), 1, "coretemp", "52000");
+    hwmon(root.path(), 2, "amdgpu", "47000");
+    std::fs::write(root.path().join("hwmon1/temp1_crit"), "100000\n").unwrap();
+    std::fs::write(root.path().join("hwmon2/temp1_crit"), "110000\n").unwrap();
+    assert_eq!(read_limits(root.path()), reading(100_000, 110_000));
 }

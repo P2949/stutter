@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 
 /// Attempts of one study must start within this spread of each other (millidegrees C).
 pub const MAX_START_SPREAD_MC: i32 = 10_000;
-/// An attempt that ends at or above these is treated as thermally limited.
+/// An attempt that ends within this margin of the sensor's own critical temperature (`temp1_crit`, read from the
+/// hardware: 100 C for this CPU, 110 C for this GPU) is treated as thermally limited. Where a sensor reports
+/// no limit, these fallbacks apply.
+pub const LIMIT_MARGIN_MC: i32 = 5_000;
 pub const CPU_CEILING_MC: i32 = 95_000;
 pub const GPU_CEILING_MC: i32 = 100_000;
 
@@ -26,10 +29,13 @@ pub struct ThermalReading {
 pub struct ThermalContext {
     pub start: ThermalReading,
     pub end: ThermalReading,
+    /// The sensors' own critical temperatures when the attempt launched (absent from older records).
+    #[serde(default)]
+    pub limit: ThermalReading,
 }
 
-fn temperature(dir: &Path) -> Option<i32> {
-    let value: i32 = std::fs::read_to_string(dir.join("temp1_input"))
+fn temperature(dir: &Path, file: &str) -> Option<i32> {
+    let value: i32 = std::fs::read_to_string(dir.join(file))
         .ok()?
         .trim()
         .parse()
@@ -40,6 +46,15 @@ fn temperature(dir: &Path) -> Option<i32> {
 
 /// Read the CPU package (`coretemp`/`k10temp`) and GPU (`amdgpu`) temperatures under a hwmon root.
 pub fn read(hwmon_root: &Path) -> ThermalReading {
+    read_file(hwmon_root, "temp1_input")
+}
+
+/// The same sensors' own critical temperatures.
+pub fn read_limits(hwmon_root: &Path) -> ThermalReading {
+    read_file(hwmon_root, "temp1_crit")
+}
+
+fn read_file(hwmon_root: &Path, file: &str) -> ThermalReading {
     let mut reading = ThermalReading::default();
     let Ok(entries) = std::fs::read_dir(hwmon_root) else {
         return reading;
@@ -50,8 +65,8 @@ pub fn read(hwmon_root: &Path) -> ThermalReading {
             continue;
         };
         match name.trim() {
-            "coretemp" | "k10temp" => reading.cpu_mc = reading.cpu_mc.or(temperature(&dir)),
-            "amdgpu" => reading.gpu_mc = reading.gpu_mc.or(temperature(&dir)),
+            "coretemp" | "k10temp" => reading.cpu_mc = reading.cpu_mc.or(temperature(&dir, file)),
+            "amdgpu" => reading.gpu_mc = reading.gpu_mc.or(temperature(&dir, file)),
             _ => {}
         }
     }
@@ -83,8 +98,14 @@ pub fn state(contexts: &[Option<ThermalContext>]) -> ThermalState {
         Some((*temps.iter().min()?, *temps.iter().max()?))
     };
     let ended_limited = all.iter().any(|c| {
-        c.end.cpu_mc.is_some_and(|t| t >= CPU_CEILING_MC)
-            || c.end.gpu_mc.is_some_and(|t| t >= GPU_CEILING_MC)
+        let ceiling =
+            |limit: Option<i32>, fallback: i32| limit.map_or(fallback, |l| l - LIMIT_MARGIN_MC);
+        c.end
+            .cpu_mc
+            .is_some_and(|t| t >= ceiling(c.limit.cpu_mc, CPU_CEILING_MC))
+            || c.end
+                .gpu_mc
+                .is_some_and(|t| t >= ceiling(c.limit.gpu_mc, GPU_CEILING_MC))
     });
     let (cpu, gpu) = (spread(|r| r.cpu_mc), spread(|r| r.gpu_mc));
     let drifted = ended_limited

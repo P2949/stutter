@@ -312,6 +312,100 @@ mod research_action_gate {
         assert!(!runtime.has_active_experiment());
     }
 
+    /// The real kernel path on a stand-in target (not the game): a process this test owns has its CPU
+    /// affinity changed by the runtime's own apply and restored by the stop rollback, and the gate proves the
+    /// restoration by comparing the target's /proc state before and after. Nothing here touches the game, the
+    /// GPU or any other process.
+    #[test]
+    fn a_real_apply_and_restore_on_a_stand_in_process_is_proven_against_procfs() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("120")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let allowed = |pid: u32| -> String {
+            std::fs::read_to_string(format!("/proc/{pid}/status"))
+                .unwrap()
+                .lines()
+                .find_map(|l| l.strip_prefix("Cpus_allowed_list:"))
+                .unwrap()
+                .trim()
+                .to_owned()
+        };
+        // The stand-in is matched by its command name; it is not a game, so no class rule applies to it.
+        let standin = Profile {
+            name: "stand-in".to_owned(),
+            rules: vec![ProfileRule {
+                affinity: Some(CpuMask::parse("0").unwrap()),
+                nice: None,
+                ionice: None,
+                match_class: Vec::new(),
+                match_comm: vec![
+                    crate::process_tree::CompiledPattern::new("sleep".to_owned()).unwrap(),
+                ],
+            }],
+        };
+        let original = allowed(pid);
+        let cpu = CandidateAction::cpu_affinity_profile_for(
+            standin,
+            pid,
+            crate::autotune::objective::ObjectiveKind::GameRunnableLatency,
+        );
+        let mut config = AutotuneRuntimeConfig::apply_low_risk(None, Some(pid), None)
+            .with_simulated_candidates(vec![cpu.clone()]);
+        config.history_log = None;
+        let mut runtime = AutotuneRuntime::new(config);
+        runtime.research_campaign_active = true;
+        let target = process_identity(pid).expect("the stand-in is alive");
+        let shared: Arc<Mutex<ActionGate>> = Arc::new(Mutex::new(
+            ActionGate::new(
+                ActionChildScope::new(
+                    [ResearchAction::CpuAffinityProfile],
+                    target,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs()
+                        + 600,
+                ),
+                Box::new(|| Some(0)),
+            )
+            .with_state_probe(Box::new(
+                crate::autotune::research::action_gate::procfs_state,
+            )),
+        ));
+        runtime.set_research_action_gate(Some(shared.clone()));
+        assert!(runtime.research_gate_permits(&cpu));
+        let observation = high_quality_game_observation_with_focus_confidence(0.95);
+        let decision = decide_autotune_transition(
+            &runtime.controller.policy,
+            &runtime.controller.state,
+            &observation,
+            Some(cpu),
+        );
+        let applied = runtime.apply_decision_side_effects(&observation, &decision, "real apply");
+        let during = allowed(pid);
+        runtime.observe_research_gate();
+        let stopped = runtime.rollback_on_stop("real restore");
+        let after = allowed(pid);
+        runtime.observe_research_gate();
+        let evidence = shared.lock().unwrap().evidence();
+        let _ = child.kill();
+        let _ = child.wait();
+        applied.unwrap();
+        stopped.unwrap();
+        assert_eq!(
+            during, "0",
+            "the runtime really changed the stand-in's affinity"
+        );
+        assert_eq!(after, original, "and really put it back");
+        assert!(
+            evidence.clean && evidence.kernel_state_proven,
+            "{evidence:?}"
+        );
+        assert_eq!(evidence.settled.len(), 1);
+    }
+
     #[test]
     fn a_gate_armed_for_another_process_never_permits_this_ones_candidate() {
         let pid = std::process::id();

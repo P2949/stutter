@@ -74,7 +74,10 @@ pub struct SteamAttemptHost<P: SteamPort> {
     /// Where the kernel's hwmon files are read (replaceable for tests).
     hwmon_root: PathBuf,
     /// The temperatures when the running attempt launched.
-    thermal_start: Option<super::thermal::ThermalReading>,
+    thermal_start: Option<(
+        super::thermal::ThermalReading,
+        super::thermal::ThermalReading,
+    )>,
 }
 
 #[path = "steam_host_init.rs"]
@@ -209,7 +212,10 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         self.initializing = context.intent.initialization;
         self.warm_since = None;
         self.tool_dir = Some(tool_dir);
-        self.thermal_start = Some(super::thermal::read(&self.hwmon_root));
+        self.thermal_start = Some((
+            super::thermal::read(&self.hwmon_root),
+            super::thermal::read_limits(&self.hwmon_root),
+        ));
         self.port.launch(slot, context)
     }
 
@@ -258,9 +264,10 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
                 }
                 Progress::Finished {
                     evidence: AttemptEvidenceV1 {
-                        thermal: self.thermal_start.take().map(|start| {
+                        thermal: self.thermal_start.take().map(|(start, limit)| {
                             super::thermal::ThermalContext {
                                 start,
+                                limit,
                                 end: super::thermal::read(&self.hwmon_root),
                             }
                         }),

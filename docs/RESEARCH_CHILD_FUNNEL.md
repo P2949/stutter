@@ -474,3 +474,15 @@ a GPU negative control, both require launching and driving the game, so neither 
   exist on this host). Attempts of one study must start within 10 C of each other and none may end at or
   above 95 C (CPU) / 100 C (GPU); a hot start or throttled end is `Drifted`, a partial or blind record is
   `Unproven`, and results from before this existed (none recorded) are not held to it.
+
+## Real apply and restore on a stand-in process; hardware-derived thermal limits
+
+- `a_real_apply_and_restore_on_a_stand_in_process_is_proven_against_procfs` runs the runtime's own,
+  unsimulated apply on a process the test spawns (`sleep`, not the game): the gate permits it, the decision
+  starts the experiment, `sched_setaffinity` really changes the target (`Cpus_allowed_list` becomes `0`), the
+  stop rollback really restores it, and the gate's real `/proc` state probe proves the restoration
+  (`clean`, one settled action, `kernel_state_proven`). It touches no game, GPU or other process. What stays
+  live-only is the same sequence on the game with a GPU negative control, which needs a launched game.
+- Thermal ceilings are no longer fixed guesses: each attempt records its sensors' own critical temperatures
+  (`temp1_crit`: 100 C for this CPU, 110 C for this GPU) and is thermally limited within 5 C of them; the
+  95 C / 100 C constants remain only as fallbacks for a sensor that reports no limit.

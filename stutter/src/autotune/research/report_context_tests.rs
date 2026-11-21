@@ -172,6 +172,7 @@ fn attempts_must_share_a_thermal_context_to_be_one_comparison() {
                     let native = item.native_completion.as_mut().unwrap();
                     native.runtime_binding = Some(RuntimeBinding::Matched);
                     item.thermal = Some(ThermalContext {
+                        limit: ThermalReading::default(),
                         start: reading(start_of(slot), 48_000),
                         end: reading(end_cpu, 62_000),
                     });
