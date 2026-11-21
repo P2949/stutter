@@ -182,6 +182,14 @@ pub(crate) mod protected_state;
 pub(crate) mod raw_archive;
 pub(crate) mod replication;
 pub(crate) mod route_driver;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged: no device sink is supplied; the build keeps UnavailableInput"
+    )
+)]
+pub(crate) mod scripted_input;
 pub(crate) mod telemetry_observer;
 pub(crate) mod thermal;
 pub(crate) mod treatment;

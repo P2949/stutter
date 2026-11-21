@@ -26,6 +26,10 @@ pub trait RouteInput: Send {
     fn available(&self) -> bool;
     /// The route enters a phase: start sending that phase's inputs.
     fn begin_phase(&mut self, phase: &str) -> Result<(), &'static str>;
+    /// Time has passed inside the current phase: send whatever that phase scheduled by now.
+    fn tick(&mut self, _elapsed_ms: u64) -> Result<(), &'static str> {
+        Ok(())
+    }
     /// The route is over or abandoned: stop sending anything.
     fn stop(&mut self);
 }
@@ -136,6 +140,9 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
             let step = &self.route[state.cursor];
             let end = state.phase_started + u64::from(step.seconds);
             if now < end {
+                if let Err(code) = self.input.tick((now - state.phase_started) * 1000) {
+                    return self.fail(code);
+                }
                 return LongProgress::Running;
             }
             state.phases.push(Phase {

@@ -499,3 +499,11 @@ Tests cover the schedule, a refused input, a lost or replaced process, an abort,
 driven end to end by the real driver through the host (qualified, verified offline). The only thing absent is
 the `RouteInput` that sends the route's inputs to the game; the build's input is `UnavailableInput`, so a long
 attempt still fails with the typed `BlockedNoLongSessionDriver` until a physical backend exists.
+
+`scripted_input::ScriptedInput` is the scripted `RouteInput`: per-phase key scripts with times relative to the
+phase, encoded as exact Linux `struct input_event` records (each followed by a sync report) and written through
+an `EventSink`; the route driver feeds it the phase's elapsed time, a phase never inherits held keys, and
+stopping, a failing sink or the end of the route releases every key. Everything but the device sink is tested.
+No device sink is in the repository on purpose: a virtual keyboard registered on the user's machine is picked
+up by the running compositor and types into the focused window, so a `/dev/uinput` sink can only be exercised
+in a session of its own. The build keeps `UnavailableInput`.
