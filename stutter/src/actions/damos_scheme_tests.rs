@@ -22,7 +22,7 @@ fn admin(name: &str, state: &str, contexts: u32) -> PathBuf {
 
 fn request(action: DamosAction) -> DamosRequest {
     DamosRequest {
-        task: 4242,
+        task: 2147483000,
         start_ticks: 777,
         action,
         quota: DamosQuota {
@@ -37,8 +37,9 @@ fn request(action: DamosAction) -> DamosRequest {
     }
 }
 
+/// A pid above any Linux `pid_max`, so no live host process can ever share it.
 fn alive(task: u32) -> Option<u64> {
-    (task == 4242).then_some(777)
+    (task == 2147483000).then_some(777)
 }
 
 fn read(root: &Path, file: &str) -> String {
@@ -55,7 +56,10 @@ fn a_monitoring_scheme_commits_reads_back_and_clears() {
     assert_eq!(read(&root, "0/state"), "off", "prepare writes nothing");
     let committed = prepared.commit().unwrap();
     assert_eq!(read(&root, "0/state"), "on");
-    assert_eq!(read(&root, "0/contexts/0/targets/0/pid_target"), "4242");
+    assert_eq!(
+        read(&root, "0/contexts/0/targets/0/pid_target"),
+        "2147483000"
+    );
     assert_eq!(
         committed.restore(),
         DamosRestore::Cleared {

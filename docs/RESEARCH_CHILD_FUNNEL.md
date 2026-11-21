@@ -273,3 +273,17 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   gap found, "no operation bypassing `autonomous_apply_gate`", is now an architecture test: the one
   production call of the apply must follow the gate in its own function (it fails if the gate call is
   removed).
+
+## Persistence transactions (thirteenth audit, 2026-11-21)
+
+- `report_store::write_new` now publishes atomically: bytes are written and fsynced under a hidden
+  `.NAME.tmp`, renamed into place with `RENAME_NOREPLACE`, and the directory fsynced. A crash leaves at
+  most a temporary file, never a partial canonical record; `read_evidence` ignores such leftovers and the
+  retry discards them. An existing record is never replaced (`AlreadyExists`).
+- A settled child whose accounting could not be written keeps its original terminal disposition in
+  `pending_end`. Polling again (and `abort_outcome`) retries only the persistence; the driver is never
+  ticked again. `StudyAttempts::persistence_pending` lets the executor keep the study running (bounded by
+  three consecutive failures, after which the existing abort path records it as unresolved).
+- Telemetry receipts are frozen under the observer's lock, written outside it, and acknowledged by count.
+- Scene length: a benchmark whose frames/averageFps differs by more than 5% from the others marks the
+  native context `Drifted`.

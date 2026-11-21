@@ -9,6 +9,17 @@ const MAX_FRAMES: usize = 2_000_000;
 /// The summary average is 1000 / mean(frame ms); allow for its printed precision.
 const AVERAGE_TOLERANCE: f64 = 0.005;
 
+/// How far the length of two runs of the built-in benchmark may differ (as a fraction) and still be
+/// accepted as a duration consistency check. Matching duration alone cannot establish that two runs
+/// completed the same scene (scene identity, settings and build ID must also match).
+pub const SCENE_SECONDS_TOLERANCE: f64 = 0.05;
+
+/// Whether two benchmark lengths match within `SCENE_SECONDS_TOLERANCE`. This is a consistency
+/// check, not independent proof of scene identity.
+pub fn same_scene_length(first: f64, other: f64) -> bool {
+    first > 0.0 && other > 0.0 && ((other - first).abs() / first) <= SCENE_SECONDS_TOLERANCE
+}
+
 /// What the game reported about how it ran. Compared across arms; never trusted for identity.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +34,14 @@ pub struct NativeContext {
 }
 
 impl NativeContext {
+    /// The benchmark's length in seconds as the result itself shows it: its frame count over its average
+    /// FPS. The built-in benchmark is a fixed fly-through, so this is the same from run to run; a run of a
+    /// different length played a different scene.
+    pub fn benchmark_seconds(&self, average_fps: f64) -> Option<f64> {
+        (average_fps.is_finite() && average_fps > 0.0 && self.frame_count > 0)
+            .then(|| self.frame_count as f64 / average_fps)
+    }
+
     /// Every graphics field the comparison depends on was reported. A context with a hole proves
     /// nothing: two reports that are both silent about ray tracing are not "the same".
     pub fn is_complete(&self) -> bool {
@@ -415,5 +434,42 @@ mod stage_tests {
                 ProfileConformance::Violates
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod scene_tests {
+    use super::*;
+
+    #[test]
+    fn the_benchmark_length_is_frames_over_average_fps_and_unknowns_have_none() {
+        let context = |frames: u64| NativeContext {
+            game_version: None,
+            preset_name: None,
+            gpu_name: None,
+            upscaling_type: None,
+            ray_tracing_enabled: None,
+            frame_generation_type: None,
+            frame_count: frames,
+        };
+        // The real 2026-11-15 run: 4408 frames at 68.61 FPS is the benchmark's 64.25 seconds.
+        let seconds = context(4408).benchmark_seconds(68.60662841796875).unwrap();
+        assert!((seconds - 64.25).abs() < 0.01, "{seconds}");
+        assert_eq!(context(0).benchmark_seconds(60.0), None);
+        assert_eq!(context(100).benchmark_seconds(0.0), None);
+        assert_eq!(context(100).benchmark_seconds(f64::NAN), None);
+    }
+
+    #[test]
+    fn runs_of_the_same_benchmark_are_within_five_percent_and_other_scenes_are_not() {
+        // The real runs: 64.25 s in most, 65.21 s and 66.15 s in the slowest two.
+        for real in [64.25, 64.28, 65.21, 66.15] {
+            assert!(same_scene_length(64.25, real), "{real}");
+        }
+        // A run half again as long, or half as long, is another scene; so is a non-positive length.
+        assert!(!same_scene_length(64.25, 96.4));
+        assert!(!same_scene_length(64.25, 32.1));
+        assert!(!same_scene_length(64.25, 0.0));
+        assert!(!same_scene_length(0.0, 64.25));
     }
 }

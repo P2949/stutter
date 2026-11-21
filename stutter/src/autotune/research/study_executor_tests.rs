@@ -688,3 +688,6 @@ mod pilot_tests;
 
 #[path = "study_executor_feature_tests.rs"]
 mod feature;
+
+#[path = "study_executor_persistence_tests.rs"]
+mod persistence;

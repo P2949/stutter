@@ -262,6 +262,20 @@ impl TelemetryObserver {
         std::mem::take(&mut self.finished)
     }
 
+    /// Close the current observation and copy the receipts so they can be persisted without holding
+    /// the observer; `acknowledge` is then given that batch's length.
+    pub fn freeze_receipts(&mut self) -> Vec<AttemptTelemetry> {
+        self.end_attempt();
+        self.finished.clone()
+    }
+
+    /// Drop exactly the first `count` receipts, those a successful persistence covered; receipts
+    /// finished since the freeze are kept.
+    pub fn acknowledge(&mut self, count: usize) {
+        let count = count.min(self.finished.len());
+        self.finished.drain(..count);
+    }
+
     pub fn is_observing(&self) -> bool {
         self.running.is_some()
     }

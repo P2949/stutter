@@ -32,6 +32,8 @@ pub struct StudyInputs {
 /// Chooses a child study's inputs.
 pub type SelectArms = Box<dyn FnMut(&ChildStudy) -> anyhow::Result<StudyInputs> + Send>;
 
+/// Consecutive failed attempts to record a settled child before it is treated as unresolved.
+const MAX_PERSIST_RETRIES: u32 = 3;
 const STUDIES_DIR: &str = "studies";
 
 pub struct DriverStudyAttempts {
@@ -50,6 +52,10 @@ pub struct DriverStudyAttempts {
     running: Option<(String, Driver)>,
     /// The driver step of the last poll, for the controller to advance the lease from.
     last_step: Option<Step>,
+    /// The attempt has settled and its end (halted, terminal failure) is only awaiting durable
+    /// accounting; the driver is never ticked again, only the persistence is retried.
+    pending_end: Option<(bool, Option<super::driver::FailureClass>)>,
+    persist_failures: u32,
     /// The controller's own `now` for the next tick, overriding the clock (one tick only).
     override_now: Option<u64>,
     /// The action gate an action child arms on the sighted game process (absent: never armed).
@@ -107,6 +113,8 @@ impl DriverStudyAttempts {
             claim_verifier: None,
             running: None,
             last_step: None,
+            pending_end: None,
+            persist_failures: 0,
             override_now: None,
             gate: None,
             telemetry: None,
@@ -166,30 +174,6 @@ impl DriverStudyAttempts {
         if let Ok(mut observer) = telemetry.lock() {
             observer.arm(target, attempt);
         }
-    }
-
-    /// Keep every attempt's telemetry receipt beside the study (write-once; a conflicting file means
-    /// the receipts cannot be recorded and the study simply has none).
-    fn record_telemetry(&self, study: &ChildStudy) -> anyhow::Result<()> {
-        let Some(telemetry) = &self.telemetry else {
-            return Ok(());
-        };
-        let receipts = telemetry
-            .lock()
-            .map_err(|_| anyhow::anyhow!("the telemetry observer is poisoned"))?
-            .take_receipts();
-        if receipts.is_empty() {
-            return Ok(());
-        }
-        // A receipt that cannot be made durable is an evidence failure, not a quiet omission.
-        let studies = open_dir(&self.campaign, STUDIES_DIR)?;
-        let dir = open_dir(&studies, dir_name(study))?;
-        write_new(
-            &dir,
-            "telemetry-receipts.json",
-            &serde_json::to_vec_pretty(&receipts)?,
-        )
-        .map_err(|error| anyhow::anyhow!("telemetry receipts not recorded: {error:#}"))
     }
 
     /// During a feature study, once per attempt: does the factor's treatment (on or off) show in the
@@ -441,7 +425,21 @@ impl DriverStudyAttempts {
         self.record_telemetry(study)?;
         let study_dir = open_dir(&open_dir(&self.campaign, STUDIES_DIR)?, dir_name(study))?;
         // The study's report is sealed beside its journal; verification recomputes and compares it.
-        write_report(&study_dir, &report)?;
+        match write_report(&study_dir, &report) {
+            Ok(()) => {}
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                anyhow::ensure!(
+                    super::report_store::read_private(&study_dir, "report.json", self.parent.uid)?
+                        == serde_json::to_vec(&report)?,
+                    "the recorded child report differs"
+                );
+            }
+            Err(error) => return Err(error),
+        }
         let evidence_dir = open_dir(&study_dir, "evidence")?;
         let evidence: BTreeMap<_, _> = read_evidence(&evidence_dir, self.parent.uid)?;
         let conformance = evidence
@@ -570,6 +568,12 @@ impl StudyAttempts for DriverStudyAttempts {
         if digest != &study.study_sha256 {
             return Err("InterruptedStudyMismatch");
         }
+        if self.pending_end.is_some() {
+            // Already settled: only its accounting is outstanding, so settle nothing again.
+            return self
+                .persist_end(study)
+                .map_err(|_| "InterruptedReportPersistenceFailed");
+        }
         driver.cancel();
         let now = self
             .override_now
@@ -617,6 +621,10 @@ impl StudyAttempts for DriverStudyAttempts {
         Err("SettlementUnproven")
     }
 
+    fn persistence_pending(&self) -> bool {
+        self.pending_end.is_some() && self.persist_failures < MAX_PERSIST_RETRIES
+    }
+
     fn take_step(&mut self) -> Option<Step> {
         self.last_step.take()
     }
@@ -635,6 +643,10 @@ impl StudyAttempts for DriverStudyAttempts {
         remaining_attempts: u32,
         fence: &mut dyn FnMut() -> anyhow::Result<()>,
     ) -> anyhow::Result<Option<AttemptsOutcome>> {
+        if self.pending_end.is_some() {
+            // Settled and only awaiting durable accounting: retry that, never the launch machinery.
+            return self.persist_end(study);
+        }
         if self.running.is_none() {
             self.begin(study, remaining_attempts)?;
         }
@@ -667,22 +679,15 @@ impl StudyAttempts for DriverStudyAttempts {
             | Step::Cancelled
             | Step::Halted(_)
             | Step::Stopped(_) => {
-                let Some((_, driver)) = self.running.take() else {
-                    return Ok(None);
-                };
-                // What this child used is recorded before anything else is decided about it, so
-                // the next child starts from the campaign's true spend; unrecorded fails closed.
-                self.record_budget(study, &driver)?;
-                Ok(Some(self.outcome(
-                    study,
-                    &driver,
-                    halted,
-                    terminal_failure,
-                )?))
+                self.pending_end = Some((halted, terminal_failure));
+                self.persist_end(study)
             }
         }
     }
 }
+
+#[path = "driver_attempts_persistence.rs"]
+mod persistence;
 
 #[cfg(test)]
 #[path = "driver_attempts_tests.rs"]

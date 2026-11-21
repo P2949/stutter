@@ -444,6 +444,15 @@ fn context_state_with_treatment(
         Some(RuntimeBinding::Matched) => {}
         Some(RuntimeBinding::Unknown) | None => unproven = true,
     }
+    // The built-in benchmark is a fixed fly-through: every run lasts the same time. A run of another
+    // length is a scene that did not repeat, and its numbers are not comparable with the others'.
+    let seconds = |native: &super::cyberpunk::CyberpunkBenchmarkCompletion| {
+        native
+            .context
+            .as_ref()
+            .and_then(|context| context.benchmark_seconds(native.metrics.average_fps))
+    };
+    let first_seconds = seconds(first);
     for native in natives {
         let Some(native) = native else {
             unproven = true;
@@ -453,6 +462,11 @@ fn context_state_with_treatment(
             || native.scene != first.scene
             || native.settings_sha256 != first.settings_sha256
             || native.process.executable_sha256 != first.process.executable_sha256
+        {
+            return ContextState::Drifted;
+        }
+        if let (Some(a), Some(b)) = (first_seconds, seconds(native))
+            && !super::native_context::same_scene_length(a, b)
         {
             return ContextState::Drifted;
         }

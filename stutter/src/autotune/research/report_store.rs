@@ -35,11 +35,28 @@ pub(crate) fn baseline_name(kind: &str, campaign: &str) -> anyhow::Result<String
     Ok(format!("{kind}-before-{campaign}.json"))
 }
 
+/// Publish a new record atomically: the bytes are written and synchronized under a temporary name,
+/// then renamed into place without replacing anything, so a crash never leaves a partial canonical
+/// file and an existing record is never overwritten (`AlreadyExists`).
 pub fn write_new(dir: &File, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
     anyhow::ensure!(bytes.len() as u64 <= MAX_FILE, "record too large");
-    let mut file = crate::syscall::create_new_at(dir.as_fd(), name)?;
+    anyhow::ensure!(!name.starts_with('.'), "record name is reserved");
+    let tmp = format!(".{name}.tmp");
+    let tmp_path = format!("/proc/self/fd/{}/{tmp}", dir.as_raw_fd());
+    // A temporary file left by an interrupted write was never canonical; discard it.
+    match std::fs::remove_file(&tmp_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    let mut file = crate::syscall::create_new_at(dir.as_fd(), &tmp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
+    drop(file);
+    if let Err(error) = crate::syscall::rename_noreplace_at(dir.as_fd(), &tmp, name) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(error.into());
+    }
     dir.sync_all()?;
     Ok(())
 }
@@ -92,6 +109,9 @@ pub fn read_evidence(dir: &File, uid: u32) -> anyhow::Result<BTreeMap<u32, Attem
             .file_name()
             .into_string()
             .map_err(|_| anyhow::anyhow!("non-UTF8 evidence entry"))?;
+        if name.starts_with('.') && name.ends_with(".json.tmp") {
+            continue; // an interrupted write that never became canonical
+        }
         let index = name
             .strip_suffix(".json")
             .filter(|stem| stem.len() == 4)
@@ -226,6 +246,52 @@ mod budget_tests {
             average_fps: 60.0,
             native_completion: None,
         }
+    }
+
+    fn private_dir() -> (tempfile::TempDir, File) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let dir = File::from(crate::syscall::open_dir_no_symlinks(tmp.path()).unwrap());
+        (tmp, dir)
+    }
+
+    #[test]
+    fn a_record_is_published_atomically_and_never_replaced() {
+        let (tmp, dir) = private_dir();
+        write_new(&dir, "0001.json", b"first").unwrap();
+        let again = write_new(&dir, "0001.json", b"second").unwrap_err();
+        assert_eq!(
+            again.downcast_ref::<std::io::Error>().map(|e| e.kind()),
+            Some(std::io::ErrorKind::AlreadyExists)
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("0001.json")).unwrap(),
+            b"first"
+        );
+        // No temporary file is left behind by either outcome.
+        let names: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("0001.json")]);
+    }
+
+    #[test]
+    fn an_interrupted_write_never_becomes_canonical_and_is_cleared_by_the_retry() {
+        let (tmp, dir) = private_dir();
+        // A crash after the temporary file was started leaves only the temporary name.
+        std::fs::write(tmp.path().join(".0002.json.tmp"), b"{\"partial").unwrap();
+        assert!(
+            read_evidence(&dir, crate::syscall::geteuid())
+                .unwrap()
+                .is_empty()
+        );
+        write_new(&dir, "0002.json", b"whole").unwrap();
+        assert_eq!(
+            std::fs::read(tmp.path().join("0002.json")).unwrap(),
+            b"whole"
+        );
+        assert!(!tmp.path().join(".0002.json.tmp").exists());
     }
 
     #[test]

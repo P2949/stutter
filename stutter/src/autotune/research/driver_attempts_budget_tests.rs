@@ -13,6 +13,70 @@ fn read_spent(
 }
 
 #[test]
+fn a_report_conflict_keeps_the_finished_driver_until_accounting_can_be_retried() {
+    let (root, mut runner, study, _) = attempts(Host::finishing());
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    let path = root
+        .path()
+        .join("studies")
+        .join(&study.study_sha256[..16])
+        .join("report.json");
+    std::fs::write(&path, b"conflicting report").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut failed = false;
+    for _ in 0..200 {
+        match runner.poll(&study, 100) {
+            Err(_) => {
+                failed = true;
+                break;
+            }
+            Ok(None) => {}
+            Ok(Some(_)) => panic!("a conflicting report was accepted"),
+        }
+    }
+    assert!(failed);
+    assert!(runner.has_running(), "the settled driver remains owned");
+    assert!(path.with_file_name("budget.json").is_file());
+    std::fs::remove_file(&path).unwrap();
+    let outcome = run_to_end(&mut runner, &study);
+    assert!(outcome.attempts_used > 0);
+    assert!(!runner.has_running());
+}
+
+#[test]
+fn telemetry_is_retained_when_its_durable_receipt_conflicts() {
+    use std::sync::{Arc, Mutex};
+    let (root, mut runner, study, parent) = attempts(Host::finishing());
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    let observer = Arc::new(Mutex::new(
+        crate::autotune::research::telemetry_observer::TelemetryObserver::default(),
+    ));
+    observer.lock().unwrap().arm(
+        crate::autotune::research::action_child::ChildTarget {
+            pid: stutter_core::ids::Pid::new(4242),
+            start_ticks: 99,
+            uid: parent.uid,
+        },
+        Some(0),
+    );
+    runner.telemetry = Some(observer.clone());
+    let path = root
+        .path()
+        .join("studies")
+        .join(&study.study_sha256[..16])
+        .join("telemetry-receipts.json");
+    std::fs::write(&path, b"conflicting telemetry").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(runner.record_telemetry(&study).is_err());
+    assert_eq!(observer.lock().unwrap().freeze_receipts().len(), 1);
+    std::fs::remove_file(&path).unwrap();
+    runner.record_telemetry(&study).unwrap();
+    assert!(observer.lock().unwrap().freeze_receipts().is_empty());
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(saved.as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn a_second_child_starts_from_what_the_first_already_spent_of_the_campaign() {
     let (root, mut runner, first, parent) = attempts(Host::finishing());
     let second = plan(&parent).unwrap().remove(1);

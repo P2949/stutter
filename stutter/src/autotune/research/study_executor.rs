@@ -112,6 +112,11 @@ pub trait StudyAttempts {
     ) -> anyhow::Result<Option<AttemptsOutcome>> {
         self.poll(study, budget)
     }
+    /// The attempt has settled and only its durable accounting failed; polling again retries just
+    /// that, within a bound. Never true while a game or worker could still be owned.
+    fn persistence_pending(&self) -> bool {
+        false
+    }
     /// The driver step of the last poll, taken once.
     fn take_step(&mut self) -> Option<super::driver::Step> {
         None
@@ -429,6 +434,9 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
         let outcome = match self.attempts.poll_fenced(study, remaining_attempts, fence) {
             Ok(None) => return Ok(None),
             Ok(Some(outcome)) => outcome,
+            // A settled child whose accounting could not be written yet owns nothing: keep the
+            // study running and retry only the persistence on the next poll.
+            Err(_) if self.attempts.persistence_pending() => return Ok(None),
             Err(error) => {
                 // The attempt may still own a game: settle it first. If that cannot be proven the
                 // settings are left as they are (the durable snapshot recovers them later) and the
