@@ -309,3 +309,17 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   game ending is the expected outcome, settled through `port.stop()`. A voided launch (GPU reset,
   identity mismatch) is settled before it is reported. The composition supplies the per-arm attempt slot
   and dispatch context; this module builds no identity.
+
+## Native tail metric (thirteenth audit, priority 3)
+
+- `frame_stats::FrameStats` (p99 frame time by nearest rank, 1%-low FPS) is computed from the verified
+  per-frame times and stored in `NativeContext.frame_stats` only when the run holds at least 1000 frames;
+  a smaller or corrupt population has none (never a guess). Old results lack it: `matches_replay`
+  compares them without it, and a recorded tail must match the files exactly.
+- `metric_plan::values` chooses the primary metric once per campaign from the sealed evidence: the 99th
+  percentile when every completed attempt has a known population, otherwise the average-FPS fallback for
+  the whole campaign (never a mix). The report's design, rule and values use it; the report names
+  `primary_metric` only for the tail, so reports recorded before this still rebuild byte-for-byte (the
+  real campaign `fdf5ba08ff2acfac` still replays and bundles).
+- Remaining for the metric: the pilot/confirmation rule and the screen/pilot selectors still read average
+  FPS; they move to the same plan when frame statistics are recorded for live runs.

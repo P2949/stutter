@@ -31,6 +31,10 @@ pub struct NativeContext {
     pub ray_tracing_enabled: Option<bool>,
     pub frame_generation_type: Option<i64>,
     pub frame_count: u64,
+    /// Tail statistics of the verified frame times; absent for results recorded before they existed
+    /// and for runs too short for a tail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame_stats: Option<super::frame_stats::FrameStats>,
 }
 
 impl NativeContext {
@@ -40,6 +44,17 @@ impl NativeContext {
     pub fn benchmark_seconds(&self, average_fps: f64) -> Option<f64> {
         (average_fps.is_finite() && average_fps > 0.0 && self.frame_count > 0)
             .then(|| self.frame_count as f64 / average_fps)
+    }
+
+    /// Whether this sealed context is what the native files say now. A result sealed before tail
+    /// statistics existed has none and is compared without them; one sealed with them must match them.
+    pub fn matches_replay(&self, replayed: &Self) -> bool {
+        if self.frame_stats.is_some() {
+            return self == replayed;
+        }
+        let mut without = replayed.clone();
+        without.frame_stats = None;
+        *self == without
     }
 
     /// Every graphics field the comparison depends on was reported. A context with a hole proves
@@ -151,6 +166,7 @@ pub fn verify_frames(summary: &[u8], frames_csv: &[u8]) -> anyhow::Result<Native
             .get("frameGenerationType")
             .and_then(serde_json::Value::as_i64),
         frame_count: count,
+        frame_stats: super::frame_stats::FrameStats::of(&times),
     })
 }
 
@@ -331,6 +347,7 @@ mod tests {
             ray_tracing_enabled: rt,
             frame_generation_type: fg,
             frame_count: 10,
+            frame_stats: None,
         };
         for profile in [Profile::Cpu, Profile::Gpu] {
             assert_eq!(
@@ -384,6 +401,7 @@ mod stage_tests {
             ray_tracing_enabled: Some(rt),
             frame_generation_type: Some(fg),
             frame_count: 10,
+            frame_stats: None,
         }
     }
 
@@ -451,6 +469,7 @@ mod scene_tests {
             ray_tracing_enabled: None,
             frame_generation_type: None,
             frame_count: frames,
+            frame_stats: None,
         };
         // The real 2026-11-15 run: 4408 frames at 68.61 FPS is the benchmark's 64.25 seconds.
         let seconds = context(4408).benchmark_seconds(68.60662841796875).unwrap();
@@ -471,5 +490,44 @@ mod scene_tests {
         assert!(!same_scene_length(64.25, 32.1));
         assert!(!same_scene_length(64.25, 0.0));
         assert!(!same_scene_length(0.0, 64.25));
+    }
+}
+
+#[cfg(test)]
+mod replay_tests {
+    use super::*;
+
+    fn context(stats: Option<super::super::frame_stats::FrameStats>) -> NativeContext {
+        NativeContext {
+            game_version: Some("2.3".into()),
+            preset_name: Some("RT".into()),
+            gpu_name: Some("gpu".into()),
+            upscaling_type: Some(0),
+            ray_tracing_enabled: Some(false),
+            frame_generation_type: Some(0),
+            frame_count: 2000,
+            frame_stats: stats,
+        }
+    }
+
+    #[test]
+    fn a_context_sealed_before_tail_statistics_still_replays_and_a_sealed_one_must_match() {
+        let stats = super::super::frame_stats::FrameStats::of(&vec![10.0; 2000]);
+        assert!(stats.is_some());
+        let replayed = context(stats);
+        assert!(
+            context(None).matches_replay(&replayed),
+            "old results replay"
+        );
+        assert!(replayed.matches_replay(&replayed));
+        let mut forged = replayed.clone();
+        forged.frame_stats.as_mut().unwrap().p99_frame_ms = 1.0;
+        assert!(
+            !forged.matches_replay(&replayed),
+            "a recorded tail must match the files"
+        );
+        let mut other = context(None);
+        other.frame_count = 1999;
+        assert!(!other.matches_replay(&replayed), "other fields still bind");
     }
 }

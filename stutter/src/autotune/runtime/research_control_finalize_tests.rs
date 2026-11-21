@@ -17,6 +17,7 @@ fn a_completed_receipt_requires_its_prepared_decision_report_and_bundle() {
         attempts_completed: 0,
         control: ProtonSource::ValveStable,
         arms: Vec::new(),
+        primary_metric: None,
         treatment: None,
     };
     let report_bytes = serde_json::to_vec(&report).unwrap();

@@ -609,7 +609,7 @@ pub fn reverify_completion(
         completion
             .context
             .as_ref()
-            .is_none_or(|sealed| *sealed == replayed),
+            .is_none_or(|sealed| sealed.matches_replay(&replayed)),
         "sealed graphics context differs from the native files"
     );
     Ok(())

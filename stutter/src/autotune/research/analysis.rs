@@ -16,7 +16,7 @@ pub(crate) enum NativeMetric {
 }
 
 impl NativeMetric {
-    fn name_and_unit(self) -> (&'static str, &'static str) {
+    pub(crate) fn name_and_unit(self) -> (&'static str, &'static str) {
         match self {
             Self::AverageFps => ("native_average_fps", "fps"),
             Self::P99FrameMs => ("native_p99_frame_ms", "ms"),

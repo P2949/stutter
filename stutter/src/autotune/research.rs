@@ -19,13 +19,6 @@ pub(crate) mod action_gate;
     )
 )]
 pub(crate) mod action_study;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "P5 analysis is consumed once the scheduler drives real runs"
-    )
-)]
 pub(crate) mod analysis;
 pub(crate) mod arm_selection;
 pub(crate) mod campaign_budget;
@@ -80,6 +73,7 @@ pub(crate) mod fault_matrix;
 )]
 pub(crate) mod features;
 pub(crate) mod final_bundle;
+pub(crate) mod frame_stats;
 pub(crate) mod functional_probe;
 pub(crate) mod funnel_driver;
 #[cfg_attr(
@@ -149,6 +143,7 @@ pub(crate) mod loaded_runtime;
 )]
 pub(crate) mod long_receipt;
 pub(crate) mod long_session;
+pub(crate) mod metric_plan;
 mod mounts;
 pub(crate) mod native_context;
 #[cfg_attr(

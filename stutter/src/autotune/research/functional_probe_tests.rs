@@ -9,6 +9,7 @@ fn context(frame_generation: Option<i64>, upscaler: Option<i64>) -> NativeContex
         ray_tracing_enabled: Some(false),
         frame_generation_type: frame_generation,
         frame_count: 10,
+        frame_stats: None,
     }
 }
 

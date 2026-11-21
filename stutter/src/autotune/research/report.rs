@@ -104,6 +104,14 @@ pub struct ResearchReportV1 {
     /// factor or action on versus off, not a second Proton.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub treatment: Option<super::TreatmentSpec>,
+    /// Present only when the comparison was judged on the 99th-percentile frame time; absent means the
+    /// average FPS (results recorded before tail statistics existed, or without a known frame population).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_metric: Option<String>,
+}
+
+fn metric_label(metric: NativeMetric) -> Option<String> {
+    (metric == NativeMetric::P99FrameMs).then(|| metric.name_and_unit().0.to_owned())
 }
 
 fn verdict_name(verdict: Verdict) -> &'static str {
@@ -130,6 +138,7 @@ fn design(
     confidence: f64,
     seed: u64,
     rule: Option<&super::pilot_rule::FrozenConfirmationRule>,
+    metric: NativeMetric,
 ) -> ExperimentDesign {
     // A confirmation runs under the thresholds its pilot froze; anything else keeps the provisional
     // defaults. The frozen rule is never replaced by a threshold chosen after the data.
@@ -143,8 +152,8 @@ fn design(
     ExperimentDesign {
         schema_version: crate::autotune::experiment_design::EXPERIMENT_SCHEMA_VERSION,
         objective: "proton_native_benchmark".into(),
-        metric: "native_average_fps".into(),
-        unit: "fps".into(),
+        metric: metric.name_and_unit().0.into(),
+        unit: metric.name_and_unit().1.into(),
         candidate: format!("{candidate:?}"),
         context_fingerprint: slots[0].context_sha256.clone(),
         min_effect_percent: min_effect,
@@ -210,8 +219,10 @@ pub fn build_report(
         evidence.len() == fps.len(),
         "unsealed or unexpected evidence exists"
     );
+    // The primary metric is chosen once, from the sealed evidence, before any comparison is read.
+    let (metric, fps) = super::metric_plan::values(evidence, fps.keys().copied())?;
     if let Some(treatments) = super::treatment::treatments_of(intent)? {
-        let result = treatment_result(intent, &schedule, &fps, evidence, &treatments)?;
+        let result = treatment_result(intent, &schedule, &fps, evidence, &treatments, metric)?;
         return Ok(ResearchReportV1 {
             schema_version: 2,
             intent_sha256: intent.digest()?,
@@ -220,6 +231,7 @@ pub fn build_report(
             attempts_completed: fps.len(),
             control,
             arms: vec![result],
+            primary_metric: metric_label(metric),
             treatment: intent.treatment,
         });
     }
@@ -266,10 +278,11 @@ pub fn build_report(
                 confidence,
                 seed,
                 intent.confirmation_rule.as_ref(),
+                metric,
             ),
             family_alpha: FAMILY_ALPHA,
             comparisons,
-            metric: NativeMetric::AverageFps,
+            metric,
         };
         results.push(
             match analyse_pairs(&rule, &left, &right, context == ContextState::Drifted) {
@@ -308,6 +321,7 @@ pub fn build_report(
         attempts_completed: fps.len(),
         control,
         arms: results,
+        primary_metric: metric_label(metric),
         treatment: None,
     })
 }
@@ -320,6 +334,7 @@ fn treatment_result(
     fps: &BTreeMap<u32, f64>,
     evidence: &BTreeMap<u32, AttemptEvidenceV1>,
     treatments: &[super::Treatment],
+    metric: NativeMetric,
 ) -> anyhow::Result<ArmResult> {
     use super::Treatment::{Off, On};
     let source = intent.tools[0].source;
@@ -339,10 +354,18 @@ fn treatment_result(
         }
     }
     let rule = Rule {
-        design: design(source, schedule, blocks, 1.0 - FAMILY_ALPHA, seed, None),
+        design: design(
+            source,
+            schedule,
+            blocks,
+            1.0 - FAMILY_ALPHA,
+            seed,
+            None,
+            metric,
+        ),
         family_alpha: FAMILY_ALPHA,
         comparisons: 1,
-        metric: NativeMetric::AverageFps,
+        metric,
     };
     Ok(
         match analyse_pairs(&rule, &left, &right, context == ContextState::Drifted) {

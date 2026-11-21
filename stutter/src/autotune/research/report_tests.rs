@@ -233,6 +233,7 @@ fn native_completions_decide_consistent_or_drifted_context() {
                     ray_tracing_enabled: Some(true),
                     frame_generation_type: Some(0),
                     frame_count: 100,
+                    frame_stats: None,
                 }),
                 loaded_runtime: Some(matched_runtime()),
                 runtime_binding: Some(super::super::loaded_runtime::RuntimeBinding::Matched),
@@ -463,7 +464,15 @@ fn a_confirmation_design_uses_its_pilots_frozen_thresholds_not_the_provisional_d
     use super::super::pilot_rule::freeze;
     let (_, schedule) = study(4);
     let rule = freeze(&[70.0, 73.0, 67.0]).unwrap();
-    let frozen = design(ProtonSource::Ge, &schedule, 4, 0.95, 1, Some(&rule));
+    let frozen = design(
+        ProtonSource::Ge,
+        &schedule,
+        4,
+        0.95,
+        1,
+        Some(&rule),
+        NativeMetric::AverageFps,
+    );
     assert_eq!(
         frozen.min_effect_percent,
         f64::from(rule.min_effect_bp) / 100.0
@@ -472,7 +481,15 @@ fn a_confirmation_design_uses_its_pilots_frozen_thresholds_not_the_provisional_d
         frozen.equivalence_margin_percent,
         f64::from(rule.equivalence_margin_bp) / 100.0
     );
-    let default = design(ProtonSource::Ge, &schedule, 4, 0.95, 1, None);
+    let default = design(
+        ProtonSource::Ge,
+        &schedule,
+        4,
+        0.95,
+        1,
+        None,
+        NativeMetric::AverageFps,
+    );
     assert_eq!(default.min_effect_percent, MIN_EFFECT_PERCENT);
     assert_ne!(frozen.min_effect_percent, default.min_effect_percent);
 }
@@ -480,7 +497,15 @@ fn a_confirmation_design_uses_its_pilots_frozen_thresholds_not_the_provisional_d
 #[test]
 fn zero_warmup_and_washout_rest_on_whole_launches_in_complete_order_balanced_blocks() {
     let (intent, schedule) = study(6);
-    let design = design(ProtonSource::ValveStable, &schedule, 6, 0.95, 1, None);
+    let design = design(
+        ProtonSource::ValveStable,
+        &schedule,
+        6,
+        0.95,
+        1,
+        None,
+        NativeMetric::AverageFps,
+    );
     assert_eq!((design.warmup_seconds, design.washout_seconds), (0, 0));
     // Every block holds every arm exactly once, and no arm always goes first: carry-over between
     // launches is balanced by the schedule, which is what stands in for discarded time.
