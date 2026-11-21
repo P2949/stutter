@@ -372,3 +372,11 @@ byte-identical and a path that escapes its folder is refused. Replay (`verify_ra
 rotating, editing or deleting the prefix results afterwards cannot change or defeat verification, and
 editing the archived copy is found. Studies without a `raw/` directory (older campaigns, such as the
 preserved real one) still replay from the supplied results directory.
+
+## Independent budget replay (thirteenth audit)
+
+`campaign_budget::replay` runs inside `child_verify::verify_children`: every child must have a spend
+record, its recorded evidence bytes must equal what its own sealed evidence costs (recomputed), and the
+totals (active seconds, evidence bytes, and the attempts the ledger counted) must stay within what the
+operator authorized. A problem is `ChildrenVerification.budget_problem` and `all_verified` requires none.
+Active seconds are the child's own record and are bounded, not rebuilt.

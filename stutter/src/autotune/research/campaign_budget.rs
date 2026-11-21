@@ -80,6 +80,56 @@ pub fn spent(studies: &File, uid: u32, max_active_seconds: u64) -> anyhow::Resul
     Ok(total)
 }
 
+/// Independent replay of the campaign's cumulative budgets from what its children sealed: every child
+/// has a spend record, its evidence bytes equal what its own sealed evidence costs, and the totals (and
+/// the attempts the ledger counted) stay within what the operator authorized. `None` is a clean replay;
+/// otherwise the first problem. The active seconds are the child's own record (they cannot be rebuilt
+/// from sealed bytes) and are bounded, not recomputed.
+pub fn replay(
+    studies: &File,
+    uid: u32,
+    parent: &super::ResearchIntentV1,
+    attempts: &std::collections::BTreeMap<String, u32>,
+) -> Option<String> {
+    let outcome = (|| -> anyhow::Result<Option<String>> {
+        let mut total = Spent::default();
+        for entry in std::fs::read_dir(format!(
+            "/proc/self/fd/{}",
+            std::os::fd::AsRawFd::as_raw_fd(studies)
+        ))? {
+            let name = entry?.file_name().to_string_lossy().into_owned();
+            let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), &name)?);
+            let Ok(bytes) = read_private(&dir, FILE, uid) else {
+                return Ok(Some(format!("BudgetRecordMissing:{name}")));
+            };
+            let recorded: Spent = serde_json::from_slice(&bytes)?;
+            let evidence = File::from(crate::syscall::openat_dir_nofollow(
+                dir.as_fd(),
+                "evidence",
+            )?);
+            let mut actual = 0u64;
+            for item in read_evidence(&evidence, uid)?.values() {
+                actual = actual.saturating_add(evidence_cost(item)?);
+            }
+            if actual != recorded.evidence_bytes {
+                return Ok(Some(format!("BudgetEvidenceBytesMismatch:{name}")));
+            }
+            total = total.plus(recorded);
+        }
+        if total.active_seconds > u64::from(parent.max_active_seconds) {
+            return Ok(Some("CampaignActiveSecondsExceeded".into()));
+        }
+        if total.evidence_bytes > parent.max_evidence_bytes {
+            return Ok(Some("CampaignEvidenceBytesExceeded".into()));
+        }
+        if attempts.values().map(|n| u64::from(*n)).sum::<u64>() > u64::from(parent.max_attempts) {
+            return Ok(Some("CampaignAttemptsExceeded".into()));
+        }
+        Ok(None)
+    })();
+    outcome.unwrap_or_else(|error| Some(format!("BudgetReplayFailed:{error:#}")))
+}
+
 #[cfg(test)]
 #[path = "campaign_budget_tests.rs"]
 mod tests;

@@ -93,6 +93,9 @@ pub struct ChildrenVerification {
     pub children: Vec<ChildVerification>,
     /// Studies the ledger records as run (qualified, unqualified or failed) that have no directory.
     pub missing: Vec<String>,
+    /// The cumulative budget replay found a problem (`campaign_budget::replay`); absent when it is clean.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_problem: Option<String>,
 }
 
 impl ChildrenVerification {
@@ -181,6 +184,7 @@ impl ChildrenVerification {
     pub fn all_verified(&self) -> bool {
         !self.children.is_empty()
             && self.missing.is_empty()
+            && self.budget_problem.is_none()
             && self
                 .children
                 .iter()
@@ -325,6 +329,7 @@ pub fn verify_children(
             return Ok(ChildrenVerification {
                 children: Vec::new(),
                 missing: missing_children(campaign, uid, parent, &[])?,
+                budget_problem: None,
             });
         }
         Err(error) => return Err(error.into()),
@@ -427,6 +432,7 @@ pub fn verify_children(
     let present: Vec<String> = children.iter().map(|child| child.study.clone()).collect();
     Ok(ChildrenVerification {
         missing: missing_children(campaign, uid, parent, &present)?,
+        budget_problem: super::campaign_budget::replay(&studies, uid, parent, &counts),
         children,
     })
 }

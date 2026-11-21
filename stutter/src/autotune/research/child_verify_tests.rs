@@ -119,6 +119,7 @@ fn every_planned_holdout_needs_its_own_reconstructed_replication() {
         completed_processes: Vec::new(),
     };
     let mut result = ChildrenVerification {
+        budget_problem: None,
         children: vec![child(&planned[0])],
         missing: Vec::new(),
     };
@@ -446,6 +447,7 @@ mod telemetry {
 
     fn summary(children: Vec<ChildVerification>) -> Option<(u32, u32)> {
         ChildrenVerification {
+            budget_problem: None,
             children,
             missing: Vec::new(),
         }
@@ -610,6 +612,7 @@ mod restoration {
 
     fn restored(children: Vec<ChildVerification>, planned: &[Disposition]) -> bool {
         ChildrenVerification {
+            budget_problem: None,
             children,
             missing: Vec::new(),
         }

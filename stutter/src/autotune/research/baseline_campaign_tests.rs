@@ -375,3 +375,56 @@ fn the_campaigns_own_raw_copy_is_what_is_verified_and_tampering_with_it_is_found
         "a tampered archive copy must not verify"
     );
 }
+
+#[test]
+fn the_cumulative_budgets_replay_from_what_the_children_sealed() {
+    let run = run_campaign();
+    let clean = verify(&run);
+    assert_eq!(clean.budget_problem, None);
+    assert!(clean.all_verified());
+
+    let campaign_path = std::fs::read_link(format!(
+        "/proc/self/fd/{}",
+        std::os::fd::AsRawFd::as_raw_fd(&run.campaign)
+    ))
+    .unwrap();
+    let studies = campaign_path.join("studies");
+    let first = std::fs::read_dir(&studies)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let record = first.join("budget.json");
+    let original = std::fs::read(&record).unwrap();
+    let rewrite = |bytes: &[u8]| {
+        std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::write(&record, bytes).unwrap();
+    };
+
+    // A spend record that understates the sealed evidence is found.
+    let mut spent: crate::autotune::research::campaign_budget::Spent =
+        serde_json::from_slice(&original).unwrap();
+    spent.evidence_bytes -= 1;
+    rewrite(&serde_json::to_vec(&spent).unwrap());
+    let problem = verify(&run).budget_problem.unwrap();
+    assert!(
+        problem.starts_with("BudgetEvidenceBytesMismatch"),
+        "{problem}"
+    );
+    assert!(!verify(&run).all_verified());
+
+    // A total over the authorized active time is found.
+    spent = serde_json::from_slice(&original).unwrap();
+    spent.active_seconds = u64::from(run.parent.max_active_seconds) + 1;
+    rewrite(&serde_json::to_vec(&spent).unwrap());
+    assert_eq!(
+        verify(&run).budget_problem.as_deref(),
+        Some("CampaignActiveSecondsExceeded")
+    );
+
+    // A child with no spend record is found rather than assumed free.
+    std::fs::remove_file(&record).unwrap();
+    let problem = verify(&run).budget_problem.unwrap();
+    assert!(problem.starts_with("BudgetRecordMissing"), "{problem}");
+}
