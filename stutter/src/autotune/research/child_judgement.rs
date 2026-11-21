@@ -6,7 +6,6 @@ use super::{
     child_ledger::Disposition,
     child_study::{Stage, StudyResult},
     driver::{FailureClass, build_schedule},
-    native_context::ProfileConformance,
     report::{AttemptEvidenceV1, ResearchReportV1, evidence_context_consistent},
     report_store::{read_evidence, read_private},
     study_executor::{AttemptsOutcome, judge},
@@ -51,19 +50,13 @@ pub(super) fn verify_qualification(
         "evidence",
     )?);
     let evidence: BTreeMap<u32, AttemptEvidenceV1> = read_evidence(&evidence_dir, uid)?;
+    let applied = read_private(dir, super::init_receipt::SETTINGS_RECEIPT, uid)
+        .ok()
+        .and_then(|bytes| super::init_receipt::read_settings_receipt(&bytes))
+        .unwrap_or_default();
     let conformance = evidence
         .values()
-        .map(|item| {
-            if item.long_session.is_some() {
-                return ProfileConformance::NotSpecified;
-            }
-            item.native_completion
-                .as_deref()
-                .and_then(|native| native.context.as_ref())
-                .map_or(ProfileConformance::Unproven, |context| {
-                    context.conformance_in(study.profile, study.stage)
-                })
-        })
+        .map(|item| super::init_receipt::conformance_of(item, &applied, &study))
         .collect();
     let (tail_metric, run_fps) = super::metric_plan::run_values(
         evidence

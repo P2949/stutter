@@ -50,3 +50,61 @@ pub(crate) fn read_feature_receipt(bytes: &[u8]) -> Option<Observed> {
     }
     Some(observed)
 }
+
+/// The file a study records the settings digests its applied profile left, beside itself.
+pub(crate) const SETTINGS_RECEIPT: &str = "applied-settings.json";
+
+pub(crate) fn settings_receipt_bytes(digests: &[String]) -> anyhow::Result<Vec<u8>> {
+    Ok(serde_json::to_vec(
+        &serde_json::json!({ "sha256": digests }),
+    )?)
+}
+
+/// The recorded digests; any other shape proves nothing (`None`).
+pub(crate) fn read_settings_receipt(bytes: &[u8]) -> Option<Vec<String>> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let digests: Vec<String> = value["sha256"]
+        .as_array()?
+        .iter()
+        .map(|d| d.as_str().map(str::to_owned))
+        .collect::<Option<_>>()?;
+    digests
+        .iter()
+        .all(|d| d.len() == 64 && d.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then_some(digests)
+}
+
+/// Whether a result ran with the settings the profile left: its sealed settings hash is one of them. With
+/// no recorded digests (no profile was applied, or an older study) there is nothing to hold it to.
+pub(crate) fn settings_conform(
+    applied: &[String],
+    native: &super::cyberpunk::CyberpunkBenchmarkCompletion,
+) -> bool {
+    applied.is_empty() || applied.contains(&native.settings_sha256)
+}
+
+/// One completed attempt's conformance to its study's frozen profile: a long session specifies none, a
+/// result that ran with settings the applied profile did not leave violates it, and otherwise the game's own
+/// reported context is judged. The live outcome and every verifier use this one function.
+pub(crate) fn conformance_of(
+    item: &super::report::AttemptEvidenceV1,
+    applied: &[String],
+    study: &super::child_study::ChildStudy,
+) -> super::native_context::ProfileConformance {
+    use super::native_context::ProfileConformance;
+    if item.long_session.is_some() {
+        return ProfileConformance::NotSpecified;
+    }
+    let Some(native) = item.native_completion.as_deref() else {
+        return ProfileConformance::Unproven;
+    };
+    if !settings_conform(applied, native) {
+        return ProfileConformance::Violates;
+    }
+    native
+        .context
+        .as_ref()
+        .map_or(ProfileConformance::Unproven, |context| {
+            context.conformance_in(study.profile, study.stage)
+        })
+}

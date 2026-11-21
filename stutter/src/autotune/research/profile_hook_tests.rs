@@ -73,7 +73,21 @@ fn every_arm_takes_the_profile_and_every_arm_is_restored_byte_for_byte() {
                 .contains("\"value\": false")
         );
     }
+    // The digests are exactly what each arm's file holds now: what a game launched next will run with.
+    let mut expected: Vec<String> = a
+        .paths
+        .iter()
+        .map(|p| stutter_core::hash::sha256_hex(&std::fs::read(p).unwrap()))
+        .collect();
+    let mut left = hook.applied_digests();
+    expected.sort();
+    left.sort();
+    assert_eq!(left, expected);
     assert!(hook.restore().is_ok());
+    assert!(
+        hook.applied_digests().is_empty(),
+        "nothing is applied once restored"
+    );
     assert_eq!(bytes(&a_paths(&a.paths)), original);
     // A profile that changes no graphics settings applies nothing and needs no restore.
     let none = arms(1, &[]);

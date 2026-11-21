@@ -22,6 +22,7 @@ fn run(
         let outcome = match fps(slot) {
             Some(average_fps) => {
                 let item = AttemptEvidenceV1 {
+                    thermal: None,
                     long_session: None,
                     schema_version: 1,
                     slot_index: slot.index,
@@ -110,6 +111,7 @@ fn tampered_evidence_and_schedule_drift_are_rejected() {
     evidence.insert(
         0,
         AttemptEvidenceV1 {
+            thermal: None,
             long_session: None,
             schema_version: 1,
             slot_index: 0,
@@ -167,6 +169,7 @@ fn native_completion_must_match_the_frozen_attempt_before_sealing() {
         }],
     };
     let mut evidence = AttemptEvidenceV1 {
+        thermal: None,
         long_session: None,
         schema_version: 1,
         slot_index: slot.index,
@@ -201,6 +204,7 @@ fn native_completions_decide_consistent_or_drifted_context() {
     let make = |slot: &AttemptSlot| {
         let tool = intent.tools.iter().find(|t| t.source == slot.arm).unwrap();
         AttemptEvidenceV1 {
+            thermal: None,
             long_session: None,
             schema_version: 1,
             slot_index: slot.index,
@@ -408,6 +412,7 @@ fn valid_native_evidence(intent: &ResearchIntentV1, slot: &AttemptSlot) -> Attem
         .find(|tool| tool.source == slot.arm)
         .unwrap();
     AttemptEvidenceV1 {
+        thermal: None,
         long_session: None,
         schema_version: 1,
         slot_index: slot.index,

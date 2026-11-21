@@ -11,6 +11,7 @@ use crate::autotune::research::{
 pub(crate) fn item(index: u32, stats: Option<FrameStats>, fps: f64) -> AttemptEvidenceV1 {
     let intent = crate::autotune::research::tests::intent();
     AttemptEvidenceV1 {
+        thermal: None,
         long_session: None,
         schema_version: 1,
         slot_index: index,

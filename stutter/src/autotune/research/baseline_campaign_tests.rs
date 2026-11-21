@@ -21,13 +21,20 @@ use crate::autotune::research::{
 /// The built-in benchmark is a fixed fly-through of this many seconds.
 const SCENE_SECONDS: f64 = 64.25;
 
-struct NoProfiles;
+/// No settings file is touched; when `digests` is non-empty the profile claims to have applied and to have
+/// left the settings files with those digests.
+struct NoProfiles {
+    digests: Vec<String>,
+}
 impl ProfileHook for NoProfiles {
     fn apply(
         &mut self,
         _: crate::autotune::research::child_study::Profile,
     ) -> Result<bool, ProfileFailure> {
-        Ok(false)
+        Ok(!self.digests.is_empty())
+    }
+    fn applied_digests(&self) -> Vec<String> {
+        self.digests.clone()
     }
     fn recover(&mut self) -> Result<(), &'static str> {
         Ok(())
@@ -184,6 +191,7 @@ impl AttemptHost for NativeHost {
             self.initialized = self.warms_prefix;
             return Progress::Finished {
                 evidence: AttemptEvidenceV1 {
+                    thermal: None,
                     long_session: None,
                     schema_version: 1,
                     slot_index: slot.index,
@@ -195,6 +203,7 @@ impl AttemptHost for NativeHost {
         let native = self.write_result(&slot);
         Progress::Finished {
             evidence: AttemptEvidenceV1 {
+                thermal: None,
                 long_session: None,
                 schema_version: 1,
                 slot_index: slot.index,
@@ -211,6 +220,7 @@ impl AttemptHost for NativeHost {
 fn composed(
     init_arms: Vec<ProtonSource>,
     warms_prefix: bool,
+    profile_digests: Vec<String>,
 ) -> (
     tempfile::TempDir,
     tempfile::TempDir,
@@ -259,7 +269,9 @@ fn composed(
     let driver = FunnelDriver::new(
         &campaign,
         &parent,
-        Box::new(NoProfiles),
+        Box::new(NoProfiles {
+            digests: profile_digests,
+        }),
         attempts,
         |_| None,
         rules,
@@ -281,8 +293,21 @@ fn run_campaign() -> Finished {
     run_campaign_with(Vec::new(), true)
 }
 
+fn run_campaign_with_profile(digests: Vec<String>) -> Finished {
+    run_campaign_full(Vec::new(), true, digests)
+}
+
 fn run_campaign_with(init_arms: Vec<ProtonSource>, warms_prefix: bool) -> Finished {
-    let (root, results, mut driver, parent, campaign) = composed(init_arms, warms_prefix);
+    run_campaign_full(init_arms, warms_prefix, Vec::new())
+}
+
+fn run_campaign_full(
+    init_arms: Vec<ProtonSource>,
+    warms_prefix: bool,
+    profile_digests: Vec<String>,
+) -> Finished {
+    let (root, results, mut driver, parent, campaign) =
+        composed(init_arms, warms_prefix, profile_digests);
     for _ in 0..4000 {
         match driver.tick(&mut || Ok(())).unwrap() {
             Step::Done => {
@@ -517,4 +542,60 @@ fn an_initialization_that_leaves_the_prefix_cold_blocks_every_screen_rather_than
         ),
         "{all:?}"
     );
+}
+
+#[test]
+fn every_result_must_have_run_with_the_settings_the_applied_profile_left() {
+    use crate::autotune::research::child_study::Stage;
+    // The synthetic results seal this settings hash; a profile that left exactly it conforms.
+    let ran_with = "c".repeat(64);
+    let run = run_campaign_with_profile(vec!["d".repeat(64), ran_with.clone()]);
+    let all = run.driver.dispositions();
+    assert!(
+        all.iter().all(|d| d.result == Some(StudyResult::Qualified)),
+        "{all:?}"
+    );
+    let verified = verify(&run);
+    assert!(verified.all_verified());
+    assert!(verified.children.iter().all(|c| c.problem.is_none()));
+
+    // A recorded digest list that does not contain what a result ran with is found offline: the study
+    // can no longer be the qualified one it claims to be.
+    let campaign_path = std::fs::read_link(format!(
+        "/proc/self/fd/{}",
+        std::os::fd::AsRawFd::as_raw_fd(&run.campaign)
+    ))
+    .unwrap();
+    let screen = std::fs::read_dir(campaign_path.join("studies"))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.join(crate::autotune::research::init_receipt::SETTINGS_RECEIPT)
+                .is_file()
+        })
+        .expect("a study recorded the settings its profile left");
+    let receipt = screen.join(crate::autotune::research::init_receipt::SETTINGS_RECEIPT);
+    std::fs::set_permissions(&receipt, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(
+        &receipt,
+        crate::autotune::research::init_receipt::settings_receipt_bytes(&["e".repeat(64)]).unwrap(),
+    )
+    .unwrap();
+    let tampered = verify(&run);
+    assert!(
+        tampered.children.iter().any(|c| c.problem.is_some()),
+        "a result that ran with other settings must not verify as qualified"
+    );
+    let _ = Stage::Screen;
+}
+
+#[test]
+fn a_profile_that_left_other_settings_than_the_game_ran_with_is_unqualified() {
+    use crate::autotune::research::child_study::Stage;
+    let run = run_campaign_with_profile(vec!["e".repeat(64)]);
+    let all = run.driver.dispositions();
+    let screen = all.iter().find(|d| d.stage == Stage::Screen).unwrap();
+    assert_eq!(screen.result, Some(StudyResult::Unqualified), "{all:?}");
+    assert_eq!(screen.reason, "ProfileViolated");
 }

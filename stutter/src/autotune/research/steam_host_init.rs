@@ -41,6 +41,7 @@ impl<P: SteamPort> SteamAttemptHost<P> {
         self.warm_since = None;
         Progress::Finished {
             evidence: AttemptEvidenceV1 {
+                thermal: None,
                 long_session: None,
                 schema_version: 1,
                 slot_index: index,

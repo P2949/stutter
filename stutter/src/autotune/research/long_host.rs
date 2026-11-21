@@ -166,6 +166,7 @@ impl<H: AttemptHost, D: LongSessionDriver> AttemptHost for LongAttemptHost<H, D>
                 }
                 Progress::Finished {
                     evidence: AttemptEvidenceV1 {
+                        thermal: None,
                         schema_version: 1,
                         slot_index: index,
                         // No FPS exists: the record is the evidence, this only has to be a valid placeholder.

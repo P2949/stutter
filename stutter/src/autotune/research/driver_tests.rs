@@ -22,6 +22,7 @@ struct Fake {
 
 fn ev(slot_index: u32) -> AttemptEvidenceV1 {
     AttemptEvidenceV1 {
+        thermal: None,
         long_session: None,
         schema_version: 1,
         slot_index,

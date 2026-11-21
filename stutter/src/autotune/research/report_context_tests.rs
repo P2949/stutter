@@ -54,6 +54,7 @@ fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
         (
             index,
             AttemptEvidenceV1 {
+                thermal: None,
                 long_session: None,
                 schema_version: 1,
                 slot_index: index,
@@ -150,4 +151,45 @@ fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
     ]
     .into();
     assert_eq!(context_state(&drift_with_hole), ContextState::Drifted);
+}
+
+#[test]
+fn attempts_must_share_a_thermal_context_to_be_one_comparison() {
+    use crate::autotune::research::{
+        loaded_runtime::RuntimeBinding,
+        thermal::{ThermalContext, ThermalReading},
+    };
+    let reading = |cpu, gpu| ThermalReading {
+        cpu_mc: Some(cpu),
+        gpu_mc: Some(gpu),
+    };
+    let evidence =
+        |start_of: &dyn Fn(u32) -> i32, end_cpu: i32| -> BTreeMap<u32, AttemptEvidenceV1> {
+            (0..6u32)
+                .map(|slot| {
+                    let mut item =
+                        crate::autotune::research::metric_plan::tests::item(slot, None, 60.0);
+                    let native = item.native_completion.as_mut().unwrap();
+                    native.runtime_binding = Some(RuntimeBinding::Matched);
+                    item.thermal = Some(ThermalContext {
+                        start: reading(start_of(slot), 48_000),
+                        end: reading(end_cpu, 62_000),
+                    });
+                    (slot, item)
+                })
+                .collect()
+        };
+    // Starting within a few degrees of each other and ending cool: one comparison.
+    let steady = evidence(&|slot| 55_000 + slot as i32 * 500, 72_000);
+    assert_eq!(context_state(&steady), ContextState::Consistent);
+    // One attempt began 25 degrees hotter than the rest.
+    let hot = evidence(&|slot| if slot == 3 { 80_000 } else { 55_000 }, 72_000);
+    assert_eq!(context_state(&hot), ContextState::Drifted);
+    // Every attempt ended at a throttling temperature.
+    let throttled = evidence(&|_| 55_000, 97_000);
+    assert_eq!(context_state(&throttled), ContextState::Drifted);
+    // Some attempts recorded a thermal context and one did not: not proven.
+    let mut partial = evidence(&|_| 55_000, 72_000);
+    partial.get_mut(&2).unwrap().thermal = None;
+    assert_eq!(context_state(&partial), ContextState::Unproven);
 }

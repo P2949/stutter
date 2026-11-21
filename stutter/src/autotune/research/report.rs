@@ -32,6 +32,10 @@ pub struct AttemptEvidenceV1 {
     /// long session is verified by `long_receipt::verify` against the intent's authorized unit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub long_session: Option<Box<super::long_receipt::LongSessionRecord>>,
+    /// The CPU and GPU temperatures when the attempt launched and when its result arrived (absent for results
+    /// from before it existed, or where the host reads none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thermal: Option<super::thermal::ThermalContext>,
 }
 
 impl AttemptEvidenceV1 {
@@ -537,6 +541,17 @@ fn context_state_with_treatment(
         {
             return ContextState::Drifted;
         }
+    }
+    // The attempts must also share a thermal context: a hot start or a throttled end is not one comparison.
+    match super::thermal::state(
+        &evidence
+            .values()
+            .map(|item| item.thermal)
+            .collect::<Vec<_>>(),
+    ) {
+        super::thermal::ThermalState::Drifted => return ContextState::Drifted,
+        super::thermal::ThermalState::Unproven => unproven = true,
+        super::thermal::ThermalState::Consistent | super::thermal::ThermalState::NotRecorded => {}
     }
     if unproven {
         ContextState::Unproven

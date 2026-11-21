@@ -35,6 +35,8 @@ pub struct FileProfileHook {
     spec_for: fn(Profile) -> Result<Option<ProfileSpec>, ProfileFailure>,
     game_running: fn() -> bool,
     applied: Vec<(usize, AppliedProfile)>,
+    /// Each edited settings file's digest as the profile left it.
+    applied_digests: Vec<String>,
     /// Observed list mappings the profiles are resolved against before they are applied.
     mappings: super::profile_mappings::Mappings,
     mapping_loader: Option<MappingLoader>,
@@ -52,6 +54,7 @@ impl FileProfileHook {
             spec_for,
             game_running,
             applied: Vec::new(),
+            applied_digests: Vec::new(),
             mappings: super::profile_mappings::Mappings::default(),
             mapping_loader: None,
         }
@@ -153,7 +156,18 @@ impl ProfileHook for FileProfileHook {
                 }
             }
         }
+        // What the games will run with: the digest of every file as the profile left it.
+        self.applied_digests = self
+            .applied
+            .iter()
+            .filter_map(|(index, _)| self.files[*index].read().ok())
+            .map(|bytes| stutter_core::hash::sha256_hex(&bytes))
+            .collect();
         Ok(true)
+    }
+
+    fn applied_digests(&self) -> Vec<String> {
+        self.applied_digests.clone()
     }
 
     fn recover(&mut self) -> Result<(), &'static str> {
@@ -184,6 +198,7 @@ impl ProfileHook for FileProfileHook {
                 failed.push((index, applied));
             }
         }
+        self.applied_digests.clear();
         self.applied = failed;
         if proven {
             Ok(())

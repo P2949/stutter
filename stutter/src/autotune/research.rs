@@ -182,6 +182,7 @@ pub(crate) mod protected_state;
 pub(crate) mod raw_archive;
 pub(crate) mod replication;
 pub(crate) mod telemetry_observer;
+pub(crate) mod thermal;
 pub(crate) mod treatment;
 pub use treatment::{Treatment, TreatmentSpec};
 #[cfg_attr(

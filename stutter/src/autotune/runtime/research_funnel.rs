@@ -138,6 +138,10 @@ impl ProfileHook for RefreshingProfiles {
         self.recover_current()
     }
 
+    fn applied_digests(&self) -> Vec<String> {
+        self.current.applied_digests()
+    }
+
     fn restore(&mut self) -> Result<(), &'static str> {
         if self.unresolved {
             return Err("ProfileOwnershipUnresolved");

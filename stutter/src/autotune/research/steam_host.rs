@@ -71,6 +71,10 @@ pub struct SteamAttemptHost<P: SteamPort> {
     current_arm: Option<super::ProtonSource>,
     warm_since: Option<std::time::Instant>,
     init_settle: std::time::Duration,
+    /// Where the kernel's hwmon files are read (replaceable for tests).
+    hwmon_root: PathBuf,
+    /// The temperatures when the running attempt launched.
+    thermal_start: Option<super::thermal::ThermalReading>,
 }
 
 #[path = "steam_host_init.rs"]
@@ -101,6 +105,8 @@ impl<P: SteamPort> SteamAttemptHost<P> {
             current_arm: None,
             warm_since: None,
             init_settle: init::INIT_SETTLE,
+            hwmon_root: PathBuf::from("/sys/class/hwmon"),
+            thermal_start: None,
         }
     }
 }
@@ -203,6 +209,7 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         self.initializing = context.intent.initialization;
         self.warm_since = None;
         self.tool_dir = Some(tool_dir);
+        self.thermal_start = Some(super::thermal::read(&self.hwmon_root));
         self.port.launch(slot, context)
     }
 
@@ -251,6 +258,12 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
                 }
                 Progress::Finished {
                     evidence: AttemptEvidenceV1 {
+                        thermal: self.thermal_start.take().map(|start| {
+                            super::thermal::ThermalContext {
+                                start,
+                                end: super::thermal::read(&self.hwmon_root),
+                            }
+                        }),
                         long_session: None,
                         schema_version: 1,
                         slot_index: index,
@@ -472,6 +485,38 @@ mod tests {
         assert_eq!((evidence.slot_index, evidence.average_fps), (3, 71.5));
         assert_eq!(host.port.stops, 1);
         assert_eq!(host.port.launches, 1);
+    }
+
+    #[test]
+    fn a_result_carries_the_temperatures_at_launch_and_at_the_result() {
+        let hwmon = tempfile::tempdir().unwrap();
+        let write = |cpu: &str, gpu: &str| {
+            for (index, (name, value)) in
+                [("coretemp", cpu), ("amdgpu", gpu)].into_iter().enumerate()
+            {
+                let dir = hwmon.path().join(format!("hwmon{index}"));
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("name"), name).unwrap();
+                std::fs::write(dir.join("temp1_input"), value).unwrap();
+            }
+        };
+        write("50000", "45000");
+        let mut host = host(vec![GameState::Result {
+            completion: Box::new(completion()),
+        }]);
+        host.hwmon_root = hwmon.path().to_path_buf();
+        launch(&mut host);
+        write("73000", "64000");
+        let Progress::Finished { evidence } = host.poll() else {
+            panic!("expected a result")
+        };
+        let thermal = evidence.thermal.expect("a recorded thermal context");
+        assert_eq!(thermal.start.cpu_mc, Some(50_000));
+        assert_eq!(thermal.end.cpu_mc, Some(73_000));
+        assert_eq!(
+            (thermal.start.gpu_mc, thermal.end.gpu_mc),
+            (Some(45_000), Some(64_000))
+        );
     }
 
     #[test]

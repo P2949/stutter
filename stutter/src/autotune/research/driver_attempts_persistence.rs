@@ -73,6 +73,7 @@ impl DriverStudyAttempts {
                 self.running = None;
                 self.pending_end = None;
                 self.persist_failures = 0;
+                self.applied_settings.clear();
                 Ok(Some(outcome))
             }
             Err(error) => {
@@ -102,6 +103,39 @@ impl DriverStudyAttempts {
                 && evidence.kernel_state_proven
                 && durable,
         )
+    }
+
+    /// The settings digests the applied profile left, recorded once beside the study (an existing record
+    /// wins), and returned; empty when no profile was applied.
+    pub(super) fn settings_receipt(
+        &self,
+        study_dir: &std::fs::File,
+    ) -> anyhow::Result<Vec<String>> {
+        use crate::autotune::research::init_receipt::{
+            SETTINGS_RECEIPT, read_settings_receipt, settings_receipt_bytes,
+        };
+        if !self.applied_settings.is_empty() {
+            match write_new(
+                study_dir,
+                SETTINGS_RECEIPT,
+                &settings_receipt_bytes(&self.applied_settings)?,
+            ) {
+                Ok(()) => return Ok(self.applied_settings.clone()),
+                Err(error)
+                    if error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(crate::autotune::research::report_store::read_private(
+            study_dir,
+            SETTINGS_RECEIPT,
+            self.parent.uid,
+        )
+        .ok()
+        .and_then(|bytes| read_settings_receipt(&bytes))
+        .unwrap_or_default())
     }
 
     /// A feature study's per-attempt observation, recorded once beside the study (an existing record wins).

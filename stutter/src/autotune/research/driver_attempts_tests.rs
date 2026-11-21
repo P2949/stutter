@@ -126,6 +126,7 @@ impl AttemptHost for Host {
             .pop_front()
             .unwrap_or_else(|| Progress::Finished {
                 evidence: AttemptEvidenceV1 {
+                    thermal: None,
                     long_session: None,
                     schema_version: 1,
                     slot_index: self.current,
@@ -311,7 +312,7 @@ fn a_child_study_runs_its_own_attempts_through_the_driver_and_reports_what_was_s
         outcome
             .conformance
             .iter()
-            .all(|c| *c == ProfileConformance::Unproven)
+            .all(|c| *c == crate::autotune::research::native_context::ProfileConformance::Unproven)
     );
 }
 

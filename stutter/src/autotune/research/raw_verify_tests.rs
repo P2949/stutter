@@ -122,6 +122,7 @@ fn failed(index: u32) -> AttemptRecord {
 
 fn item(index: u32, fps: f64, native: Option<CyberpunkBenchmarkCompletion>) -> AttemptEvidenceV1 {
     AttemptEvidenceV1 {
+        thermal: None,
         long_session: None,
         schema_version: 1,
         slot_index: index,

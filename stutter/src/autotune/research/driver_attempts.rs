@@ -14,7 +14,6 @@ use super::{
     child_study::{ChildStudy, Stage},
     driver::{AttemptHost, Driver, Step, build_schedule},
     loaded_runtime::RuntimeBinding,
-    native_context::ProfileConformance,
     pilot_rule::FrozenConfirmationRule,
     report::{AttemptEvidenceV1, evidence_context_consistent},
     report_store::{read_evidence, write_new, write_report},
@@ -55,6 +54,8 @@ pub struct DriverStudyAttempts {
     /// accounting; the driver is never ticked again, only the persistence is retried.
     pending_end: Option<(bool, Option<super::driver::FailureClass>)>,
     persist_failures: u32,
+    /// The settings digests the applied profile left (set by the executor before the first attempt).
+    applied_settings: Vec<String>,
     /// An initialization study only: whether every listed arm's prefix was warm when its attempts ended,
     /// observed once by the host before the outcome is recorded.
     init_observed: Option<bool>,
@@ -117,6 +118,7 @@ impl DriverStudyAttempts {
             last_step: None,
             pending_end: None,
             persist_failures: 0,
+            applied_settings: Vec::new(),
             init_observed: None,
             override_now: None,
             gate: None,
@@ -424,19 +426,10 @@ impl DriverStudyAttempts {
         }
         let evidence_dir = open_dir(&study_dir, "evidence")?;
         let evidence: BTreeMap<_, _> = read_evidence(&evidence_dir, self.parent.uid)?;
+        let applied = self.settings_receipt(&study_dir)?;
         let conformance = evidence
             .values()
-            .map(|item| {
-                if item.long_session.is_some() {
-                    return ProfileConformance::NotSpecified;
-                }
-                item.native_completion
-                    .as_deref()
-                    .and_then(|native| native.context.as_ref())
-                    .map_or(ProfileConformance::Unproven, |context| {
-                        context.conformance_in(study.profile, study.stage)
-                    })
-            })
+            .map(|item| super::init_receipt::conformance_of(item, &applied, study))
             .collect();
         // Keep the campaign's own copy of every completed attempt's native files (hashed against the seal as
         // they are copied), then replay them against the sealed records from that copy, and require every
@@ -514,6 +507,10 @@ impl DriverStudyAttempts {
 }
 
 impl StudyAttempts for DriverStudyAttempts {
+    fn record_applied_settings(&mut self, _study: &ChildStudy, digests: Vec<String>) {
+        self.applied_settings = digests;
+    }
+
     fn required_attempts(&mut self, study: &ChildStudy) -> anyhow::Result<u32> {
         let inputs = (self.select_arms)(study)?;
         if study.stage == Stage::Pilot {

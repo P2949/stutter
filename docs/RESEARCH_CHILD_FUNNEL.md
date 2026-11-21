@@ -458,3 +458,19 @@ human-only), the game is installed but not running, and the audit forbids any ga
 selection or GPU stress while that halt stands. A long-session driver, and a causal action apply/restore with
 a GPU negative control, both require launching and driving the game, so neither can begin. Evidence:
 `StutterProtonStudies/live-items-blocked-2026-11-21.json`.
+
+## Settings and thermal context per attempt (thirteenth audit, priority 3)
+
+- **Settings actually run with:** after a profile is applied the hook reports the SHA-256 of every settings
+  file as the profile left it (`ProfileHook::applied_digests`); the executor hands them to the attempts before
+  the first launch and `applied-settings.json` is sealed beside the study. A result whose sealed
+  `settings_sha256` is not one of those digests did not run with the frozen profile (resolution, render scale
+  and every other setting included): it is `ProfileViolated`, live and in the verifier's replay. Real
+  campaign data shows the game does not rewrite the file after a run (the sealed hash equals the file's
+  current hash), so a mismatch means a changed file. A study with no recorded digests (no profile, or older)
+  is not held to this.
+- **Thermal context:** `thermal.rs` reads the CPU package (`coretemp`/`k10temp`) and GPU (`amdgpu`) hwmon
+  temperatures at launch and at the result (`SteamAttemptHost`, `AttemptEvidenceV1.thermal`; both sensors
+  exist on this host). Attempts of one study must start within 10 C of each other and none may end at or
+  above 95 C (CPU) / 100 C (GPU); a hot start or throttled end is `Drifted`, a partial or blind record is
+  `Unproven`, and results from before this existed (none recorded) are not held to it.

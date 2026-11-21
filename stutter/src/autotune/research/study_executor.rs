@@ -39,9 +39,17 @@ pub trait ProfileHook {
     fn recover(&mut self) -> Result<(), &'static str>;
     /// Put the original settings back and prove it. `Err` means the proof failed.
     fn restore(&mut self) -> Result<(), &'static str>;
+    /// SHA-256 (hex) of each settings file as the applied profile left it: what the game must then run
+    /// with. Empty when nothing is applied.
+    fn applied_digests(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 impl ProfileHook for Box<dyn ProfileHook + Send> {
+    fn applied_digests(&self) -> Vec<String> {
+        (**self).applied_digests()
+    }
     fn apply(&mut self, profile: Profile) -> Result<bool, ProfileFailure> {
         (**self).apply(profile)
     }
@@ -124,6 +132,9 @@ pub trait StudyAttempts {
     fn take_step(&mut self) -> Option<super::driver::Step> {
         None
     }
+    /// The profile's settings files as it left them, recorded once before the first attempt so a
+    /// verifier can check what each game run actually used.
+    fn record_applied_settings(&mut self, _study: &ChildStudy, _digests: Vec<String>) {}
     /// Cancel the running attempt and independently settle it. `Ok` only when no game or worker
     /// owner remains (the settlement witness agrees); anything unproven is an `Err`.
     fn abort(&mut self) -> Result<(), &'static str>;
@@ -451,6 +462,10 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
                     return Ok(Some(unresolved(0, reason)));
                 }
             };
+            if applied {
+                let digests = self.profiles.applied_digests();
+                self.attempts.record_applied_settings(study, digests);
+            }
             self.state = State::Running { applied };
         }
         let State::Running { applied } = self.state else {
