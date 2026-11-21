@@ -380,3 +380,34 @@ record, its recorded evidence bytes must equal what its own sealed evidence cost
 totals (active seconds, evidence bytes, and the attempts the ledger counted) must stay within what the
 operator authorized. A problem is `ChildrenVerification.budget_problem` and `all_verified` requires none.
 Active seconds are the child's own record and are bounded, not rebuilt.
+
+## Production composition of prefix initialization: the remaining design (not yet built)
+
+The stage (`prefix_init_stage`), phase (`init_phase`) and Steam host (`init_steam_host`) are built and
+tested against synthetic hosts. They cannot be composed into the resident funnel as they stand, because a
+real initialization launch needs what only the journalled `Driver` provides: a per-attempt dispatch
+directory, launch tickets (`dispatch_context::arm_attempt_in_root`), the lease's launching phase, claim
+settlement receipts and a sealed journal record. Building those a second time inside the phase would be a
+second launch authority, which the restrictions forbid. The intended composition is therefore an
+initialization *child study*, run by the existing funnel and Driver:
+
+1. A frozen `prefix_init_arms` list on the campaign intent (omitted when empty, so existing intents and
+   digests are unchanged), recorded at issue time from `prefix_init::plan` (cold arms only).
+2. `Stage::Init` in `child_study::plan` only when that list is non-empty: one attempt per listed arm, a
+   dependency of every screen. It needs a profile that applies no graphics settings (a `Profile::None`
+   or an explicit bypass in the profile hook), because the settings file does not exist yet.
+3. `SteamAttemptHost` gains an initialization purpose: `ResultProbe::begin` is not called, the game
+   ending (`ExitedWithoutResult`) is the success path, and `Progress::Finished` carries evidence with no
+   native completion. The attempt's seal is `Completed` with that evidence; nothing is measured.
+4. `study_executor::judge` qualifies an `Init` study only when `prefix_init::initialized` holds for every
+   listed arm afterwards (warm prefix, settings present), within the 15-minute bound; otherwise the arm
+   stays cold and the profile hook blocks its studies with `BlockedPrefixNotInitialized`.
+5. `child_verify` replays an `Init` child from its journal and the prefix observation recorded in its
+   receipt; it requires no raw native files for it. `InitStageRunner` remains the journalled contract
+   for the observation and its settle/verify rules and is reused by the child's judgement.
+6. Budgets: each init attempt is charged like any attempt (time and attempts) against the campaign.
+
+Touch points: `ResearchIntentV1`, `child_study::{Stage, Profile, plan}`, `child_intent`,
+`profile_hook`, `steam_host`, `study_executor::judge`, `child_verify`, the final bundle's study rows and
+the synthetic baseline campaign (extend it with a cold arm). This is a schema-level change to the frozen
+intent and the study plan and should be decided by the reviewer before it is built.
