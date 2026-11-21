@@ -107,6 +107,14 @@ pub(crate) mod init_phase;
     not(test),
     expect(
         dead_code,
+        reason = "staged: the composition supplies the initialization launch context"
+    )
+)]
+pub(crate) mod init_steam_host;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "consumed by the resident capture once a live game source is qualified"
     )
 )]

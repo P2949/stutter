@@ -303,3 +303,9 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
   finished; cancellation and shutdown cancel and settle a launch in flight.
 - The production `InitHost` over the authenticated Steam launcher (non-measurement launch purpose) is
   the remaining step; the stage and phase are exercised against synthetic hosts only.
+- `init_steam_host::SteamInitHost` is the production `InitHost` over the same authenticated `SteamPort` the
+  measured attempts use (same safe-window, GPU-health, disk-reserve and dispatcher admission, same
+  independent settlement witness). Initialization differs only in purpose: nothing is measured and the
+  game ending is the expected outcome, settled through `port.stop()`. A voided launch (GPU reset,
+  identity mismatch) is settled before it is reported. The composition supplies the per-arm attempt slot
+  and dispatch context; this module builds no identity.
