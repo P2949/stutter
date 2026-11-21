@@ -607,8 +607,14 @@ fn study_checks(
             for &val in c3_runs {
                 runs.push((super::ProtonSource::CachyOsV3, val));
             }
-            let expected_rule =
-                super::pilot_rule::rule_from_runs(&runs).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let pilot_tail = planned
+                .depends_on
+                .iter()
+                .find_map(|digest| rules.get(digest))
+                .is_some_and(|rule| rule.tail_metric);
+            let expected_rule = super::pilot_rule::rule_from_runs(&runs)
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .with_tail_metric(pilot_tail);
             anyhow::ensure!(
                 child.confirmation_rule.as_ref() == Some(&expected_rule),
                 "the matched CachyOS study does not run under its own frozen rule"

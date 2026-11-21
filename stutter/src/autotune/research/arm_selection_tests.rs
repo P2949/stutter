@@ -287,6 +287,18 @@ mod inputs {
             inputs.rule,
             Some(crate::autotune::research::pilot_rule::rule_from_runs(&expected).unwrap())
         );
+        // Under a pilot that froze the tail metric, the matched rule carries it too.
+        let tail_pilot = freeze(&[70.0, 73.0, 67.0]).unwrap().with_tail_metric(true);
+        let tail = inputs_for_study(&intent, &matched, &fps, Some(tail_pilot)).unwrap();
+        assert_eq!(
+            tail.rule,
+            Some(
+                crate::autotune::research::pilot_rule::rule_from_runs(&expected)
+                    .unwrap()
+                    .with_tail_metric(true)
+            )
+        );
+        assert!(tail.rule.unwrap().is_consistent());
         let mut missing = fps;
         missing.remove(&ProtonSource::CachyOsV3);
         assert!(inputs_for_study(&intent, &matched, &missing, None).is_err());

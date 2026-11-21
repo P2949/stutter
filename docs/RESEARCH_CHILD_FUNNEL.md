@@ -360,7 +360,7 @@ digest only changes for the tail, so earlier rules are unchanged). The confirmat
 studies then keep the frozen metric (`metric_plan::values(.., Some(frozen))`); evidence that cannot supply
 it is an error, never a silent switch to another metric. The synthetic baseline campaign now runs on the
 tail metric end to end and every child report names `primary_metric = native_p99_frame_ms`. The matched
-CachyOS rule is derived from the selection values and carries no flag (judged on the average).
+CachyOS rule is derived from the selection values and carries its pilot's frozen metric (the dependency rule's flag), in both the funnel and the verifier.
 
 ## Raw native archive (thirteenth audit, priority 3)
 

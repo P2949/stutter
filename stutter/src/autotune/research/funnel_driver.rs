@@ -87,8 +87,10 @@ pub fn inputs_for_study(
                         for &v in c3_runs {
                             runs.push((super::ProtonSource::CachyOsV3, v));
                         }
+                        // The matched rule stands on the metric its pilot froze (the dependency's rule).
                         let matched_rule = super::pilot_rule::rule_from_runs(&runs)
-                            .map_err(|e| anyhow::anyhow!("{e}"))?;
+                            .map_err(|e| anyhow::anyhow!("{e}"))?
+                            .with_tail_metric(rule.as_ref().is_some_and(|rule| rule.tail_metric));
                         StudyInputs {
                             arms: vec![
                                 super::ProtonSource::CachyOs,
