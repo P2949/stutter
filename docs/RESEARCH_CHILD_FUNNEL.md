@@ -288,28 +288,6 @@ real 2026-11-15 lease it reports a valid chain that stopped in `Launching`.
 - Scene length: a benchmark whose frames/averageFps differs by more than 5% from the others marks the
   native context `Drifted`.
 
-## Prefix initialization stage (thirteenth audit, priority 2)
-
-- `prefix_init_stage::InitStageRunner` runs one arm's journalled stage (`Planned -> Launched -> Settled ->
-  Verified | Abandoned`) tick by tick over an injected `InitHost` (launch, observe, terminate-and-prove).
-  It never replays a launch: one found unfinished after a restart is only settled. A launch needs the
-  whole 15-minute bound authorized (never shortened) and an overdue one is terminated and proven gone.
-- `init_phase::InitPhase` walks the cold arms in turn (warm or already-verified arms are skipped, an
-  indeterminate prefix is not touched), calls the controller's launch fence before each launch, charges
-  the elapsed seconds against the authorized initialization time, and abandons an arm that does not
-  initialize (it stays cold, so the profile hook blocks its studies). Only an unprovable settlement ends
-  the campaign.
-- `FunnelDriver::with_init_phase` runs the phase before any study: ticks show `Waiting` until it is
-  finished; cancellation and shutdown cancel and settle a launch in flight.
-- The production `InitHost` over the authenticated Steam launcher (non-measurement launch purpose) is
-  the remaining step; the stage and phase are exercised against synthetic hosts only.
-- `init_steam_host::SteamInitHost` is the production `InitHost` over the same authenticated `SteamPort` the
-  measured attempts use (same safe-window, GPU-health, disk-reserve and dispatcher admission, same
-  independent settlement witness). Initialization differs only in purpose: nothing is measured and the
-  game ending is the expected outcome, settled through `port.stop()`. A voided launch (GPU reset,
-  identity mismatch) is settled before it is reported. The composition supplies the per-arm attempt slot
-  and dispatch context; this module builds no identity.
-
 ## Native tail metric (thirteenth audit, priority 3)
 
 - `frame_stats::FrameStats` (p99 frame time by nearest rank, 1%-low FPS) is computed from the verified
@@ -381,33 +359,31 @@ totals (active seconds, evidence bytes, and the attempts the ledger counted) mus
 operator authorized. A problem is `ChildrenVerification.budget_problem` and `all_verified` requires none.
 Active seconds are the child's own record and are bounded, not rebuilt.
 
-## Production composition of prefix initialization: the remaining design (not yet built)
+## Prefix initialization as a child study (thirteenth audit, priority 2)
 
-The stage (`prefix_init_stage`), phase (`init_phase`) and Steam host (`init_steam_host`) are built and
-tested against synthetic hosts. They cannot be composed into the resident funnel as they stand, because a
-real initialization launch needs what only the journalled `Driver` provides: a per-attempt dispatch
-directory, launch tickets (`dispatch_context::arm_attempt_in_root`), the lease's launching phase, claim
-settlement receipts and a sealed journal record. Building those a second time inside the phase would be a
-second launch authority, which the restrictions forbid. The intended composition is therefore an
-initialization *child study*, run by the existing funnel and Driver:
+A cold arm is initialized by its own child study run by the existing funnel and `Driver`, never by a second
+launch authority:
 
-1. A frozen `prefix_init_arms` list on the campaign intent (omitted when empty, so existing intents and
-   digests are unchanged), recorded at issue time from `prefix_init::plan` (cold arms only).
-2. `Stage::Init` in `child_study::plan` only when that list is non-empty: one attempt per listed arm, a
-   dependency of every screen. It needs a profile that applies no graphics settings (a `Profile::None`
-   or an explicit bypass in the profile hook), because the settings file does not exist yet.
-3. `SteamAttemptHost` gains an initialization purpose: `ResultProbe::begin` is not called, the game
-   ending (`ExitedWithoutResult`) is the success path, and `Progress::Finished` carries evidence with no
-   native completion. The attempt's seal is `Completed` with that evidence; nothing is measured.
-4. `study_executor::judge` qualifies an `Init` study only when `prefix_init::initialized` holds for every
-   listed arm afterwards (warm prefix, settings present), within the 15-minute bound; otherwise the arm
-   stays cold and the profile hook blocks its studies with `BlockedPrefixNotInitialized`.
-5. `child_verify` replays an `Init` child from its journal and the prefix observation recorded in its
-   receipt; it requires no raw native files for it. `InitStageRunner` remains the journalled contract
-   for the observation and its settle/verify rules and is reused by the child's judgement.
-6. Budgets: each init attempt is charged like any attempt (time and attempts) against the campaign.
-
-Touch points: `ResearchIntentV1`, `child_study::{Stage, Profile, plan}`, `child_intent`,
-`profile_hook`, `steam_host`, `study_executor::judge`, `child_verify`, the final bundle's study rows and
-the synthetic baseline campaign (extend it with a cold arm). This is a schema-level change to the frozen
-intent and the study plan and should be decided by the reviewer before it is built.
+- `ResearchIntentV1.prefix_init_arms` (omitted when empty, so existing intents and digests are unchanged)
+  freezes the arms whose prefix was cold when the campaign was issued; it must name distinct authorized
+  tools. It is operator-authored with the rest of the intent; a cold arm left out is still safe, because
+  the profile hook blocks its studies (`BlockedPrefixNotInitialized`).
+- `child_study::plan` opens with `Stage::Init` only when that list is non-empty (one attempt per listed
+  arm) and every screen depends on it; an unqualified initialization therefore blocks every study that
+  rests on it (`PredecessorNotQualified`) instead of comparing cold prefixes.
+- The Init child's intent has `initialization = true` and exactly the listed arms. Its schedule is one
+  attempt per arm (`init_schedule`; no balanced blocks, one arm is enough). The executor applies no
+  profile for it.
+- `SteamAttemptHost` (`steam_host_init.rs`) runs an initialization attempt through the same authenticated
+  port as every attempt (same admission, tickets, settlement witness): it stops the game, proven gone
+  through the port, once the arm's registry and `UserSettings.json` have held for 15 s, or lets it end;
+  the placeholder evidence has no native completion, so nothing is measured.
+- After the attempts the host observes the prefixes once (`check_prefixes`); `init-observation.json` is
+  sealed beside the study and the live judgement and every verifier read the same record
+  (`init_receipt`). The study qualifies only when every listed arm was observed warm.
+- `child_verify` replays an Init child from its journal and that receipt; it needs no raw native files or
+  runtime match, and its cold cohort is exempt from the warm-cohort rule. The synthetic baseline campaign
+  covers a cold arm (nine studies, all verified) and an initialization that leaves the prefix cold (every
+  dependent study blocked).
+- `prefix_init` (the journalled stage contract) remains as a staged module; the earlier standalone stage
+  runner, phase and Steam init host were removed in favour of this composition.

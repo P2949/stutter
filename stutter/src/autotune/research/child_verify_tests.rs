@@ -49,6 +49,7 @@ fn built(parent: &ResearchIntentV1, study: &ChildStudy) -> ResearchIntentV1 {
         }
         StudyArms::Pair => vec![ProtonSource::ValveStable, ProtonSource::Ge],
         StudyArms::Single => vec![ProtonSource::ValveStable],
+        StudyArms::Listed => parent.prefix_init_arms.clone(),
     };
     let rule = matches!(
         study.stage,

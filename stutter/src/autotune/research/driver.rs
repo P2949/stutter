@@ -157,6 +157,9 @@ pub fn build_schedule(intent: &ResearchIntentV1) -> anyhow::Result<Vec<AttemptSl
     } else {
         intent.tools.iter().map(|tool| tool.source).collect()
     };
+    if intent.initialization {
+        return super::init_schedule::slots(intent, &digest, &arms);
+    }
     anyhow::ensure!(
         arms.len() >= 2,
         "a comparison needs at least two eligible tools"

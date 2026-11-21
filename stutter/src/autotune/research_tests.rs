@@ -46,6 +46,8 @@ pub(super) fn intent() -> ResearchIntentV1 {
         confirmation_rule: None,
         long_attempt_seconds: None,
         prefix_cohort: None,
+        prefix_init_arms: Vec::new(),
+        initialization: false,
         treatment: None,
     }
 }

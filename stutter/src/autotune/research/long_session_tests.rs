@@ -159,6 +159,7 @@ fn a_long_child_intent_carries_the_long_window_validates_and_is_derived_from_its
             StudyArms::All | StudyArms::Viable => sources,
             StudyArms::Pair => sources[..2].to_vec(),
             StudyArms::Single => sources[..1].to_vec(),
+            StudyArms::Listed => campaign.prefix_init_arms.clone(),
         };
         let Ok(child) = child_intent(&campaign, &study, &arms, None) else {
             continue;

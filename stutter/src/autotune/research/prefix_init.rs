@@ -192,14 +192,6 @@ impl<'a> InitJournal<'a> {
         self.records.last().map(|(record, _)| record.stage)
     }
 
-    /// When the launch was recorded, if it was.
-    pub fn launched_at(&self) -> Option<u64> {
-        self.records
-            .iter()
-            .find(|(record, _)| record.stage == InitStage::Launched)
-            .map(|(record, _)| record.unix_seconds)
-    }
-
     /// Append the next stage, observing the prefix now. A transition the machine does not permit,
     /// a late `Verified`, or `Verified` over a prefix without settings and registry is refused.
     /// Settlement and abandonment remain recordable after expiry so cleanup is never hidden.

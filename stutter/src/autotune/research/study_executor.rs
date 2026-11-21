@@ -263,6 +263,21 @@ pub(super) fn judge(study: &ChildStudy, outcome: &AttemptsOutcome) -> StudyRun {
         run(StudyResult::Failed, used, class.terminal_code(), true)
     } else if outcome.health_halt {
         run(StudyResult::Failed, used, "GpuReset", true)
+    } else if study.stage == Stage::Init {
+        // Nothing is measured: it qualifies only when every listed arm ran and its prefix was then observed
+        // to hold what initialization creates.
+        if outcome.attempts_used < study.min_attempts || outcome.completed < study.min_attempts {
+            run(StudyResult::Failed, used, "IncompleteAttempts", false)
+        } else if outcome.stage_evidence == Some(true) {
+            run(StudyResult::Qualified, used, "", false)
+        } else {
+            run(
+                StudyResult::Unqualified,
+                used,
+                "InitializationUnproven",
+                false,
+            )
+        }
     } else if if matches!(study.stage, Stage::Screen) {
         !screen_sufficient(
             study.min_attempts,
@@ -343,6 +358,7 @@ fn stage_gap(study: &ChildStudy, outcome: &AttemptsOutcome) -> Option<&'static s
         }
         Stage::Feature(_) => Some("FeatureActivationUnproven"),
         Stage::Action(_) => Some("ActionEvidenceMissing"),
+        Stage::Init => Some("InitializationUnproven"),
         Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs => {
             None
         }
@@ -416,7 +432,12 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
                     false,
                 )));
             }
-            let applied = match self.profiles.apply(study.profile) {
+            // Initialization applies no settings: the settings file does not exist until it has run.
+            let applied = match if study.stage == Stage::Init {
+                Ok(false)
+            } else {
+                self.profiles.apply(study.profile)
+            } {
                 Ok(applied) => applied,
                 Err(ProfileFailure::Blocked(reason)) => {
                     return Ok(Some(run(StudyResult::Blocked, 0, reason, false)));

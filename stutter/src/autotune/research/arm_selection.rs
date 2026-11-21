@@ -123,9 +123,12 @@ pub fn select_treatment_source(
             }
             best.map(|(source, _)| source)
         }
-        Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs => {
-            None
-        }
+        Stage::Init
+        | Stage::Screen
+        | Stage::Pilot
+        | Stage::Confirm
+        | Stage::Holdout
+        | Stage::MatchedCachyOs => None,
     }
 }
 

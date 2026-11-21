@@ -38,7 +38,7 @@ pub fn child_intent(
         .filter(|tool| arms.contains(&tool.source))
         .cloned()
         .collect();
-    let minimum = if study.arms() == StudyArms::Single {
+    let minimum = if matches!(study.arms(), StudyArms::Single | StudyArms::Listed) {
         1
     } else {
         2
@@ -48,6 +48,14 @@ pub fn child_intent(
         "the arms are not distinct tools of this campaign"
     );
     match study.arms() {
+        StudyArms::Listed => anyhow::ensure!(
+            !parent.prefix_init_arms.is_empty()
+                && tools.len() == parent.prefix_init_arms.len()
+                && tools
+                    .iter()
+                    .all(|tool| parent.prefix_init_arms.contains(&tool.source)),
+            "an initialization study runs exactly the arms the intent froze as cold"
+        ),
         StudyArms::All => anyhow::ensure!(
             tools.len() == parent.tools.len(),
             "a screen runs across every authorized tool"
@@ -73,7 +81,12 @@ pub fn child_intent(
             parent.actions.contains(&action),
             "the campaign did not authorize this action"
         ),
-        Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs => {}
+        Stage::Init
+        | Stage::Screen
+        | Stage::Pilot
+        | Stage::Confirm
+        | Stage::Holdout
+        | Stage::MatchedCachyOs => {}
     }
     // A confirmation runs under the rule its pilot froze; no other study carries one.
     match (study.stage, rule) {
@@ -115,6 +128,7 @@ pub fn child_intent(
     child.child_study_sha256 = Some(study.study_sha256.clone());
     child.confirmation_rule = rule.cloned();
     child.treatment = study.treatment_spec();
+    child.initialization = study.stage == Stage::Init;
     child.validate()?;
     Ok(child)
 }

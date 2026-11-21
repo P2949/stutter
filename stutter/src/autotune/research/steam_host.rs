@@ -66,7 +66,15 @@ pub struct SteamAttemptHost<P: SteamPort> {
     treatments: Option<Vec<super::Treatment>>,
     /// The arm's frozen installation, to bind the mapped runtime to when the result arrives.
     tool_dir: Option<PathBuf>,
+    /// The running attempt only initializes its arm's prefix (`DispatchContextV1.intent.initialization`).
+    initializing: bool,
+    current_arm: Option<super::ProtonSource>,
+    warm_since: Option<std::time::Instant>,
+    init_settle: std::time::Duration,
 }
+
+#[path = "steam_host_init.rs"]
+mod init;
 
 impl<P: SteamPort> SteamAttemptHost<P> {
     /// The study's factors and whether this attempt runs them On. A within-source Off attempt runs
@@ -89,6 +97,10 @@ impl<P: SteamPort> SteamAttemptHost<P> {
             factors: Vec::new(),
             treatments: None,
             tool_dir: None,
+            initializing: false,
+            current_arm: None,
+            warm_since: None,
+            init_settle: init::INIT_SETTLE,
         }
     }
 }
@@ -187,6 +199,9 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
             code: "ScheduledToolUnavailable",
         })?;
         self.current = Some(slot.index);
+        self.current_arm = Some(slot.arm);
+        self.initializing = context.intent.initialization;
+        self.warm_since = None;
         self.tool_dir = Some(tool_dir);
         self.port.launch(slot, context)
     }
@@ -198,7 +213,16 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
                 code: "NoLaunchedAttempt".into(),
             };
         };
-        match self.port.state() {
+        let state = self.port.state();
+        let state = if self.initializing {
+            match self.init_poll(index, state) {
+                Ok(progress) => return progress,
+                Err(other) => other,
+            }
+        } else {
+            state
+        };
+        match state {
             GameState::Starting | GameState::Running => Progress::Running,
             GameState::Result { mut completion } => {
                 if self.port.stop().is_err() {

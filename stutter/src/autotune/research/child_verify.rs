@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     ProtonSource, ResearchIntentV1, ResearchJournal,
     child_verify_rules::{
-        attempt_count_matches, missing_children, receipts_valid, rule_matches_pilot,
+        action_receipts, attempt_count_matches, completed_attempts, missing_children,
+        receipts_valid, rule_matches_pilot, study_file,
     },
     driver::build_schedule,
     raw_verify::verify_raw_evidence,
@@ -227,6 +228,13 @@ pub(crate) fn derived_from(
             StudyArms::Viable => child.tools.len() >= 2,
             StudyArms::Pair => child.tools.len() == 2,
             StudyArms::Single => child.tools.len() == 1,
+            StudyArms::Listed => {
+                let named: Vec<_> = child.tools.iter().map(|tool| tool.source).collect();
+                named.len() == parent.prefix_init_arms.len()
+                    && named
+                        .iter()
+                        .all(|arm| parent.prefix_init_arms.contains(arm))
+            }
         };
     let rule_ok = match (study.stage, &child.confirmation_rule) {
         (Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs, Some(rule)) => {
@@ -247,6 +255,7 @@ pub(crate) fn derived_from(
     rebuilt.prefix_cohort = None;
     rebuilt.confirmation_rule = None;
     rebuilt.treatment = None;
+    rebuilt.initialization = false;
     // The treatment is exactly the planned study's own, and only a within-source study has one.
     let treatment_ok = child.treatment == study.treatment_spec();
     bound
@@ -296,6 +305,11 @@ pub(crate) fn verify_child(
     // A study that archived its raw files is replayed from its own copy, which no longer depends on a
     // results directory the campaign does not control; an older study is replayed from `results_for`.
     let records = journal.verify()?;
+    // An initialization child measured nothing: it has no native files to replay and no runtime to match.
+    let nothing_measured = child.initialization
+        && super::report_store::read_evidence(&evidence, uid)?
+            .values()
+            .all(|item| item.native_completion.is_none());
     let raw = if super::raw_archive::exists(dir) {
         verify_raw_evidence(&evidence, uid, &records, &|source| {
             super::raw_archive::arm_root(dir, source)
@@ -303,16 +317,18 @@ pub(crate) fn verify_child(
     } else {
         verify_raw_evidence(&evidence, uid, &records, results_for)?
     }
-    .passed();
+    .passed()
+        || nothing_measured;
     let bindings: Vec<_> = super::report_store::read_evidence(&evidence, uid)?
         .values()
         .filter_map(|item| item.native_completion.as_deref())
         .map(|native| native.runtime_binding)
         .collect();
-    let runtime = !bindings.is_empty()
-        && bindings
-            .iter()
-            .all(|binding| *binding == Some(super::loaded_runtime::RuntimeBinding::Matched));
+    let runtime = nothing_measured
+        || (!bindings.is_empty()
+            && bindings
+                .iter()
+                .all(|binding| *binding == Some(super::loaded_runtime::RuntimeBinding::Matched)));
     Ok((raw, report, runtime))
 }
 
@@ -439,27 +455,6 @@ pub fn verify_children(
     })
 }
 
-/// Studies the ledger decided after running them, whose directory is absent: a subset of valid
-/// children must not stand for the whole recorded funnel.
-/// The receipts an action child recorded in its study directory, if any.
-fn action_receipts(studies: &File, name: &str, uid: u32) -> Option<serde_json::Value> {
-    study_file(studies, name, uid, "action-receipts.json")
-}
-
-/// The journal slots of a child's completed attempts, from its sealed evidence directory.
-fn completed_attempts(studies: &File, name: &str, uid: u32) -> Vec<u32> {
-    let Ok(dir) = crate::syscall::openat_dir_nofollow(studies.as_fd(), name) else {
-        return Vec::new();
-    };
-    let dir = File::from(dir);
-    let Ok(evidence) = crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence") else {
-        return Vec::new();
-    };
-    super::report_store::read_evidence(&File::from(evidence), uid)
-        .map(|items| items.into_keys().collect())
-        .unwrap_or_default()
-}
-
 /// The game process each completed attempt's sealed native completion names.
 fn completed_processes(studies: &File, name: &str, uid: u32) -> Vec<AttemptProcess> {
     let Ok(dir) = crate::syscall::openat_dir_nofollow(studies.as_fd(), name) else {
@@ -492,12 +487,6 @@ fn completed_processes(studies: &File, name: &str, uid: u32) -> Vec<AttemptProce
         .unwrap_or_default()
 }
 
-/// A JSON file a study recorded in its own directory, if present and private.
-fn study_file(studies: &File, name: &str, uid: u32, file: &str) -> Option<serde_json::Value> {
-    let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name).ok()?);
-    serde_json::from_slice(&read_private(&dir, file, uid).ok()?).ok()
-}
-
 /// What the child must additionally satisfy given the funnel's own record of it:
 /// - a confirmation runs under exactly the rule its pilot froze (not merely a consistent one);
 /// - a qualified action study carries valid, attributable restoration receipts.
@@ -520,7 +509,9 @@ fn study_checks(
     let child: ResearchIntentV1 = serde_json::from_slice(&read_private(&dir, "intent.json", uid)?)?;
     // The prefix must be initialized for later studies. Its registry does not establish actual
     // shader-cache temperature, which remains a separate measurement question.
-    if decided.result == Some(StudyResult::Qualified) && !matches!(decided.stage, Stage::Screen) {
+    if decided.result == Some(StudyResult::Qualified)
+        && !matches!(decided.stage, Stage::Init | Stage::Screen)
+    {
         anyhow::ensure!(
             child.prefix_cohort.as_deref() == Some("warm"),
             "ColdOrUnknownCohortNotComparable"
@@ -665,7 +656,7 @@ fn selection_check(
     };
     let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name)?);
     let child: ResearchIntentV1 = serde_json::from_slice(&read_private(&dir, "intent.json", uid)?)?;
-    if decided.stage != Stage::Screen {
+    if !matches!(decided.stage, Stage::Init | Stage::Screen) {
         let planned = super::child_study::plan(parent)?
             .into_iter()
             .find(|study| study.study_sha256 == decided.study_sha256)

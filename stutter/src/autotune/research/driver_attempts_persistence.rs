@@ -81,4 +81,63 @@ impl DriverStudyAttempts {
             }
         }
     }
+
+    /// What the gate saw during an Action study: an applied action, decided, with its restoration
+    /// proven. Anything less (nothing applied, or an action still outstanding) is not evidence.
+    pub(super) fn stage_evidence(&self, study: &ChildStudy) -> Option<bool> {
+        use crate::autotune::research::child_study::Stage;
+        let (Some(gate), Stage::Action(_)) = (&self.gate, study.stage) else {
+            return None;
+        };
+        let evidence = gate.lock().ok()?.disarm();
+        // The receipts must be durable beside the study, where an independent verification reads them:
+        // a failed or conflicting write is a failed qualification, never a silent one.
+        let durable = !evidence.receipts.is_empty()
+            && self
+                .write_receipts(study, &evidence.receipts_json())
+                .is_ok();
+        Some(
+            evidence.clean
+                && !evidence.settled.is_empty()
+                && evidence.kernel_state_proven
+                && durable,
+        )
+    }
+
+    /// The initialization observation, recorded once beside the study so an independent verification reads
+    /// exactly what the live judgement stood on. An existing record wins (a retry never re-decides it).
+    pub(super) fn init_receipt(&self, study_dir: &std::fs::File) -> anyhow::Result<Option<bool>> {
+        let arms: Vec<&str> = self
+            .parent
+            .prefix_init_arms
+            .iter()
+            .map(|arm| arm.dir_name())
+            .collect();
+        if let Some(observed) = self.init_observed {
+            let bytes =
+                serde_json::to_vec(&serde_json::json!({ "arms": arms, "all_warm": observed }))?;
+            match write_new(
+                study_dir,
+                crate::autotune::research::init_receipt::INIT_RECEIPT,
+                &bytes,
+            ) {
+                Ok(()) => return Ok(Some(observed)),
+                Err(error)
+                    if error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        match crate::autotune::research::report_store::read_private(
+            study_dir,
+            crate::autotune::research::init_receipt::INIT_RECEIPT,
+            self.parent.uid,
+        ) {
+            Ok(bytes) => Ok(crate::autotune::research::init_receipt::read_init_receipt(
+                &bytes, &arms,
+            )),
+            Err(_) => Ok(None),
+        }
+    }
 }

@@ -164,6 +164,8 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         confirmation_rule: None,
         long_attempt_seconds: None,
         prefix_cohort: None,
+        prefix_init_arms: Vec::new(),
+        initialization: false,
         treatment: None,
     };
     let facts = CampaignFacts {

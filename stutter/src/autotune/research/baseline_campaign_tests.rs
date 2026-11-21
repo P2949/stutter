@@ -39,6 +39,14 @@ impl ProfileHook for NoProfiles {
 
 /// Injects only the world: launching "runs" the game, polling returns a real result folder.
 struct NativeHost {
+    /// Arms whose prefix is cold until an initialization attempt has run (empty: all warm from the start).
+    cold_until_initialized: bool,
+    initialized: bool,
+    initializing: bool,
+    /// Whether an initialization launch actually leaves a warm prefix behind.
+    warms_prefix: bool,
+    initialization_launches: u32,
+    screens_before_init: u32,
     results: PathBuf,
     intent: ResearchIntentV1,
     current: Option<AttemptSlot>,
@@ -136,10 +144,12 @@ impl AttemptHost for NativeHost {
         &mut self,
         _: &[ProtonSource],
     ) -> Result<Option<crate::autotune::research::prefix_identity::PrefixClass>, &'static str> {
-        // Every arm's prefix was initialized beforehand (the init phase, or a warm start).
-        Ok(Some(
-            crate::autotune::research::prefix_identity::PrefixClass::Warm,
-        ))
+        use crate::autotune::research::prefix_identity::PrefixClass::{Cold, Warm};
+        Ok(Some(if self.cold_until_initialized && !self.initialized {
+            Cold
+        } else {
+            Warm
+        }))
     }
     fn attempt_index(&mut self) -> Option<u32> {
         self.current.as_ref().map(|slot| slot.index)
@@ -156,13 +166,31 @@ impl AttemptHost for NativeHost {
             proton_manifest: "/m".into(),
         })
     }
-    fn launch(&mut self, slot: &AttemptSlot, _: &DispatchContextV1) -> anyhow::Result<()> {
+    fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()> {
         self.launches += 1;
+        self.initializing = context.intent.initialization;
+        if self.initializing {
+            self.initialization_launches += 1;
+        } else if self.cold_until_initialized && !self.initialized {
+            self.screens_before_init += 1;
+        }
         self.current = Some(slot.clone());
         Ok(())
     }
     fn poll(&mut self) -> Progress {
         let slot = self.current.clone().expect("polled before launch");
+        if self.initializing {
+            // The game created its prefix and was stopped: nothing was measured.
+            self.initialized = self.warms_prefix;
+            return Progress::Finished {
+                evidence: AttemptEvidenceV1 {
+                    schema_version: 1,
+                    slot_index: slot.index,
+                    average_fps: 1.0,
+                    native_completion: None,
+                },
+            };
+        }
         let native = self.write_result(&slot);
         Progress::Finished {
             evidence: AttemptEvidenceV1 {
@@ -178,7 +206,10 @@ impl AttemptHost for NativeHost {
     }
 }
 
-fn composed() -> (
+fn composed(
+    init_arms: Vec<ProtonSource>,
+    warms_prefix: bool,
+) -> (
     tempfile::TempDir,
     tempfile::TempDir,
     FunnelDriver,
@@ -191,6 +222,7 @@ fn composed() -> (
     std::fs::set_permissions(results.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let campaign = File::open(root.path()).unwrap();
     let mut parent = parent();
+    parent.prefix_init_arms = init_arms;
     parent.max_evidence_bytes = 256 * 1024 * 1024;
     parent.deadline_unix_seconds = parent.issued_unix_seconds + 40_000;
     parent.max_active_seconds = 28_000;
@@ -201,6 +233,12 @@ fn composed() -> (
         intent: parent.clone(),
         current: None,
         launches: 0,
+        cold_until_initialized: !parent.prefix_init_arms.is_empty(),
+        initialized: false,
+        initializing: false,
+        warms_prefix,
+        initialization_launches: 0,
+        screens_before_init: 0,
     };
     let results_root = results.path().to_path_buf();
     let mut now = parent.issued_unix_seconds + 1;
@@ -238,7 +276,11 @@ struct Finished {
 
 /// Run the composed funnel until every study has a recorded decision.
 fn run_campaign() -> Finished {
-    let (root, results, mut driver, parent, campaign) = composed();
+    run_campaign_with(Vec::new(), true)
+}
+
+fn run_campaign_with(init_arms: Vec<ProtonSource>, warms_prefix: bool) -> Finished {
+    let (root, results, mut driver, parent, campaign) = composed(init_arms, warms_prefix);
     for _ in 0..4000 {
         match driver.tick(&mut || Ok(())).unwrap() {
             Step::Done => {
@@ -427,4 +469,50 @@ fn the_cumulative_budgets_replay_from_what_the_children_sealed() {
     std::fs::remove_file(&record).unwrap();
     let problem = verify(&run).budget_problem.unwrap();
     assert!(problem.starts_with("BudgetRecordMissing"), "{problem}");
+}
+
+#[test]
+fn a_cold_arm_is_initialized_by_its_own_study_before_any_screen_and_the_campaign_then_verifies() {
+    let run = run_campaign_with(vec![ProtonSource::Ge], true);
+    let all = run.driver.dispositions();
+    assert_eq!(
+        all.len(),
+        9,
+        "the initialization study joins the baseline eight"
+    );
+    assert!(
+        all.iter().all(|d| d.result == Some(StudyResult::Qualified)),
+        "{all:?}"
+    );
+    // It runs first, and nothing measured ran on the cold prefix.
+    assert_eq!(
+        all[0].stage,
+        crate::autotune::research::child_study::Stage::Init
+    );
+    let verified = verify(&run);
+    assert_eq!(verified.children.len(), 9);
+    assert!(verified.missing.is_empty() && verified.budget_problem.is_none());
+    for child in &verified.children {
+        assert_eq!(child.problem, None, "{}", child.study);
+    }
+    assert!(verified.all_verified());
+}
+
+#[test]
+fn an_initialization_that_leaves_the_prefix_cold_blocks_every_screen_rather_than_comparing_cold_prefixes()
+ {
+    use crate::autotune::research::child_study::Stage;
+    let run = run_campaign_with(vec![ProtonSource::Ge], false);
+    let all = run.driver.dispositions();
+    let init = &all[0];
+    assert_eq!(init.stage, Stage::Init);
+    assert_eq!(init.result, Some(StudyResult::Unqualified));
+    assert_eq!(init.reason, "InitializationUnproven");
+    // Nothing that depends on it ran: every other study is blocked by its predecessor.
+    assert!(
+        all[1..].iter().all(
+            |d| d.result == Some(StudyResult::Blocked) && d.reason == "PredecessorNotQualified"
+        ),
+        "{all:?}"
+    );
 }

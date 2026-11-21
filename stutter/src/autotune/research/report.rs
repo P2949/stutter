@@ -219,6 +219,20 @@ pub fn build_report(
         evidence.len() == fps.len(),
         "unsealed or unexpected evidence exists"
     );
+    // An initialization study compares nothing: its report only accounts for the attempts.
+    if intent.initialization {
+        return Ok(ResearchReportV1 {
+            schema_version: 2,
+            intent_sha256: intent.digest()?,
+            attempts_scheduled: schedule.len(),
+            attempts_sealed: records.len(),
+            attempts_completed: fps.len(),
+            control,
+            arms: Vec::new(),
+            primary_metric: None,
+            treatment: None,
+        });
+    }
     // The primary metric is chosen once, from the sealed evidence, before any comparison is read.
     let (metric, fps) = super::metric_plan::values(
         evidence,

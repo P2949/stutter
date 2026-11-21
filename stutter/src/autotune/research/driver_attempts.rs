@@ -56,6 +56,9 @@ pub struct DriverStudyAttempts {
     /// accounting; the driver is never ticked again, only the persistence is retried.
     pending_end: Option<(bool, Option<super::driver::FailureClass>)>,
     persist_failures: u32,
+    /// An initialization study only: whether every listed arm's prefix was warm when its attempts ended,
+    /// observed once by the host before the outcome is recorded.
+    init_observed: Option<bool>,
     /// The controller's own `now` for the next tick, overriding the clock (one tick only).
     override_now: Option<u64>,
     /// The action gate an action child arms on the sighted game process (absent: never armed).
@@ -115,6 +118,7 @@ impl DriverStudyAttempts {
             last_step: None,
             pending_end: None,
             persist_failures: 0,
+            init_observed: None,
             override_now: None,
             gate: None,
             telemetry: None,
@@ -273,27 +277,6 @@ impl DriverStudyAttempts {
                 gate.set_attempt_on(on);
             }
         }
-    }
-
-    /// What the gate saw during an Action study: an applied action, decided, with its restoration
-    /// proven. Anything less (nothing applied, or an action still outstanding) is not evidence.
-    fn stage_evidence(&self, study: &ChildStudy) -> Option<bool> {
-        let (Some(gate), Stage::Action(_)) = (&self.gate, study.stage) else {
-            return None;
-        };
-        let evidence = gate.lock().ok()?.disarm();
-        // The receipts must be durable beside the study, where an independent verification reads them:
-        // a failed or conflicting write is a failed qualification, never a silent one.
-        let durable = !evidence.receipts.is_empty()
-            && self
-                .write_receipts(study, &evidence.receipts_json())
-                .is_ok();
-        Some(
-            evidence.clean
-                && !evidence.settled.is_empty()
-                && evidence.kernel_state_proven
-                && durable,
-        )
     }
 
     /// Record what a finished child spent of the campaign's active-time and evidence budgets.
@@ -481,6 +464,7 @@ impl DriverStudyAttempts {
         // evidence is connected, even when the environment and game-reported selection agree.
         let stage_evidence = match study.stage {
             Stage::Feature(_) => Some(false),
+            Stage::Init => self.init_receipt(&study_dir)?,
             _ => self.stage_evidence(study),
         };
         Ok(AttemptsOutcome {
@@ -683,6 +667,12 @@ impl StudyAttempts for DriverStudyAttempts {
             | Step::Cancelled
             | Step::Halted(_)
             | Step::Stopped(_) => {
+                if study.stage == Stage::Init && self.init_observed.is_none() {
+                    self.init_observed = Some(matches!(
+                        self.host.check_prefixes(&self.parent.prefix_init_arms),
+                        Ok(Some(super::prefix_identity::PrefixClass::Warm))
+                    ));
+                }
                 self.pending_end = Some((halted, terminal_failure));
                 self.persist_end(study)
             }

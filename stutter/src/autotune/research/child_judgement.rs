@@ -81,8 +81,18 @@ pub(super) fn verify_qualification(
         run_fps,
         // The current historical receipts do not independently prove feature activation or an
         // action's objective and guardrails. Never promote those claims from a live boolean.
-        stage_evidence: matches!(study.stage, Stage::Feature(_) | Stage::Action(_))
-            .then_some(false),
+        stage_evidence: if study.stage == Stage::Init {
+            let arms: Vec<&str> = parent
+                .prefix_init_arms
+                .iter()
+                .map(|arm| arm.dir_name())
+                .collect();
+            read_private(dir, super::init_receipt::INIT_RECEIPT, uid)
+                .ok()
+                .and_then(|bytes| super::init_receipt::read_init_receipt(&bytes, &arms))
+        } else {
+            matches!(study.stage, Stage::Feature(_) | Stage::Action(_)).then_some(false)
+        },
         activation: None,
         functional: None,
     };

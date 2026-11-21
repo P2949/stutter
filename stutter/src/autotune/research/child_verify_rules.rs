@@ -187,3 +187,35 @@ pub(super) fn missing_children(
             .collect(),
     )
 }
+
+/// Studies the ledger decided after running them, whose directory is absent: a subset of valid
+/// children must not stand for the whole recorded funnel.
+/// The receipts an action child recorded in its study directory, if any.
+pub(super) fn action_receipts(studies: &File, name: &str, uid: u32) -> Option<serde_json::Value> {
+    study_file(studies, name, uid, "action-receipts.json")
+}
+
+/// The journal slots of a child's completed attempts, from its sealed evidence directory.
+pub(super) fn completed_attempts(studies: &File, name: &str, uid: u32) -> Vec<u32> {
+    let Ok(dir) = crate::syscall::openat_dir_nofollow(studies.as_fd(), name) else {
+        return Vec::new();
+    };
+    let dir = File::from(dir);
+    let Ok(evidence) = crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence") else {
+        return Vec::new();
+    };
+    super::report_store::read_evidence(&File::from(evidence), uid)
+        .map(|items| items.into_keys().collect())
+        .unwrap_or_default()
+}
+
+/// A JSON file a study recorded in its own directory, if present and private.
+pub(super) fn study_file(
+    studies: &File,
+    name: &str,
+    uid: u32,
+    file: &str,
+) -> Option<serde_json::Value> {
+    let dir = File::from(crate::syscall::openat_dir_nofollow(studies.as_fd(), name).ok()?);
+    serde_json::from_slice(&read_private(&dir, file, uid).ok()?).ok()
+}

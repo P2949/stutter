@@ -79,6 +79,7 @@ fn every_stage_of_a_six_proton_campaign_builds_a_schedule_over_its_own_arms() {
             }
             StudyArms::Pair => pair().to_vec(),
             StudyArms::Single => vec![ProtonSource::ValveStable],
+            StudyArms::Listed => parent.prefix_init_arms.clone(),
         };
         let child = build(&parent, &study, &arms)
             .unwrap_or_else(|e| panic!("{:?}/{:?}: {e:#}", study.profile, study.stage));

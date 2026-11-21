@@ -89,22 +89,8 @@ pub(crate) mod gpu_health;
 pub(super) mod host;
 pub(crate) mod host_baseline;
 pub(crate) mod host_hardware;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "staged: the funnel driver adopts the phase when a launch host is supplied"
-    )
-)]
-pub(crate) mod init_phase;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "staged: the composition supplies the initialization launch context"
-    )
-)]
-pub(crate) mod init_steam_host;
+pub(crate) mod init_receipt;
+mod init_schedule;
 #[cfg_attr(
     not(test),
     expect(
@@ -189,14 +175,6 @@ pub(crate) mod pilot_rule;
     )
 )]
 pub(crate) mod prefix_init;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "staged: the production composition supplies the authenticated launch host"
-    )
-)]
-pub(crate) mod prefix_init_stage;
 pub(crate) mod profile_mappings;
 pub(crate) mod protected_state;
 pub(crate) mod raw_archive;
@@ -508,12 +486,31 @@ pub struct ResearchIntentV1 {
     /// the study was created and sealed with it (a sidecar label could be edited after the fact).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix_cohort: Option<String>,
+    /// The arms whose Wine prefix was cold when the campaign was issued: each gets one supervised,
+    /// non-measuring initialization attempt (the funnel's `Init` study) before any screen. Frozen with the
+    /// intent so the plan, and every digest bound to it, cannot be changed afterwards; absent for a
+    /// campaign that needs none, so existing digests are unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefix_init_arms: Vec<ProtonSource>,
+    /// Only on the intent of the `Init` child study: its attempts initialize a prefix and measure nothing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub initialization: bool,
 }
 
 impl ResearchIntentV1 {
     /// Validate the closed contract. This alone never grants execution authority.
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(self.schema_version == 1, "unsupported intent schema");
+        // The arms to initialize are distinct authorized tools; an initialization child runs exactly them.
+        anyhow::ensure!(
+            self.prefix_init_arms
+                .iter()
+                .all(|arm| self.tools.iter().any(|tool| tool.source == *arm))
+                && self.prefix_init_arms.iter().collect::<BTreeSet<_>>().len()
+                    == self.prefix_init_arms.len()
+                && (!self.initialization || self.child_study_sha256.is_some()),
+            "invalid prefix initialization arms"
+        );
         anyhow::ensure!(
             self.app_id == 1_091_500 && self.build_id != 0,
             "invalid game identity"

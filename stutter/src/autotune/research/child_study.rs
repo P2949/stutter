@@ -38,6 +38,9 @@ pub enum Stage {
     Action(ResearchAction),
     /// One fork-local factor at a time.
     Feature(ResearchFactor),
+    /// One supervised, non-measuring launch per cold arm so its prefix and settings exist before any
+    /// screen applies a profile (PLAN section 6.1). Present only when the intent froze cold arms.
+    Init,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -64,6 +67,8 @@ pub enum StudyArms {
     /// feature and action studies compare two conditions, so their attempt counts divide across two
     /// arms whatever the campaign's tool count is.
     Pair,
+    /// Exactly the arms the intent froze as cold: one initialization attempt each.
+    Listed,
     /// One of them, fixed after the screen (the control), measured with a factor or an action off and
     /// on: a within-source treatment, not a comparison of Proton builds.
     Single,
@@ -75,7 +80,8 @@ impl ChildStudy {
         match self.stage {
             Stage::Feature(factor) => Some(super::TreatmentSpec::Factor(factor)),
             Stage::Action(action) => Some(super::TreatmentSpec::Action(action)),
-            Stage::Screen
+            Stage::Init
+            | Stage::Screen
             | Stage::Pilot
             | Stage::Confirm
             | Stage::Holdout
@@ -85,6 +91,7 @@ impl ChildStudy {
 
     pub fn arms(&self) -> StudyArms {
         match self.stage {
+            Stage::Init => StudyArms::Listed,
             Stage::Screen => StudyArms::All,
             Stage::Pilot => StudyArms::Viable,
             Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs => StudyArms::Pair,
@@ -100,6 +107,9 @@ const CONFIRM_ATTEMPTS: u32 = 8;
 const HOLDOUT_ATTEMPTS: u32 = 8;
 const FEATURE_ATTEMPTS: u32 = 8;
 const ACTION_ATTEMPTS: u32 = 8;
+
+#[path = "child_study_init.rs"]
+mod init;
 
 fn study(
     intent_sha256: &str,
@@ -131,8 +141,15 @@ pub fn plan(intent: &ResearchIntentV1) -> anyhow::Result<Vec<ChildStudy>> {
     let tools = u32::try_from(intent.tools.len())?;
     anyhow::ensure!(tools >= 2, "a comparison needs at least two eligible tools");
     let mut studies: Vec<ChildStudy> = Vec::new();
+    let screen_deps = init::study_before_screens(intent, &digest, &mut studies)?;
     for profile in [Profile::Cpu, Profile::Gpu] {
-        studies.push(study(&digest, profile, Stage::Screen, tools, Vec::new())?);
+        studies.push(study(
+            &digest,
+            profile,
+            Stage::Screen,
+            tools,
+            screen_deps.clone(),
+        )?);
     }
     for profile in [Profile::Cpu, Profile::Gpu] {
         let deps = dependency_digests(&studies, profile, Stage::Pilot);
@@ -233,7 +250,7 @@ fn dependency_digests(studies: &[ChildStudy], profile: Profile, stage: Stage) ->
 
 fn requires(profile: Profile, stage: Stage) -> Vec<(Profile, Stage)> {
     match stage {
-        Stage::Screen => Vec::new(),
+        Stage::Init | Stage::Screen => Vec::new(),
         Stage::Pilot => vec![(profile, Stage::Screen)],
         Stage::Confirm => vec![(profile, Stage::Pilot)],
         // The holdout runs under its pilot's rule and only after the confirmation it repeats qualified.
@@ -663,7 +680,7 @@ mod tests {
         let log = simulate(&studies, tools * 2, |_| StudyResult::Qualified);
         for (_, stage, what) in &log {
             match stage {
-                Stage::Screen => assert_eq!(*what, "ran"),
+                Stage::Init | Stage::Screen => assert_eq!(*what, "ran"),
                 // An unaffordable pilot is deferred, and everything that depends on it is blocked
                 // rather than run on the leftover budget.
                 Stage::Pilot => assert_eq!(*what, "deferred"),
