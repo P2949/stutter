@@ -361,3 +361,14 @@ studies then keep the frozen metric (`metric_plan::values(.., Some(frozen))`); e
 it is an error, never a silent switch to another metric. The synthetic baseline campaign now runs on the
 tail metric end to end and every child report names `primary_metric = native_p99_frame_ms`. The matched
 CachyOS rule is derived from the selection values and carries no flag (judged on the average).
+
+## Raw native archive (thirteenth audit, priority 3)
+
+`raw_archive::archive` copies every completed attempt's sealed native files from the prefix's results
+directory into the study (`studies/<study>/raw/<arm>/<result folder>/...`, private and write-once), hashing
+each against the seal as it is copied and bounding file and study size; an existing copy must be
+byte-identical and a path that escapes its folder is refused. Replay (`verify_raw_evidence`, live in
+`DriverStudyAttempts::outcome` and offline in `child_verify`) then reads the campaign's own copy, so
+rotating, editing or deleting the prefix results afterwards cannot change or defeat verification, and
+editing the archived copy is found. Studies without a `raw/` directory (older campaigns, such as the
+preserved real one) still replay from the supplied results directory.

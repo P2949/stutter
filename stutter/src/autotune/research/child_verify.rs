@@ -287,7 +287,17 @@ pub(crate) fn verify_child(
         dir.as_fd(),
         "evidence",
     )?);
-    let raw = verify_raw_evidence(&evidence, uid, &journal.verify()?, results_for)?.passed();
+    // A study that archived its raw files is replayed from its own copy, which no longer depends on a
+    // results directory the campaign does not control; an older study is replayed from `results_for`.
+    let records = journal.verify()?;
+    let raw = if super::raw_archive::exists(dir) {
+        verify_raw_evidence(&evidence, uid, &records, &|source| {
+            super::raw_archive::arm_root(dir, source)
+        })?
+    } else {
+        verify_raw_evidence(&evidence, uid, &records, results_for)?
+    }
+    .passed();
     let bindings: Vec<_> = super::report_store::read_evidence(&evidence, uid)?
         .values()
         .filter_map(|item| item.native_completion.as_deref())

@@ -39,7 +39,17 @@ pub(crate) fn baseline_name(kind: &str, campaign: &str) -> anyhow::Result<String
 /// then renamed into place without replacing anything, so a crash never leaves a partial canonical
 /// file and an existing record is never overwritten (`AlreadyExists`).
 pub fn write_new(dir: &File, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
-    anyhow::ensure!(bytes.len() as u64 <= MAX_FILE, "record too large");
+    write_new_bounded(dir, name, bytes, MAX_FILE)
+}
+
+/// As `write_new` for a larger record (a raw native file), with the caller's own size bound.
+pub(crate) fn write_new_bounded(
+    dir: &File,
+    name: &str,
+    bytes: &[u8],
+    max: u64,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(bytes.len() as u64 <= max, "record too large");
     anyhow::ensure!(!name.starts_with('.'), "record name is reserved");
     let tmp = format!(".{name}.tmp");
     let tmp_path = format!("/proc/self/fd/{}/{tmp}", dir.as_raw_fd());

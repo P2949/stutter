@@ -319,9 +319,10 @@ fn the_production_funnel_qualifies_screens_pilots_confirmations_and_holdouts_ove
 }
 
 #[test]
-fn a_tampered_native_file_is_found_by_independent_verification_of_the_finished_campaign() {
+fn the_campaigns_own_raw_copy_is_what_is_verified_and_tampering_with_it_is_found() {
     let run = run_campaign();
-    // Change one byte of one attempt's frame file after everything was sealed.
+    // The prefix's results directory is not the campaign's to control: once the sealed files are
+    // archived, rotating or editing it changes nothing about verification.
     let victim = std::fs::read_dir(run.results.path().join("ge"))
         .unwrap()
         .next()
@@ -332,12 +333,45 @@ fn a_tampered_native_file_is_found_by_independent_verification_of_the_finished_c
     let mut bytes = std::fs::read(&victim).unwrap();
     bytes[40] ^= 1;
     std::fs::write(&victim, bytes).unwrap();
+    std::fs::remove_dir_all(run.results.path().join("valve_stable")).unwrap();
+    let verified = verify(&run);
+    assert!(
+        verified
+            .children
+            .iter()
+            .all(|child| child.problem.is_none() && child.raw_files_verified),
+        "verification stands on the archived copy"
+    );
+
+    // Editing the archived copy is found.
+    let campaign_path = std::fs::read_link(format!(
+        "/proc/self/fd/{}",
+        std::os::fd::AsRawFd::as_raw_fd(&run.campaign)
+    ))
+    .unwrap();
+    let archived = std::fs::read_dir(campaign_path.join("studies"))
+        .unwrap()
+        .flatten()
+        .map(|study| study.path().join("raw/ge"))
+        .find(|path| path.is_dir())
+        .unwrap();
+    let frames = std::fs::read_dir(&archived)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path()
+        .join("frames.csv");
+    let mut bytes = std::fs::read(&frames).unwrap();
+    bytes[40] ^= 1;
+    std::fs::set_permissions(&frames, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(&frames, bytes).unwrap();
     let verified = verify(&run);
     assert!(
         verified
             .children
             .iter()
             .any(|child| child.problem.is_some() || !child.raw_files_verified),
-        "a tampered result must not verify"
+        "a tampered archive copy must not verify"
     );
 }

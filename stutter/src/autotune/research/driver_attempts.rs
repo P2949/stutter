@@ -453,13 +453,15 @@ impl DriverStudyAttempts {
                     })
             })
             .collect();
-        // Replay every completed attempt's native files against its sealed record, and require every
+        // Keep the campaign's own copy of every completed attempt's native files (hashed against the seal as
+        // they are copied), then replay them against the sealed records from that copy, and require every
         // completed result to carry a matched runtime.
+        super::raw_archive::archive(&study_dir, &evidence, &*self.results_for)?;
         let raw = verify_raw_evidence(
             &evidence_dir,
             self.parent.uid,
             &driver.records()?,
-            &*self.results_for,
+            &|source| super::raw_archive::arm_root(&study_dir, source),
         )?;
         let runtime_matched = !evidence.is_empty()
             && evidence.values().all(|item| {

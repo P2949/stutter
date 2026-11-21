@@ -199,6 +199,7 @@ pub(crate) mod prefix_init;
 pub(crate) mod prefix_init_stage;
 pub(crate) mod profile_mappings;
 pub(crate) mod protected_state;
+pub(crate) mod raw_archive;
 pub(crate) mod replication;
 pub(crate) mod telemetry_observer;
 pub(crate) mod treatment;

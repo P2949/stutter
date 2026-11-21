@@ -8,7 +8,7 @@ use crate::autotune::research::{
     native_context::NativeContext,
 };
 
-fn item(index: u32, stats: Option<FrameStats>, fps: f64) -> AttemptEvidenceV1 {
+pub(crate) fn item(index: u32, stats: Option<FrameStats>, fps: f64) -> AttemptEvidenceV1 {
     let intent = crate::autotune::research::tests::intent();
     AttemptEvidenceV1 {
         schema_version: 1,

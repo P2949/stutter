@@ -105,4 +105,4 @@ pub(crate) fn run_values<'a>(
 
 #[cfg(test)]
 #[path = "metric_plan_tests.rs"]
-mod tests;
+pub(crate) mod tests;
