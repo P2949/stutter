@@ -230,6 +230,89 @@ mod research_action_gate {
     }
 
     #[test]
+    fn a_gated_action_runs_the_normal_decision_apply_and_stop_rollback_and_the_gate_records_it() {
+        let pid = std::process::id();
+        // GameRunnableLatency is the objective the action is judged by.
+        let cpu = CandidateAction::cpu_affinity_profile_for(
+            profile(),
+            pid,
+            crate::autotune::objective::ObjectiveKind::GameRunnableLatency,
+        );
+        let mut config = AutotuneRuntimeConfig::apply_low_risk(None, Some(pid), None)
+            .with_simulated_candidates(vec![cpu.clone()])
+            .with_simulated_action_effects();
+        config.history_log = None;
+        let mut runtime = AutotuneRuntime::new(config);
+        runtime.research_campaign_active = true;
+        let shared = gate(&[ResearchAction::CpuAffinityProfile], pid);
+        runtime.set_research_action_gate(Some(shared.clone()));
+
+        // The normal controller path: the gate permits, the decision starts an experiment, and the
+        // runtime applies it; the gate then sees an action it must hold until it is restored.
+        assert!(runtime.research_gate_permits(&cpu));
+        let observation = high_quality_game_observation_with_focus_confidence(0.95);
+        let decision = decide_autotune_transition(
+            &runtime.controller.policy,
+            &runtime.controller.state,
+            &observation,
+            Some(cpu),
+        );
+        assert!(
+            matches!(decision, AutotuneDecision::StartExperiment { .. }),
+            "{decision:?}"
+        );
+        runtime
+            .apply_decision_side_effects(&observation, &decision, "gated action")
+            .unwrap();
+        assert!(runtime.has_active_experiment());
+        runtime.observe_research_gate();
+        assert!(shared.lock().unwrap().is_busy());
+        assert!(
+            !shared.lock().unwrap().evidence().clean,
+            "outstanding is not clean"
+        );
+
+        // A stop rolls the experiment back; the gate settles and records the restored action. With no
+        // kernel state probe installed here, the kernel readback is honestly not claimed.
+        runtime.rollback_on_stop("research stop").unwrap();
+        assert!(!runtime.has_active_experiment());
+        runtime.observe_research_gate();
+        let evidence = shared.lock().unwrap().evidence();
+        assert!(evidence.clean, "{evidence:?}");
+        assert_eq!(evidence.settled.len(), 1, "{evidence:?}");
+        assert_eq!(evidence.settled[0].0, ResearchAction::CpuAffinityProfile);
+        assert!(!evidence.kernel_state_proven);
+    }
+
+    #[test]
+    fn an_action_judged_by_an_objective_that_has_not_graduated_is_refused_by_the_normal_controller()
+    {
+        let pid = std::process::id();
+        // StutterScore is Experimental: only GameRunnableLatency may apply this autonomously.
+        let cpu = CandidateAction::cpu_affinity_profile(profile(), pid);
+        let mut config = AutotuneRuntimeConfig::apply_low_risk(None, Some(pid), None)
+            .with_simulated_candidates(vec![cpu.clone()])
+            .with_simulated_action_effects();
+        config.history_log = None;
+        let mut runtime = AutotuneRuntime::new(config);
+        let observation = high_quality_game_observation_with_focus_confidence(0.95);
+        let decision = decide_autotune_transition(
+            &runtime.controller.policy,
+            &runtime.controller.state,
+            &observation,
+            Some(cpu),
+        );
+        let error = runtime
+            .apply_decision_side_effects(&observation, &decision, "experimental objective")
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("objective_not_supported"),
+            "{error:#}"
+        );
+        assert!(!runtime.has_active_experiment());
+    }
+
+    #[test]
     fn a_gate_armed_for_another_process_never_permits_this_ones_candidate() {
         let pid = std::process::id();
         let cpu_again = CandidateAction::cpu_affinity_profile(profile(), pid);

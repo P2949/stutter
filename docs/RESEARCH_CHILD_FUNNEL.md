@@ -393,3 +393,17 @@ launch authority:
   prefix is left out; a partly created one is refused). Read-only and local. Run against the real preserved
   campaign intent and study directory it lists nothing (both arms are warm), so that intent and its digest
   are unchanged.
+
+## Gated action through the normal controller path (thirteenth audit, priority 5)
+
+`runtime/tests/planning.rs` drives a CPU-affinity candidate judged by `GameRunnableLatency` (a Supported
+objective) through the real `AutotuneRuntime`: the action gate permits it, `decide_autotune_transition`
+starts an experiment, the runtime applies it (simulated effects), the gate sees the outstanding action, a
+stop rolls it back, and the gate settles and records the restored action (`evidence.clean`, one settled
+action; the kernel readback is honestly not claimed without a state probe). The same candidate judged by
+`StutterScore` (Experimental) is refused by the product maturity gate (`objective_not_supported`) and
+starts nothing. What this cannot show offline is the real causal effect: a real apply and restore on the
+running game, with a GPU negative control.
+
+Also: three `commands::daemon::status` tests read the live daemon's state snapshot from the default path
+and failed whenever the machine's controller was in another mode; they now read a path that does not exist.

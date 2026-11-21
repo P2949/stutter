@@ -56,7 +56,15 @@ pub fn run_status_command(
 pub fn build_status_output_with_recent_decisions(
     recent_decision_limit: usize,
 ) -> DaemonStatusOutput {
-    let state_path = default_daemon_state_snapshot_path();
+    build_status_output_at(default_daemon_state_snapshot_path(), recent_decision_limit)
+}
+
+/// As above for an explicit state snapshot path (tests pass one that does not exist, so a live daemon
+/// on the machine cannot change what they assert).
+fn build_status_output_at(
+    state_path: std::path::PathBuf,
+    recent_decision_limit: usize,
+) -> DaemonStatusOutput {
     let (state_loaded, state) = match load_daemon_state(&state_path) {
         Ok(state) => (true, state),
         Err(err) => {
@@ -341,7 +349,8 @@ mod tests {
 
     #[test]
     fn daemon_status_text_contains_state_and_restore_command() {
-        let output = build_status_output_with_recent_decisions(0);
+        let output =
+            build_status_output_at("/nonexistent/stutter-test/daemon-state.json".into(), 0);
 
         let text = render_status_text(&output);
 
@@ -353,7 +362,8 @@ mod tests {
 
     #[test]
     fn daemon_status_text_contains_active_workload_action_score_and_recent_decisions() {
-        let mut output = build_status_output_with_recent_decisions(0);
+        let mut output =
+            build_status_output_at("/nonexistent/stutter-test/daemon-state.json".into(), 0);
         output.state.active_target = Some(crate::daemon::state::DaemonTargetState {
             root_pid: Some(1234),
             comm: Some("game".to_owned()),
@@ -416,7 +426,8 @@ mod tests {
 
     #[test]
     fn daemon_status_json_contains_state_capabilities_and_manual_restore() {
-        let output = build_status_output_with_recent_decisions(0);
+        let output =
+            build_status_output_at("/nonexistent/stutter-test/daemon-state.json".into(), 0);
 
         let json = render_status_json(&output).unwrap();
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
