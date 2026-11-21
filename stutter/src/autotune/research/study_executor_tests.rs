@@ -124,6 +124,7 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         stage_evidence: None,
         activation: None,
         functional: None,
+        tail_metric: false,
         run_fps: (0..study.min_attempts)
             .map(|i| {
                 let arm = if i % 2 == 0 {

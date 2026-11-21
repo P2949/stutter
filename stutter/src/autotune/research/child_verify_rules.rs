@@ -148,11 +148,12 @@ pub(super) fn rule_matches_pilot(
         dir.as_fd(),
         "evidence",
     )?);
-    let runs: Vec<_> = super::report_store::read_evidence(&evidence, uid)?
-        .values()
-        .filter_map(|item| item.native_completion.as_deref())
-        .map(|native| (native.proton_source, native.metrics.average_fps))
-        .collect();
+    let items = super::report_store::read_evidence(&evidence, uid)?;
+    let (tail, runs) = super::metric_plan::run_values(
+        items
+            .values()
+            .filter_map(|item| item.native_completion.as_deref()),
+    );
     anyhow::ensure!(
         !runs.is_empty(),
         "the pilot's runs do not support a rule: PilotTooThin"
@@ -160,6 +161,7 @@ pub(super) fn rule_matches_pilot(
     let child: ResearchIntentV1 = serde_json::from_slice(&read_private(&dir, "intent.json", uid)?)?;
     let sources: Vec<_> = child.tools.iter().map(|tool| tool.source).collect();
     let recomputed = super::pilot_rule::rule_from_all_pilots(&sources, &runs)
+        .map(|rule| rule.with_tail_metric(tail))
         .map_err(|code| anyhow::anyhow!("the pilot's runs do not support a rule: {code}"))?;
     anyhow::ensure!(
         recomputed == *recorded,

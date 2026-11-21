@@ -467,6 +467,11 @@ impl DriverStudyAttempts {
                     .as_deref()
                     .is_some_and(|native| native.runtime_binding == Some(RuntimeBinding::Matched))
             });
+        let (tail_metric, run_fps) = super::metric_plan::run_values(
+            evidence
+                .values()
+                .filter_map(|item| item.native_completion.as_deref()),
+        );
         let activation = self.feature_activation(study, u32::try_from(report.attempts_completed)?);
         let functional = self.feature_functional(study, &evidence);
         // The game's enum cannot establish the exact backend or functional fork-specific activation.
@@ -505,11 +510,8 @@ impl DriverStudyAttempts {
             stage_evidence,
             activation,
             functional,
-            run_fps: evidence
-                .values()
-                .filter_map(|item| item.native_completion.as_deref())
-                .map(|native| (native.proton_source, native.metrics.average_fps))
-                .collect(),
+            tail_metric,
+            run_fps,
         })
     }
 }

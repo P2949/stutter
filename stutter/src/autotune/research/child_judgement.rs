@@ -57,6 +57,11 @@ pub(super) fn verify_qualification(
                 })
         })
         .collect();
+    let (tail_metric, run_fps) = super::metric_plan::run_values(
+        evidence
+            .values()
+            .filter_map(|item| item.native_completion.as_deref()),
+    );
     let outcome = AttemptsOutcome {
         planned_attempts: intent.max_attempts,
         source_order: intent.tools.iter().map(|tool| tool.source).collect(),
@@ -72,11 +77,8 @@ pub(super) fn verify_qualification(
         conformance,
         raw_verified,
         runtime_matched,
-        run_fps: evidence
-            .values()
-            .filter_map(|item| item.native_completion.as_deref())
-            .map(|native| (native.proton_source, native.metrics.average_fps))
-            .collect(),
+        tail_metric,
+        run_fps,
         // The current historical receipts do not independently prove feature activation or an
         // action's objective and guardrails. Never promote those claims from a live boolean.
         stage_evidence: matches!(study.stage, Stage::Feature(_) | Stage::Action(_))

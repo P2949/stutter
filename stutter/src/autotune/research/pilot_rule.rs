@@ -25,6 +25,10 @@ pub struct FrozenConfirmationRule {
     pub pilot_cv_bp: u32,
     pub min_effect_bp: u32,
     pub equivalence_margin_bp: u32,
+    /// The pilot ran on the 99th-percentile frame time (as FPS), and so must its confirmation: the metric is
+    /// frozen with the rule, before any confirming data. Absent means the average FPS.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tail_metric: bool,
     /// SHA-256 of the rule's other fields; the confirmation study binds it.
     pub rule_sha256: String,
 }
@@ -40,11 +44,22 @@ impl FrozenConfirmationRule {
     fn digest(&self) -> String {
         stutter_core::hash::sha256_hex(
             format!(
-                "pilot-rule-v1:{}:{}:{}:{}",
-                self.pilot_runs, self.pilot_cv_bp, self.min_effect_bp, self.equivalence_margin_bp
+                "pilot-rule-v1:{}:{}:{}:{}{}",
+                self.pilot_runs,
+                self.pilot_cv_bp,
+                self.min_effect_bp,
+                self.equivalence_margin_bp,
+                if self.tail_metric { ":p99" } else { "" }
             )
             .as_bytes(),
         )
+    }
+
+    /// The same rule, frozen on the tail metric (or not): the digest binds the choice.
+    pub fn with_tail_metric(mut self, tail: bool) -> Self {
+        self.tail_metric = tail;
+        self.rule_sha256 = self.digest();
+        self
     }
 
     /// The rule is internally consistent: its digest matches and its thresholds follow from its
@@ -84,6 +99,7 @@ pub fn freeze(pilot_fps: &[f64]) -> Result<FrozenConfirmationRule, PilotRefusal>
         pilot_cv_bp: cv_bp,
         min_effect_bp: min_effect,
         equivalence_margin_bp: min_effect / 2,
+        tail_metric: false,
         rule_sha256: String::new(),
     };
     rule.rule_sha256 = rule.digest();

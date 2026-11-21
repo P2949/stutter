@@ -183,15 +183,14 @@ pub fn screen_fps_in_studies(
         dir.as_fd(),
         "evidence",
     )?);
-    let runs: Vec<_> = read_evidence(&evidence, uid)?
-        .into_iter()
-        .filter_map(|(slot, item)| {
-            let native = item.native_completion.as_deref()?;
-            Some((slot, native.proton_source, native.metrics.average_fps))
-        })
-        .collect();
+    let items = read_evidence(&evidence, uid)?;
+    let (_, runs) = super::metric_plan::run_values(
+        items
+            .values()
+            .filter_map(|item| item.native_completion.as_deref()),
+    );
     let mut fps = BTreeMap::new();
-    for (_, source, value) in runs {
+    for (source, value) in runs {
         fps.entry(source).or_insert_with(Vec::new).push(value);
     }
     Ok(fps)

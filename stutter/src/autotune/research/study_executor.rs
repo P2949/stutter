@@ -80,6 +80,9 @@ pub struct AttemptsOutcome {
     pub runtime_matched: bool,
     /// Each completed attempt's native average FPS with its arm (a pilot freezes its rule from these).
     pub run_fps: Vec<(ProtonSource, f64)>,
+    /// `run_fps` holds each run's 99th-percentile frame time as FPS (every run had a known frame
+    /// population) rather than its average FPS; the pilot freezes that choice into its rule.
+    pub tail_metric: bool,
     /// The stage-specific evidence a feature or action study needs beyond benchmark FPS: runtime proof
     /// that the factor was really active, or the action's outcome with proven restoration. `None`
     /// when nothing collects it.
@@ -318,6 +321,7 @@ pub(super) fn judge(study: &ChildStudy, outcome: &AttemptsOutcome) -> StudyRun {
 /// The confirmation rule a pilot freezes (the one derivation the verifier also uses).
 fn pilot_rule(outcome: &AttemptsOutcome) -> Result<FrozenConfirmationRule, &'static str> {
     super::pilot_rule::rule_from_all_pilots(&outcome.source_order, &outcome.run_fps)
+        .map(|rule| rule.with_tail_metric(outcome.tail_metric))
 }
 
 /// A feature or action study is not qualified by benchmark attempts alone.

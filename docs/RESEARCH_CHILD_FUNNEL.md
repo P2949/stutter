@@ -349,3 +349,15 @@ order. Feature and action studies are not in this intent (no factors or actions 
 - **G3**'s direct frame source is optional: with no receipts the gate accepts and carries the note
   `DirectFrameEvidenceNotCollected` (`GateVerdict.notes`); receipts that exist must be sound or the source
   quality blocks.
+
+## Frozen tail metric (thirteenth audit, priority 3 continued)
+
+`metric_plan::run_values` is the one function every selector, rule freezer and verifier uses to turn a
+study's completed runs into comparison values: each run's 99th-percentile frame time as an FPS-equivalent
+(1000 / p99 ms, so higher stays better) when every run has a known frame population, otherwise every
+run's average FPS. A pilot's `FrozenConfirmationRule.tail_metric` records which (absent = average, and the
+digest only changes for the tail, so earlier rules are unchanged). The confirmation, holdout and matched
+studies then keep the frozen metric (`metric_plan::values(.., Some(frozen))`); evidence that cannot supply
+it is an error, never a silent switch to another metric. The synthetic baseline campaign now runs on the
+tail metric end to end and every child report names `primary_metric = native_p99_frame_ms`. The matched
+CachyOS rule is derived from the selection values and carries no flag (judged on the average).

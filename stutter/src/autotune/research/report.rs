@@ -220,7 +220,14 @@ pub fn build_report(
         "unsealed or unexpected evidence exists"
     );
     // The primary metric is chosen once, from the sealed evidence, before any comparison is read.
-    let (metric, fps) = super::metric_plan::values(evidence, fps.keys().copied())?;
+    let (metric, fps) = super::metric_plan::values(
+        evidence,
+        fps.keys().copied(),
+        intent
+            .confirmation_rule
+            .as_ref()
+            .map(|rule| rule.tail_metric),
+    )?;
     if let Some(treatments) = super::treatment::treatments_of(intent)? {
         let result = treatment_result(intent, &schedule, &fps, evidence, &treatments, metric)?;
         return Ok(ResearchReportV1 {

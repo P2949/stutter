@@ -47,10 +47,17 @@ pub(crate) fn value(item: &AttemptEvidenceV1, metric: NativeMetric) -> Option<f6
 pub(crate) fn values(
     evidence: &BTreeMap<u32, AttemptEvidenceV1>,
     completed: impl IntoIterator<Item = u32>,
+    frozen: Option<bool>,
 ) -> anyhow::Result<(NativeMetric, BTreeMap<u32, f64>)> {
     let completed: Vec<u32> = completed.into_iter().collect();
     let items = completed.iter().filter_map(|index| evidence.get(index));
-    let metric = choose(items);
+    // A study run under a frozen confirmation rule keeps the metric its pilot froze, whatever its own
+    // evidence would have chosen; evidence that cannot supply it is an error, never a silent switch.
+    let metric = match frozen {
+        Some(true) => NativeMetric::P99FrameMs,
+        Some(false) => NativeMetric::AverageFps,
+        None => choose(items),
+    };
     let mut out = BTreeMap::new();
     for index in completed {
         let item = evidence
@@ -63,6 +70,37 @@ pub(crate) fn values(
         );
     }
     Ok((metric, out))
+}
+
+/// A native completion's tail statistic as an FPS-equivalent (1000 / p99 frame ms), so that higher is
+/// better everywhere selection and rule freezing compare runs; `None` without a known population.
+fn tail_fps(native: &super::cyberpunk::CyberpunkBenchmarkCompletion) -> Option<f64> {
+    let p99 = native.context.as_ref()?.frame_stats?.p99_frame_ms;
+    (p99.is_finite() && p99 > 0.0).then(|| 1000.0 / p99)
+}
+
+/// The per-run values a study's selection and pilot rule are computed from, and whether they are the
+/// tail metric: the 99th-percentile frame time (as FPS) when every run has a known population, else the
+/// average FPS for all of them. The same function serves the live executor and every verifier, so the
+/// two cannot disagree about which metric a study stood on.
+pub(crate) fn run_values<'a>(
+    natives: impl IntoIterator<Item = &'a super::cyberpunk::CyberpunkBenchmarkCompletion>,
+) -> (bool, Vec<(super::ProtonSource, f64)>) {
+    let natives: Vec<_> = natives.into_iter().collect();
+    let tails: Option<Vec<_>> = natives
+        .iter()
+        .map(|native| tail_fps(native).map(|value| (native.proton_source, value)))
+        .collect();
+    match tails {
+        Some(tails) if !tails.is_empty() => (true, tails),
+        _ => (
+            false,
+            natives
+                .iter()
+                .map(|native| (native.proton_source, native.metrics.average_fps))
+                .collect(),
+        ),
+    }
 }
 
 #[cfg(test)]

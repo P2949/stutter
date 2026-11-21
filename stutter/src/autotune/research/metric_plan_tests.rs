@@ -66,14 +66,14 @@ fn stats(p99: f64) -> Option<FrameStats> {
 #[test]
 fn the_tail_is_primary_only_when_every_attempt_has_a_known_population() {
     let all: BTreeMap<u32, _> = (0..4).map(|i| (i, item(i, stats(20.0), 60.0))).collect();
-    let (metric, values) = values(&all, 0..4).unwrap();
+    let (metric, values) = values(&all, 0..4, None).unwrap();
     assert_eq!(metric, NativeMetric::P99FrameMs);
     assert!(values.values().all(|v| *v == 20.0));
 
     // One attempt without tail statistics sends the whole campaign to the average, never a mix.
     let mut mixed = all.clone();
     mixed.insert(2, item(2, None, 61.0));
-    let (metric, values) = self::values(&mixed, 0..4).unwrap();
+    let (metric, values) = self::values(&mixed, 0..4, None).unwrap();
     assert_eq!(metric, NativeMetric::AverageFps);
     assert_eq!(values[&2], 61.0);
     assert_eq!(values[&0], 60.0);
@@ -85,13 +85,56 @@ fn the_tail_is_primary_only_when_every_attempt_has_a_known_population() {
 #[test]
 fn a_completed_attempt_without_evidence_is_an_error_not_a_skipped_value() {
     let evidence: BTreeMap<u32, _> = [(0, item(0, stats(20.0), 60.0))].into();
-    assert!(values(&evidence, 0..2).is_err());
+    assert!(values(&evidence, 0..2, None).is_err());
 }
 
 #[test]
 fn a_non_finite_or_non_positive_tail_is_not_a_known_population() {
     for bad in [f64::NAN, 0.0, -3.0] {
         let evidence: BTreeMap<u32, _> = [(0, item(0, stats(bad), 60.0))].into();
-        assert_eq!(values(&evidence, 0..1).unwrap().0, NativeMetric::AverageFps);
+        assert_eq!(
+            values(&evidence, 0..1, None).unwrap().0,
+            NativeMetric::AverageFps
+        );
     }
+}
+
+#[test]
+fn a_frozen_rule_keeps_its_metric_and_evidence_that_cannot_supply_it_is_an_error() {
+    let with_stats: BTreeMap<u32, _> = (0..2).map(|i| (i, item(i, stats(20.0), 60.0))).collect();
+    let without: BTreeMap<u32, _> = (0..2).map(|i| (i, item(i, None, 60.0))).collect();
+    // Frozen on the average: the tail the evidence has is not used.
+    assert_eq!(
+        values(&with_stats, 0..2, Some(false)).unwrap().0,
+        NativeMetric::AverageFps
+    );
+    // Frozen on the tail: evidence without it fails rather than falling back.
+    assert_eq!(
+        values(&with_stats, 0..2, Some(true)).unwrap().0,
+        NativeMetric::P99FrameMs
+    );
+    assert!(values(&without, 0..2, Some(true)).is_err());
+}
+
+#[test]
+fn run_values_are_tail_fps_for_every_run_or_the_average_for_every_run() {
+    let natives = |stats_for: [Option<FrameStats>; 3]| -> Vec<_> {
+        stats_for
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| *item(i as u32, s, 60.0).native_completion.unwrap())
+            .collect()
+    };
+    let all = natives([stats(20.0), stats(25.0), stats(20.0)]);
+    let (tail, values) = run_values(all.iter());
+    assert!(tail);
+    assert_eq!(
+        values.iter().map(|(_, v)| *v).collect::<Vec<_>>(),
+        [50.0, 40.0, 50.0]
+    );
+    let mixed = natives([stats(20.0), None, stats(20.0)]);
+    let (tail, values) = run_values(mixed.iter());
+    assert!(!tail);
+    assert!(values.iter().all(|(_, v)| *v == 60.0));
+    assert_eq!(run_values([]), (false, Vec::new()));
 }

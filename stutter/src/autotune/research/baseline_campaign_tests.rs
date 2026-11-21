@@ -295,6 +295,17 @@ fn the_production_funnel_qualifies_screens_pilots_confirmations_and_holdouts_ove
     for child in &verified.children {
         assert_eq!(child.problem, None, "{}", child.study);
         assert!(child.reconstruction && child.raw_files_verified && child.runtime_matched);
+        // Every study stood on the 99th-percentile frame time: the real frame files have a known population,
+        // and the confirmation and holdout kept the metric their pilot froze.
+        let report = child
+            .report
+            .as_ref()
+            .expect("a verified child has its report");
+        assert_eq!(
+            report["primary_metric"], "native_p99_frame_ms",
+            "{}",
+            child.study
+        );
     }
     assert_eq!(
         verified

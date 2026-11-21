@@ -526,13 +526,11 @@ fn study_checks(
                 "evidence",
             )?);
             let evidence = super::report_store::read_evidence(&evidence, uid)?;
-            let runs: Vec<_> = evidence
-                .values()
-                .filter_map(|item| {
-                    let native = item.native_completion.as_deref()?;
-                    Some((native.proton_source, native.metrics.average_fps))
-                })
-                .collect();
+            let (_, runs) = super::metric_plan::run_values(
+                evidence
+                    .values()
+                    .filter_map(|item| item.native_completion.as_deref()),
+            );
             let used = u32::try_from(report.attempts_sealed)?;
             let completed = u32::try_from(report.attempts_completed)?;
             let sufficient = if decided.stage == Stage::Screen {
