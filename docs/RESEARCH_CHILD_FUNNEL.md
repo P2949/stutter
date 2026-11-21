@@ -439,3 +439,13 @@ the functional report from the sealed native contexts, and the replayed reason m
 (`UnqualifiedFeatureJudgementContradicted` otherwise). A missing or inconsistent receipt replays as unproven
 and disagrees with any stronger recorded reason. Feature studies themselves stay unqualifiable offline (the
 game's enum cannot identify the exact backend); this makes every reason they carry independently replayable.
+
+## Real-history diagnosis scoring: checked, not possible offline
+
+The archived controller history (`history-archive-20261105.jsonl.zst`, 150,110 real observations,
+2026-10-31 14:23 to 2026-11-06 01:00 UTC) cannot be scored against ground truth: every labelled execution on
+this machine (the 80 marker files under `docs/validation`, cold cargo builds with start and end markers)
+begins on 2026-11-11, at least five days after the last archived observation, and the archive's `Game*`
+situations were never run under an injected cause. Zero seconds overlap (evidence:
+`StutterProtonStudies/real-history-ground-truth-2026-11-21.json`). A real diagnosis score needs a live
+capture with a known injected cause.
