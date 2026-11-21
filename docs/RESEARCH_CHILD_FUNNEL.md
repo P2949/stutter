@@ -335,3 +335,17 @@ files, matched runtime, cohort, rule, replication), and flipping one byte of a f
 found by independent verification. This exposed a real defect: a child's tools followed the selector's
 order while the verifier demands the campaign's order; `child_intent` now always uses the campaign's own
 order. Feature and action studies are not in this intent (no factors or actions authorized).
+
+## Gate corrections (thirteenth audit)
+
+- **G6** is no longer physical-only: `fault_matrix::DESTRUCTIVE_CLASSES` (worker death with tokens
+  outstanding, settings crash, GPU-health halt) are proven by fixtures bound to this binary and a physical
+  case for one is refused (`DestructiveFaultInjectedPhysically`); the benign classes still need a physical
+  pass. Fixtures never stand for a benign class.
+- **G7 / overall** no longer require every study to be `Qualified`: a feature study with result `Blocked`
+  and reason `BlockedNoEligibleSource` (no authorized build supports the factor) is a legitimate exclusion
+  (`gate_verdict::legitimately_excluded`). Nothing else blocked, failed or undecided resolves, and a
+  comparison or action study is never excluded.
+- **G3**'s direct frame source is optional: with no receipts the gate accepts and carries the note
+  `DirectFrameEvidenceNotCollected` (`GateVerdict.notes`); receipts that exist must be sound or the source
+  quality blocks.

@@ -18,6 +18,10 @@ pub struct GateVerdict {
     pub accepted: bool,
     /// Why it is not accepted (empty exactly when it is).
     pub blockers: Vec<&'static str>,
+    /// What an accepted gate did not have evidence for because that evidence is optional (it never makes a
+    /// gate pass silently: the absence is named here).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<&'static str>,
 }
 
 /// What a read-only re-reading of the host found, compared with what the campaign froze (G0).
@@ -83,12 +87,26 @@ pub struct GateInputs<'a> {
     pub host: Option<HostFacts>,
 }
 
+/// A feature study that legitimately found nothing to compare: no authorized build has the factor, so the
+/// system refused to run it rather than failing. That is a finding, not a defect, and it is the only
+/// kind of exclusion PLAN allows to stand in for a qualified study; a comparison or action study never is.
+pub(super) fn legitimately_excluded(study: &Disposition) -> bool {
+    matches!(study.stage, Stage::Feature(_))
+        && study.result == Some(StudyResult::Blocked)
+        && study.reason == "BlockedNoEligibleSource"
+}
+
+/// Whether a study reached an acceptable terminal disposition: qualified, or a legitimate exclusion.
+pub(super) fn resolved(study: &Disposition) -> bool {
+    study.result == Some(StudyResult::Qualified) || legitimately_excluded(study)
+}
+
 /// `Some(true)` when there is at least one study of the kind and every one is qualified, `Some(false)`
 /// when some is not, `None` when the plan has none.
 fn qualified(studies: &[Disposition], kind: fn(&Stage) -> bool) -> Option<bool> {
     let mut matching = studies.iter().filter(|study| kind(&study.stage)).peekable();
     matching.peek()?;
-    Some(matching.all(|study| study.result == Some(StudyResult::Qualified)))
+    Some(matching.all(resolved))
 }
 
 fn gate(gate: &'static str, blockers: Vec<&'static str>) -> GateVerdict {
@@ -96,6 +114,7 @@ fn gate(gate: &'static str, blockers: Vec<&'static str>) -> GateVerdict {
         gate,
         accepted: blockers.is_empty(),
         blockers,
+        notes: Vec::new(),
     }
 }
 
@@ -269,10 +288,18 @@ fn gates_inner(inputs: &GateInputs<'_>, preparing: bool) -> Vec<GateVerdict> {
         g5.push("RestorationUnverified");
     }
 
-    // G3: what the resident controller itself saw. Every completed attempt needs a receipt showing a
-    // healthy, lossless frame source bound to the attested game with enough frames and a bounded clock.
+    // G3: what the resident controller itself saw. The native benchmark is the measurement; the direct
+    // frame source is an optional probe. With no receipts at all the probe simply did not run, which is
+    // named as a note rather than read as a pass or a zero. Receipts that exist must be sound: each
+    // completed attempt needs a healthy, lossless frame source bound to the attested game with enough
+    // frames and a bounded clock, or the source quality is blocked.
+    let g3_note: Vec<&'static str> = if inputs.telemetry.is_none() {
+        vec!["DirectFrameEvidenceNotCollected"]
+    } else {
+        Vec::new()
+    };
     let g3 = match inputs.telemetry {
-        None => vec!["NoTelemetryReceipts"],
+        None => Vec::new(),
         Some((eligible, completed)) if eligible < completed => vec!["FrameSourceNotEligible"],
         Some(_) => Vec::new(),
     };
@@ -317,10 +344,14 @@ fn gates_inner(inputs: &GateInputs<'_>, preparing: bool) -> Vec<GateVerdict> {
             health_free(blockers)
         }),
         gate("G2", health(g2)),
-        gate("G3", health(g3)),
+        GateVerdict {
+            notes: g3_note,
+            ..gate("G3", health(g3))
+        },
         gate("G4", health(g4)),
         gate("G5", health(g5)),
-        // Only a physical matrix for this very binary stands for G6; fixtures never do.
+        // A matrix for this very binary stands for G6: physical passes for the benign classes, fixtures for
+        // the destructive ones.
         gate("G6", inputs.fault_matrix.err().into_iter().collect()),
         gate("G7", health(g7)),
         gate(

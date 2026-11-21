@@ -1,5 +1,5 @@
 use super::*;
-use crate::autotune::research::child_study::{Profile, Stage};
+use crate::autotune::research::child_study::{Profile, Stage, StudyResult};
 
 fn raw(completed: u32, verified: u32, problems: usize) -> RawVerification {
     RawVerification {

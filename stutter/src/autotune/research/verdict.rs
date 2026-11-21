@@ -7,8 +7,8 @@
 use serde::Serialize;
 
 use super::{
-    child_ledger::Disposition, child_study::StudyResult, loaded_runtime::RuntimeBinding,
-    raw_verify::RawVerification, report::AttemptEvidenceV1,
+    child_ledger::Disposition, loaded_runtime::RuntimeBinding, raw_verify::RawVerification,
+    report::AttemptEvidenceV1,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -19,7 +19,8 @@ pub struct Verdict {
     pub raw_files_verified: bool,
     /// Every completed attempt's mapped runtime was matched to its own arm's installation.
     pub loaded_runtime_qualified: bool,
-    /// Every planned child study ran to a qualified result.
+    /// Every planned child study reached an acceptable terminal disposition: qualified, or a legitimate
+    /// feature exclusion (`gate_verdict::legitimately_excluded`); nothing else may stand in for one.
     pub child_studies_qualified: bool,
     /// Every child study's own report reconstructs from its sealed records and its raw files replay.
     pub child_reports_verified: bool,
@@ -100,7 +101,7 @@ fn judge_inner(inputs: &VerdictInputs<'_>, preparing: bool) -> Verdict {
         && inputs
             .child_studies
             .iter()
-            .all(|study| study.result == Some(StudyResult::Qualified));
+            .all(super::gate_verdict::resolved);
     let gate_inputs = super::gate_verdict::GateInputs {
         raw_files_verified,
         loaded_runtime_qualified,

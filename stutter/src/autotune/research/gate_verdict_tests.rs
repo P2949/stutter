@@ -102,12 +102,15 @@ fn there_is_one_verdict_per_gate_and_the_unattestable_ones_never_pass() {
         names,
         ["G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9"]
     );
-    // A campaign verification cannot attest a host baseline, the lease receipts, resident
-    // telemetry, a fault matrix or a deployment: they are named, not inferred from the studies.
-    for name in ["G0", "G1", "G3", "G6", "G8"] {
+    // A campaign verification cannot attest a host baseline, the lease receipts, a fault matrix or a
+    // deployment: they are named, not inferred from the studies.
+    for name in ["G0", "G1", "G6", "G8"] {
         let verdict = of(&verdicts, name);
         assert!(!verdict.accepted && verdict.blockers.len() == 1, "{name}");
     }
+    // The direct-frame probe is optional: its absence is accepted but named, never a silent pass.
+    let g3 = of(&verdicts, "G3");
+    assert!(g3.accepted && g3.notes == ["DirectFrameEvidenceNotCollected"]);
     for name in ["G2", "G4", "G5", "G7", "G9"] {
         let verdict = of(&verdicts, name);
         assert!(verdict.accepted && verdict.blockers.is_empty(), "{name}");
@@ -209,7 +212,10 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
         });
         of(&verdicts, "G3").clone()
     };
-    assert_eq!(with(None, false).blockers, ["NoTelemetryReceipts"]);
+    // No receipts at all: the optional direct-frame probe did not run. That is named, not passed silently.
+    let absent = with(None, false);
+    assert!(absent.accepted && absent.notes == ["DirectFrameEvidenceNotCollected"]);
+    assert_eq!(with(None, true).blockers, ["GpuHealthIncident"]);
     assert_eq!(
         with(Some((7, 8)), false).blockers,
         ["FrameSourceNotEligible"]
@@ -673,3 +679,6 @@ fn g1_also_needs_a_private_control_socket_held_by_a_live_controller() {
         ]
     );
 }
+
+#[path = "gate_exclusion_tests.rs"]
+mod exclusion;

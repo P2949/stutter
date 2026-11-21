@@ -1,19 +1,22 @@
-//! The receipt a physical fault matrix leaves, and the independent consumer that decides whether it
-//! can stand for PLAN G6 (failure and security: single-use tool tickets, no wrong target, bounded
-//! cancellation, fault fixtures, root tokens settled, the other process intact).
+//! The receipt a fault matrix leaves, and the independent consumer that decides whether it can stand for
+//! PLAN G6 (failure and security: single-use tool tickets, no wrong target, bounded cancellation, fault
+//! fixtures, root tokens settled, the other process intact).
 //!
-//! The faults themselves are injected on the real machine by an operator and are not run here. What
-//! belongs offline is the contract: the classes a matrix must cover, a typed receipt, and a verifier
-//! that accepts G6 only from a receipt in which every required class has a physical pass bound to
-//! this very binary. A fixture run (which proves the code handles a simulated fault) is recorded as
-//! such and never counts as physical evidence, a failed case blocks, and nothing is inferred from a
+//! The benign faults are injected on the real machine by an operator and are not run here; the
+//! destructive ones (`DESTRUCTIVE_CLASSES`) are never injected into the real game and are proven by
+//! fixtures. What belongs offline is the contract: the classes a matrix must cover, a typed receipt, and
+//! a verifier that accepts G6 only from a receipt, bound to this very binary, in which every benign
+//! class has a physical pass and every destructive class a fixture pass. A fixture never stands for a
+//! benign class, a physical case for a destructive class is refused, a failed case blocks, and nothing
+//! is inferred from a class that is absent.
 //! class that is absent.
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// The fault classes a G6 matrix must have exercised on the real machine.
+/// The fault classes a G6 matrix must cover: the benign ones exercised on the real machine, the destructive
+/// ones (`DESTRUCTIVE_CLASSES`) by fixtures.
 pub const REQUIRED_CLASSES: [&str; 8] = [
     "wrong_target_refused",
     "single_use_ticket_replay_refused",
@@ -22,6 +25,16 @@ pub const REQUIRED_CLASSES: [&str; 8] = [
     "worker_death_tokens_settled",
     "settings_rollback_after_crash",
     "other_process_intact_after_action",
+    "gpu_health_halt_settles",
+];
+
+/// The classes whose injection into the real machine would itself be destructive (a worker killed with
+/// tokens outstanding, a settings crash, a GPU hang): PLAN forbids running them against the real game, so
+/// they are proven by fixtures and a physical case for one is refused. Every other class is benign and
+/// needs a physical pass.
+pub const DESTRUCTIVE_CLASSES: [&str; 3] = [
+    "worker_death_tokens_settled",
+    "settings_rollback_after_crash",
     "gpu_health_halt_settles",
 ];
 
@@ -100,7 +113,11 @@ pub fn attested(
         let (Some(case), None) = (cases.next(), cases.next()) else {
             return Err("FaultClassMissingOrDuplicated");
         };
-        if case.mode != Mode::Physical {
+        if DESTRUCTIVE_CLASSES.contains(&class) {
+            if case.mode == Mode::Physical {
+                return Err("DestructiveFaultInjectedPhysically");
+            }
+        } else if case.mode != Mode::Physical {
             return Err("FaultClassOnlyFixtureTested");
         }
         if !is_digest(&case.evidence_sha256) {

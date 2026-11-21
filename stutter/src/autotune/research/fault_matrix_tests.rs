@@ -22,12 +22,21 @@ fn complete() -> FaultMatrixReceipt {
         schema: 1,
         binary_sha256: me(),
         captured_unix: NOW - 100,
-        cases: REQUIRED_CLASSES.iter().map(|c| physical(c)).collect(),
+        cases: REQUIRED_CLASSES
+            .iter()
+            .map(|c| {
+                let mut case = physical(c);
+                if DESTRUCTIVE_CLASSES.contains(c) {
+                    case.mode = Mode::Fixture;
+                }
+                case
+            })
+            .collect(),
     }
 }
 
 #[test]
-fn a_complete_physical_matrix_for_this_binary_attests() {
+fn a_complete_matrix_for_this_binary_attests() {
     assert_eq!(attested(&complete(), &me(), NOW), Ok(()));
 }
 
@@ -82,6 +91,32 @@ fn fixtures_never_count_and_every_other_gap_has_its_own_refusal() {
     assert_eq!(
         attested(&complete(), &"cc".repeat(32), NOW),
         Err("FaultMatrixForAnotherBinary")
+    );
+}
+
+#[test]
+fn destructive_faults_are_proven_by_fixtures_and_never_by_injecting_them_into_the_real_game() {
+    // The complete matrix already holds fixtures for exactly the destructive classes.
+    let matrix = complete();
+    assert!(
+        matrix
+            .cases
+            .iter()
+            .filter(|case| DESTRUCTIVE_CLASSES.contains(&case.class.as_str()))
+            .all(|case| case.mode == Mode::Fixture)
+    );
+    assert_eq!(attested(&matrix, &me(), NOW), Ok(()));
+    // Injecting one for real is refused rather than counted, whatever it showed.
+    let mut injected = complete();
+    let index = injected
+        .cases
+        .iter()
+        .position(|case| case.class == "gpu_health_halt_settles")
+        .unwrap();
+    injected.cases[index].mode = Mode::Physical;
+    assert_eq!(
+        attested(&injected, &me(), NOW),
+        Err("DestructiveFaultInjectedPhysically")
     );
 }
 
