@@ -617,6 +617,26 @@ mod settlement {
     }
 
     #[test]
+    fn the_stop_step_returns_at_once_and_settles_over_polls_inside_its_window() {
+        use crate::autotune::research::steam_host::StopStep;
+        let mut port = launched_port(None)
+            .with_settlement_witness(Box::new(LateWitness(Default::default())))
+            .with_settle_window(Duration::from_secs(10));
+        let started = std::time::Instant::now();
+        assert_eq!(port.stop_step(), StopStep::Pending);
+        assert_eq!(port.stop_step(), StopStep::Pending);
+        assert_eq!(port.stop_step(), StopStep::Settled);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "no waiting inside a step"
+        );
+        // With no window the first refusal is final.
+        let mut strict =
+            launched_port(None).with_settlement_witness(Box::new(LateWitness(Default::default())));
+        assert_eq!(strict.stop_step(), StopStep::Unsettled);
+    }
+
+    #[test]
     fn only_an_independent_witness_clears_the_unsettled_state() {
         let mut port = launched_port(Some(Some(true)));
         assert!(port.stop().is_ok());

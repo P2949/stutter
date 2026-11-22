@@ -626,3 +626,7 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 ## Sixteenth audit: G7 narrowed
 
 `FeatureNotObservable` is no longer an exclusion (this supersedes the earlier G7 note and the `QualifiedWithUnobservedFeatures` scope). Only `BlockedNoEligibleSource` (no authorized build can switch the factor) resolves a feature study without qualification; a feature whose control exists and reached the game but whose function was not established stays unresolved, so a full G7 needs a real functional proof, which nothing produces offline.
+
+## Seventeenth audit: incremental Steam settlement
+
+`SteamPort::stop_step` (`Settled` / `Pending` / `Unsettled`) replaces the blocking loop in the polled attempt path. `ProductionSteamPort` starts its settlement window at the first step, runs one cleanup-and-witness pass per call and returns at once. `SteamAttemptHost` decides the attempt's outcome first, keeps it in `settling` while the tree is not yet proven gone (the attempt stays running, ownership is kept, the port's state is not read again) and delivers it only once settled; a window that closes unproven fails the attempt as `SettlementUnverified` (unresolved ownership). `stop()` (abort) still blocks. The inline tests of `steam_host.rs` moved to `steam_host_tests.rs` for the size cap.

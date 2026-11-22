@@ -30,16 +30,9 @@ impl<P: SteamPort> SteamAttemptHost<P> {
     }
 
     fn stop_into(&mut self, index: u32) -> Progress {
-        if self.port.stop().is_err() {
-            return Progress::Failed {
-                class: super::super::driver::FailureClass::OwnershipUnresolved,
-                code: "SettlementUnverified".into(),
-            };
-        }
-        self.current = None;
         self.current_arm = None;
         self.warm_since = None;
-        Progress::Finished {
+        let outcome = Progress::Finished {
             evidence: AttemptEvidenceV1 {
                 thermal: None,
                 long_session: None,
@@ -49,7 +42,8 @@ impl<P: SteamPort> SteamAttemptHost<P> {
                 average_fps: 1.0,
                 native_completion: None,
             },
-        }
+        };
+        self.after_settlement(outcome)
     }
 
     /// One poll of an initialization attempt. `Err(state)` hands any state that voids or interrupts the

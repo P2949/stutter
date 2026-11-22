@@ -318,6 +318,8 @@ pub struct ProductionSteamPort<R: ResultProbe> {
     /// attempts live below it, in `studies/<study>/dispatch`, never in a directory of their own.
     campaign_dir: Option<String>,
     settle_window: Duration,
+    /// When the settlement window of the stop in progress closes (set by its first `stop_step`).
+    stop_deadline: Option<Instant>,
 }
 
 impl<R: ResultProbe> ProductionSteamPort<R> {
@@ -350,6 +352,7 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
             disk_reserve: None,
             campaign_dir: None,
             settle_window: Duration::ZERO,
+            stop_deadline: None,
         }
     }
 
@@ -615,6 +618,23 @@ impl<R: ResultProbe> SteamPort for ProductionSteamPort<R> {
             self.probe.poll()
         } else {
             GameState::Starting
+        }
+    }
+
+    fn stop_step(&mut self) -> super::steam_host::StopStep {
+        use super::steam_host::StopStep;
+        let deadline = *self
+            .stop_deadline
+            .get_or_insert_with(|| Instant::now() + self.settle_window);
+        self.stop_once();
+        if !self.unsettled {
+            self.stop_deadline = None;
+            StopStep::Settled
+        } else if Instant::now() >= deadline {
+            self.stop_deadline = None;
+            StopStep::Unsettled
+        } else {
+            StopStep::Pending
         }
     }
 
