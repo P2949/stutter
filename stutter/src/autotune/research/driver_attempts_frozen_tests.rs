@@ -71,3 +71,18 @@ fn a_selection_that_changed_between_profile_application_and_launch_fails_the_stu
         "no study directory was created"
     );
 }
+
+#[test]
+fn the_admission_facts_are_the_active_seconds_left_and_the_least_one_attempt_can_take() {
+    let calls = Arc::new(AtomicU32::new(0));
+    let (_root, runner, _study) = runner(calls, u32::MAX);
+    let (remaining, short_min, long_min) = runner.time_facts();
+    // Nothing spent yet: the whole authorization is left; a short attempt has a floor, and with no work unit a
+    // long attempt is bounded below by the intent's own attempt limit.
+    assert_eq!(remaining, u64::from(runner.parent.max_active_seconds));
+    assert_eq!(
+        short_min,
+        crate::autotune::research::driver_attempts::persistence::MIN_SHORT_ATTEMPT_SECONDS
+    );
+    assert_eq!(long_min, u64::from(runner.parent.max_attempt_seconds));
+}

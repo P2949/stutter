@@ -22,11 +22,11 @@ use crate::autotune::research::{
 const SCENE_SECONDS: f64 = 64.25;
 
 /// No settings file is touched; when `digest` is set the profile claims to have left every arm's file with it.
-struct NoProfiles {
+pub(super) struct NoProfiles {
     /// The digest every arm's settings file is left with (`None`: no profile is applied).
-    digest: Option<String>,
-    campaign_tools: usize,
-    arms: usize,
+    pub(super) digest: Option<String>,
+    pub(super) campaign_tools: usize,
+    pub(super) arms: usize,
 }
 impl ProfileHook for NoProfiles {
     fn apply(
@@ -64,19 +64,19 @@ impl ProfileHook for NoProfiles {
 }
 
 /// Injects only the world: launching "runs" the game, polling returns a real result folder.
-struct NativeHost {
+pub(super) struct NativeHost {
     /// Arms whose prefix is cold until an initialization attempt has run (empty: all warm from the start).
-    cold_until_initialized: bool,
-    initialized: bool,
-    initializing: bool,
+    pub(super) cold_until_initialized: bool,
+    pub(super) initialized: bool,
+    pub(super) initializing: bool,
     /// Whether an initialization launch actually leaves a warm prefix behind.
-    warms_prefix: bool,
-    initialization_launches: u32,
-    screens_before_init: u32,
-    results: PathBuf,
-    intent: ResearchIntentV1,
-    current: Option<AttemptSlot>,
-    launches: u32,
+    pub(super) warms_prefix: bool,
+    pub(super) initialization_launches: u32,
+    pub(super) screens_before_init: u32,
+    pub(super) results: PathBuf,
+    pub(super) intent: ResearchIntentV1,
+    pub(super) current: Option<AttemptSlot>,
+    pub(super) launches: u32,
 }
 
 impl NativeHost {

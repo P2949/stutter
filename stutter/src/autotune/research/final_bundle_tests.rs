@@ -492,3 +492,28 @@ fn every_bundle_file_fits_the_private_store_record_limit_with_the_real_ledger() 
         assert!(bytes.len() < 60 * 1024, "{name} is {} bytes", bytes.len());
     }
 }
+
+#[test]
+fn only_the_dossiers_the_campaigns_own_record_names_with_a_digest_read_as_observed() {
+    let observed = |response: Value| -> Value {
+        let files = build(&json!({}), &response);
+        let (_, bytes) = files
+            .iter()
+            .find(|(n, _)| *n == "crosswalk-34.json")
+            .unwrap();
+        serde_json::from_slice::<Value>(bytes).unwrap()["crosswalk_34"]["observed_in_campaign"]
+            .clone()
+    };
+    assert_eq!(observed(json!({})), 0);
+    let digest = "ab".repeat(32);
+    let good = json!({ "crosswalk_observations": { "rows": [{ "id": "5.1", "evidence_sha256": digest }] } });
+    assert_eq!(observed(good), 1);
+    // An unknown id, a malformed digest or a repeated id makes the whole record unusable, not partly believed.
+    for bad in [
+        json!({ "rows": [{ "id": "9.9", "evidence_sha256": digest }] }),
+        json!({ "rows": [{ "id": "5.1", "evidence_sha256": "xyz" }] }),
+        json!({ "rows": [{ "id": "5.1", "evidence_sha256": digest }, { "id": "5.1", "evidence_sha256": digest }] }),
+    ] {
+        assert_eq!(observed(json!({ "crosswalk_observations": bad })), 0);
+    }
+}

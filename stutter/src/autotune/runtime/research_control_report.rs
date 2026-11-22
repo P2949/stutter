@@ -348,6 +348,18 @@ impl ResearchCoordinator {
                     "child_studies": studies,
                     "child_reports": children,
                     "intent_sha256": report.intent_sha256,
+                    // Which dossiers the resident runtime recorded as observed, from its own sealed record.
+                    "crosswalk_observations": self.study_dir.as_deref().map_or(
+                        serde_json::Value::Null,
+                        |study| match crate::autotune::research::newest_record::newest::<serde_json::Value>(
+                            study,
+                            "crosswalk-observations",
+                            |_| 0,
+                        ) {
+                            crate::autotune::research::newest_record::Newest::Found(value) => value,
+                            _ => serde_json::Value::Null,
+                        },
+                    ),
                     // The diagnosis oracle's own scored cases (frozen truth, captured output), or
                     // exactly why there are none.
                     "diagnosis_oracle": match self.study_dir.as_deref().map_or(Err("NoOracleCases"), |study| {

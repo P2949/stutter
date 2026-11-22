@@ -660,6 +660,9 @@ mod budget;
 #[path = "driver_attempts_frozen_tests.rs"]
 mod frozen;
 
+#[path = "baseline_campaign_action_tests.rs"]
+mod baseline_action;
+
 #[path = "baseline_campaign_integrity_tests.rs"]
 mod baseline_integrity;
 

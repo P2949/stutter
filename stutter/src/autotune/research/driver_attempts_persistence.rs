@@ -318,3 +318,36 @@ impl DriverStudyAttempts {
         Ok(frozen)
     }
 }
+
+/// A floor on how long one short benchmark attempt can take (launch, the fixed scene, settlement): a study whose
+/// even this minimum cannot fit the remaining active time is certain to overrun.
+pub(crate) const MIN_SHORT_ATTEMPT_SECONDS: u64 = 60;
+
+impl DriverStudyAttempts {
+    /// What the active-time admission needs, as plain numbers: the active seconds left in the campaign (its
+    /// authorization less what the recorded children spent) and the least one attempt of the short and the long
+    /// kind can take. A long attempt takes at least the authorized work unit's own length.
+    pub(crate) fn time_facts(&self) -> (u64, u64, u64) {
+        let spent = open_dir(&self.campaign, STUDIES_DIR)
+            .ok()
+            .and_then(|studies| {
+                super::super::campaign_budget::spent(
+                    &studies,
+                    self.parent.uid,
+                    u64::from(self.parent.max_active_seconds),
+                )
+                .ok()
+            })
+            .map_or(0, |spent| spent.active_seconds);
+        let remaining = u64::from(self.parent.max_active_seconds).saturating_sub(spent);
+        let long_min = self.parent.long_work_unit.as_ref().map_or(
+            u64::from(
+                self.parent
+                    .long_attempt_seconds
+                    .unwrap_or(self.parent.max_attempt_seconds),
+            ),
+            |unit| u64::from(unit.duration_seconds),
+        );
+        (remaining, MIN_SHORT_ATTEMPT_SECONDS, long_min)
+    }
+}

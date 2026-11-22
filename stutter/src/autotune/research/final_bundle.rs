@@ -113,8 +113,9 @@ fn integration_matrix() -> Value {
 /// The 34-row Observed/Tested/Excluded/Blocked closure of every integration dossier, derived from the same
 /// embedded ledger. A ledger that does not yield exactly 34 known rows is reported as such, never as a
 /// shorter table; no row is a game-benefit validation.
-fn crosswalk() -> Value {
-    match super::crosswalk::build_rows(COVERAGE) {
+fn crosswalk(response: &Value) -> Value {
+    let observed = super::crosswalk::observations_from(response.get("crosswalk_observations"));
+    match super::crosswalk::build_rows_observed(COVERAGE, &observed) {
         Ok(rows) => {
             let mut counts = std::collections::BTreeMap::<String, u32>::new();
             for row in &rows {
@@ -125,7 +126,7 @@ fn crosswalk() -> Value {
                 "planned_closure_counts": counts,
                 "observed_in_campaign": rows.iter().filter(|r| r.observed_disposition == "ObservedInCampaign").count(),
                 "rows": rows,
-                "note": "planned_closure is the plan's intended role for the dossier, not a result; observed_disposition says whether this campaign supplied evidence for it (none is supplied yet); a row is never GameBenefitValidated, and only a qualified study below can say a benefit was measured",
+                "note": "planned_closure is the plan's intended role for the dossier, not a result; observed_disposition says whether this campaign supplied evidence for it (only the dossiers named, with their digests, in the campaign's own crosswalk-observations record); a row is never GameBenefitValidated, and only a qualified study below can say a benefit was measured",
             })
         }
         Err(error) => json!({ "status": "CrosswalkInvalid", "error": format!("{error:?}") }),
@@ -393,7 +394,7 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
         (
             "crosswalk-34.json",
             pretty(&json!({
-                "crosswalk_34": crosswalk(),
+                "crosswalk_34": crosswalk(response),
                 "gate_scope": gate_scope(&verdict),
             })),
         ),

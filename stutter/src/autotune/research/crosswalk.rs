@@ -373,6 +373,36 @@ pub fn build_rows_observed(
     Ok(rows)
 }
 
+/// The file, beside the study, in which the resident runtime records which dossiers a campaign actually observed,
+/// each with the SHA-256 of the evidence it rests on.
+pub const OBSERVATIONS_FILE: &str = "crosswalk-observations.json";
+
+/// The campaign's own observations by dossier id, from the response the report carries (`None` or malformed: none).
+/// An id outside the 34, a digest that is not 64 hex digits, or a duplicate id makes the whole record unusable
+/// rather than partly believed.
+pub fn observations_from(
+    value: Option<&serde_json::Value>,
+) -> std::collections::BTreeMap<String, String> {
+    let mut found = std::collections::BTreeMap::new();
+    let Some(rows) = value.and_then(|v| v["rows"].as_array()) else {
+        return found;
+    };
+    for row in rows {
+        let (Some(id), Some(digest)) = (row["id"].as_str(), row["evidence_sha256"].as_str()) else {
+            return Default::default();
+        };
+        let known = SPECS.iter().any(|spec| spec.0 == id);
+        let hex = digest.len() == 64
+            && digest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !known || !hex || found.insert(id.to_owned(), digest.to_owned()).is_some() {
+            return Default::default();
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
