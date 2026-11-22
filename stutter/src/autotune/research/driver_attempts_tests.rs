@@ -657,8 +657,8 @@ mod feature;
 #[path = "driver_attempts_budget_tests.rs"]
 mod budget;
 
-#[path = "driver_attempts_selection_tests.rs"]
-mod selection;
+#[path = "driver_attempts_frozen_tests.rs"]
+mod frozen;
 
 #[path = "baseline_campaign_integrity_tests.rs"]
 mod baseline_integrity;
