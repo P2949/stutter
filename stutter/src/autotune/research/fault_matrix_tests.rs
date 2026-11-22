@@ -147,11 +147,11 @@ fn the_gate_reads_the_newest_receipt_and_without_one_says_so() {
         gate_status(study.path(), &me(), NOW),
         Err("FaultClassOnlyFixtureTested")
     );
-    // A malformed file is not a receipt.
+    // A present file that is not a receipt is corrupt evidence: it is named, never skipped for an older pass.
     std::fs::write(study.path().join("fault-matrix-3.json"), b"{").unwrap();
     assert_eq!(
         gate_status(study.path(), &me(), NOW),
-        Err("FaultClassOnlyFixtureTested")
+        Err("FaultMatrixInvalid")
     );
 }
 

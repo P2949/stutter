@@ -150,6 +150,7 @@ pub(crate) mod native_probe;
     )
 )]
 pub(crate) mod native_source;
+pub mod newest_record;
 #[cfg_attr(
     not(test),
     expect(

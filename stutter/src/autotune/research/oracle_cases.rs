@@ -183,28 +183,13 @@ pub fn evaluate(file: &CaseFile) -> Result<Evaluation, &'static str> {
 /// The newest `oracle-cases-*.json` in a study directory, scored: `Err` carries why not, and
 /// `NoOracleCases` means none was ever produced.
 pub fn evaluate_study(study: &Path) -> Result<Evaluation, &'static str> {
-    let mut newest: Option<CaseFile> = None;
-    for entry in std::fs::read_dir(study)
-        .map_err(|_| "NoOracleCases")?
-        .flatten()
-    {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if !(name.starts_with("oracle-cases-") && name.ends_with(".json")) {
-            continue;
-        }
-        let Ok(bytes) = std::fs::read(entry.path()) else {
-            continue;
-        };
-        if let Ok(candidate) = serde_json::from_slice::<CaseFile>(&bytes)
-            && newest
-                .as_ref()
-                .is_none_or(|current| candidate.committed_unix > current.committed_unix)
-        {
-            newest = Some(candidate);
-        }
+    use super::newest_record::{Newest, newest};
+    match newest::<CaseFile>(study, "oracle-cases-", |case| case.committed_unix) {
+        Newest::None => Err("NoOracleCases"),
+        // A present case file that cannot be read is corrupt evidence, not an oracle that never ran.
+        Newest::Invalid => Err("OracleCasesInvalid"),
+        Newest::Found(cases) => evaluate(&cases),
     }
-    evaluate(&newest.ok_or("NoOracleCases")?)
 }
 
 #[cfg(test)]

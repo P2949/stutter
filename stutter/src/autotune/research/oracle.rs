@@ -136,15 +136,18 @@ pub fn gate_passes(truths: &[GroundTruth], diagnoses: &[Diagnosis]) -> anyhow::R
         .iter()
         .zip(diagnoses)
         .filter_map(|(t, d)| match t.injected {
-            Some(cause @ (Cause::RunnableDelay | Cause::IoPressure))
-                if matches!(score_case(t, d), Ok(CaseOutcome::Included)) =>
+            // Any two distinct preregistered causal controls, whatever causes the case file froze; only the GPU-bound
+            // case is the negative control, never a positive.
+            Some(cause)
+                if cause != Cause::GpuBound
+                    && matches!(score_case(t, d), Ok(CaseOutcome::Included)) =>
             {
                 Some(cause)
             }
             _ => None,
         })
         .collect();
-    Ok(causal_hits.len() == 2
+    Ok(causal_hits.len() >= 2
         && gpu_negative_clean
         && summary.negatives > 0
         && summary.correct_abstentions == summary.negatives
@@ -243,6 +246,26 @@ mod tests {
             dx("n", &[], true, false),
         ];
         assert!(gate_passes(&truths, &good).unwrap());
+        // The two positives are whichever two distinct causes were preregistered, not a fixed pair.
+        let other = vec![
+            truth("c1", Some(ColdShaderCache)),
+            truth("c2", Some(OwnerConflict)),
+            truth("g", Some(GpuBound)),
+            truth("n", None),
+        ];
+        let other_good = vec![
+            dx("c1", &[ColdShaderCache], false, false),
+            dx("c2", &[OwnerConflict], false, false),
+            dx("g", &[GpuBound], false, false),
+            dx("n", &[], true, false),
+        ];
+        assert!(gate_passes(&other, &other_good).unwrap());
+        // Two hits of the same cause are one control, not two.
+        let mut same = other.clone();
+        same[1].injected = Some(ColdShaderCache);
+        let mut same_good = other_good.clone();
+        same_good[1] = dx("c2", &[ColdShaderCache], false, false);
+        assert!(!gate_passes(&same, &same_good).unwrap());
         let mut bad = good.clone();
         bad[2].action_proposed = true;
         assert!(!gate_passes(&truths, &bad).unwrap());

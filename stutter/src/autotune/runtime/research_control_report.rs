@@ -201,9 +201,49 @@ impl ResearchCoordinator {
                             .as_ref()
                             .is_some_and(|c| c.runtime_qualified()),
                         child_telemetry: children.as_ref().and_then(|c| c.telemetry_summary()),
+                        // G3 stands on the resident runtime's own observation and on the preregistered oracle
+                        // controls (two distinct causes, the GPU-bound negative, no unsafe action), both mandatory.
+                        sealed_protected_state: match (
+                            self.host_sources.0.as_deref(),
+                            self.study_dir
+                                .as_deref()
+                                .and_then(|study| std::fs::File::open(study).ok()),
+                        ) {
+                            (Some(steamapps), Some(study)) => {
+                                // The first evaluation that is not still preparing, with the saves unchanged, seals
+                                // that fact once; later changes cannot rewrite it.
+                                if !preparing {
+                                    let _ = crate::autotune::research::protected_state::seal_unchanged(
+                                        steamapps,
+                                        &study,
+                                        uid,
+                                        &report.intent_sha256,
+                                        std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map_or(0, |elapsed| elapsed.as_secs()),
+                                    );
+                                }
+                                crate::autotune::research::protected_state::sealed(
+                                    &study,
+                                    uid,
+                                    &report.intent_sha256,
+                                )
+                            }
+                            _ => Err("ProtectedStateNotSealedAtFinalization"),
+                        },
                         child_resident: children
                             .as_ref()
-                            .map_or(Err("ResidentObservationNotCollected"), |c| c.resident_summary()),
+                            .map_or(Err("ResidentObservationNotCollected"), |c| c.resident_summary())
+                            .and_then(|()| {
+                                match self.study_dir.as_deref().map_or(
+                                    Err("NoOracleCases"),
+                                    crate::autotune::research::oracle_cases::evaluate_study,
+                                ) {
+                                    Ok(evaluation) if evaluation.gate_passed => Ok(()),
+                                    Ok(_) => Err("OracleGateNotPassed"),
+                                    Err(reason) => Err(reason),
+                                }
+                            }),
                         child_replication: children.as_ref().zip(studies.as_deref())
                             .and_then(|(children, planned)| children.holdout_replication(planned)),
                         control_socket: self.host_sources.2.as_deref().and_then(|dir| {

@@ -276,3 +276,48 @@ fn real_protected_state() {
         Ok(())
     );
 }
+
+#[test]
+fn the_unchanged_state_is_sealed_once_and_a_later_change_cannot_unseal_it_or_seal_a_changed_one() {
+    let world = steam();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let study = std::fs::File::open(dir.path()).unwrap();
+    let uid = crate::syscall::geteuid();
+    let campaign = "ab".repeat(32);
+    assert_eq!(
+        sealed(&study, uid, &campaign),
+        Err("ProtectedStateNotSealedAtFinalization")
+    );
+    assert_eq!(
+        seal_unchanged(&world.steamapps, &study, uid, &campaign, 10),
+        Err("ProtectedStateNotRecorded")
+    );
+    record_baseline(&world.steamapps, &study, uid, &campaign).unwrap();
+    assert_eq!(
+        seal_unchanged(&world.steamapps, &study, uid, &campaign, 10),
+        Ok(())
+    );
+    assert_eq!(sealed(&study, uid, &campaign), Ok(()));
+    // Sealing again is idempotent; the player later changes a save: the live comparison fails but the seal stands.
+    assert_eq!(
+        seal_unchanged(&world.steamapps, &study, uid, &campaign, 20),
+        Ok(())
+    );
+    std::fs::write(world.saves.join("ManualSave-1/sav.dat"), b"edited later").unwrap();
+    assert!(status(&world.steamapps, &study, uid, &campaign).is_err());
+    assert_eq!(sealed(&study, uid, &campaign), Ok(()));
+    // A changed state is never sealed as unchanged: a different campaign with the same changed saves cannot seal.
+    let other = "cd".repeat(32);
+    let dir2 = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir2.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let study2 = std::fs::File::open(dir2.path()).unwrap();
+    let before = steam();
+    record_baseline(&before.steamapps, &study2, uid, &other).unwrap();
+    std::fs::write(before.saves.join("ManualSave-1/sav.dat"), b"changed").unwrap();
+    assert!(seal_unchanged(&before.steamapps, &study2, uid, &other, 30).is_err());
+    assert_eq!(
+        sealed(&study2, uid, &other),
+        Err("ProtectedStateNotSealedAtFinalization")
+    );
+}

@@ -29,7 +29,10 @@ pub(crate) fn baseline_name(kind: &str, campaign: &str) -> anyhow::Result<String
         "invalid campaign identity"
     );
     anyhow::ensure!(
-        matches!(kind, "host-hardware" | "protected-state"),
+        matches!(
+            kind,
+            "host-hardware" | "protected-state" | "protected-state-final"
+        ),
         "invalid baseline kind"
     );
     Ok(format!("{kind}-before-{campaign}.json"))

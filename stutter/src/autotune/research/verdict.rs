@@ -66,6 +66,9 @@ pub struct VerdictInputs<'a> {
     pub pressure_control: Result<(), &'static str>,
     /// G3: the mandatory resident observation status over the children (`ChildrenVerification::resident_summary`).
     pub child_resident: Result<(), &'static str>,
+    /// Whether the unchanged protected state was sealed at finalization (`protected_state::sealed`): the historical
+    /// result stands on that seal, not on the saves as they are when it is replayed.
+    pub sealed_protected_state: Result<(), &'static str>,
     /// G2: the player's saves and cloud copy are unchanged since before the campaign (`protected_state`).
     pub protected_state: Result<(), &'static str>,
     /// G0: the kernel, CPU topology and GPU are the ones recorded before the campaign (`host_hardware`).
@@ -171,11 +174,12 @@ fn judge_inner(inputs: &VerdictInputs<'_>, preparing: bool) -> Verdict {
         && gates.iter().all(|gate| gate.accepted);
     // The historical result rests on the campaign's own sealed evidence only. The gates are recomputed with the
     // facts that describe today rather than the campaign: a later GPU incident (`health_blocked`), the player's
-    // saves as they are now (`protected_state`) and the age of the control receipt cannot move it. Sealing the
-    // protected-state comparison at finalization is not yet done, which `historical_notes` says.
+    // saves as they are now (`protected_state`, replaced by the comparison sealed at finalization) and the age of
+    // the control receipt cannot move it. A campaign never sealed has no historical protected-state proof, which
+    // `historical_notes` says.
     let historical_gate_inputs = super::gate_verdict::GateInputs {
         health_blocked: false,
-        protected_state: Ok(()),
+        protected_state: inputs.sealed_protected_state,
         pressure_control: match inputs.pressure_control {
             Err("PressureControlNotFresh") => Ok(()),
             other => other,
@@ -213,7 +217,7 @@ fn judge_inner(inputs: &VerdictInputs<'_>, preparing: bool) -> Verdict {
         final_gate_qualified,
         historical_evidence_qualified,
         qualification_scope,
-        historical_notes: vec!["ProtectedStateNotSealedAtFinalization"],
+        historical_notes: inputs.sealed_protected_state.err().into_iter().collect(),
         disposition,
         gates,
     }

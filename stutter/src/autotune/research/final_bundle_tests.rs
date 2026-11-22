@@ -197,6 +197,7 @@ fn real_campaign_bundle() {
         fault_matrix: Err("NoFaultMatrixReceipt"),
         pressure_control: Err("NoPressureControl"),
         child_resident: Ok(()),
+        sealed_protected_state: Ok(()),
         protected_state: Ok(()),
         hardware: Ok(()),
         control_socket: None,

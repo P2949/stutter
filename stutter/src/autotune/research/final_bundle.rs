@@ -434,8 +434,7 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
                 "receipts": receipts,
                 "outcome_comparison": comparison,
                 "benefit_demonstrated": benefit_demonstrated,
-                "note": "status says whether the action was safely applied and restored; benefit_demonstrated says only whether the off/on comparison found an improvement",
-                "note": "transactions come from the normal controller and root worker only",
+                "note": "status says whether the action was safely applied and restored; benefit_demonstrated says only whether the off/on comparison found an improvement; transactions come from the normal controller and root worker only",
             })),
         ),
         (

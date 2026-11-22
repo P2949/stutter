@@ -45,6 +45,7 @@ fn all_true<'a>(
         fault_matrix: Err("NoFaultMatrixReceipt"),
         pressure_control: Err("NoPressureControl"),
         child_resident: Ok(()),
+        sealed_protected_state: Ok(()),
         protected_state: Ok(()),
         hardware: Ok(()),
         control_socket: None,
@@ -140,6 +141,7 @@ fn a_funnel_campaign_is_judged_from_its_children_not_its_empty_flat_schedule() {
         fault_matrix: Err("NoFaultMatrixReceipt"),
         pressure_control: Err("NoPressureControl"),
         child_resident: Ok(()),
+        sealed_protected_state: Ok(()),
         protected_state: Ok(()),
         hardware: Ok(()),
         control_socket: None,
@@ -265,4 +267,27 @@ fn the_historical_result_survives_a_later_incident_changed_saves_or_an_expired_c
         judge(&inputs)
     };
     assert!(!unqualified.historical_evidence_qualified);
+}
+
+#[test]
+fn the_historical_result_needs_the_protected_state_sealed_at_finalization() {
+    let raw = raw(2, 2, 0);
+    let studies = plan_of(StudyResult::Qualified);
+    let judged = |sealed: Result<(), &'static str>| {
+        let mut inputs = all_true(&raw, &studies, &[]);
+        inputs.funnel = true;
+        inputs.child_runtime_qualified = true;
+        inputs.child_replication = Some(true);
+        inputs.pressure_control = Ok(());
+        inputs.sealed_protected_state = sealed;
+        judge(&inputs)
+    };
+    let sealed = judged(Ok(()));
+    assert!(sealed.historical_evidence_qualified && sealed.historical_notes.is_empty());
+    let unsealed = judged(Err("ProtectedStateNotSealedAtFinalization"));
+    assert!(!unsealed.historical_evidence_qualified);
+    assert_eq!(
+        unsealed.historical_notes,
+        ["ProtectedStateNotSealedAtFinalization"]
+    );
 }

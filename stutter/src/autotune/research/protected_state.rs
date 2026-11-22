@@ -239,6 +239,51 @@ pub fn record_baseline(
     write_new(study_dir, &file, &serde_json::to_vec_pretty(&snapshot)?)
 }
 
+/// Seal, once and write-once, that the protected state was unchanged when the campaign was evaluated: a later change
+/// to the player's saves cannot then rewrite what the campaign itself did. Nothing is sealed unless the state is
+/// unchanged right now.
+pub fn seal_unchanged(
+    steamapps: &Path,
+    study_dir: &std::fs::File,
+    uid: u32,
+    campaign: &str,
+    now: u64,
+) -> Result<(), &'static str> {
+    status(steamapps, study_dir, uid, campaign)?;
+    let file = super::report_store::baseline_name("protected-state-final", campaign)
+        .map_err(|_| "CampaignIdentityInvalid")?;
+    let record = serde_json::json!({ "schema": 1, "unchanged": true, "sealed_unix": now });
+    match write_new(
+        study_dir,
+        &file,
+        &serde_json::to_vec_pretty(&record).map_err(|_| "ProtectedStateSealFailed")?,
+    ) {
+        Ok(()) => Ok(()),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+        {
+            Ok(())
+        }
+        Err(_) => Err("ProtectedStateSealFailed"),
+    }
+}
+
+/// Whether the unchanged protected state was sealed at finalization (`seal_unchanged`), whatever the saves look
+/// like now.
+pub fn sealed(study_dir: &std::fs::File, uid: u32, campaign: &str) -> Result<(), &'static str> {
+    let file = super::report_store::baseline_name("protected-state-final", campaign)
+        .map_err(|_| "CampaignIdentityInvalid")?;
+    let value: serde_json::Value = read_private(study_dir, &file, uid)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .ok_or("ProtectedStateNotSealedAtFinalization")?;
+    (value["schema"] == 1 && value["unchanged"] == true)
+        .then_some(())
+        .ok_or("ProtectedStateNotSealedAtFinalization")
+}
+
 /// The protected state now against the baseline recorded before the campaign: `Ok` when unchanged, the
 /// typed reason otherwise (`ProtectedStateNotRecorded` when no baseline exists).
 pub fn status(

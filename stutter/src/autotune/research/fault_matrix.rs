@@ -131,26 +131,10 @@ pub fn attested(
 }
 
 /// The newest `fault-matrix-*.json` in a study directory, if one is there and readable.
-pub fn read_latest(study: &Path) -> Option<FaultMatrixReceipt> {
-    let mut best: Option<FaultMatrixReceipt> = None;
-    for entry in std::fs::read_dir(study).ok()?.flatten() {
-        let name = entry.file_name();
-        let name = name.to_str()?;
-        if !(name.starts_with("fault-matrix-") && name.ends_with(".json")) {
-            continue;
-        }
-        let Ok(bytes) = std::fs::read(entry.path()) else {
-            continue;
-        };
-        if let Ok(candidate) = serde_json::from_slice::<FaultMatrixReceipt>(&bytes)
-            && best
-                .as_ref()
-                .is_none_or(|current| candidate.captured_unix > current.captured_unix)
-        {
-            best = Some(candidate);
-        }
-    }
-    best
+pub fn read_latest(study: &Path) -> super::newest_record::Newest<FaultMatrixReceipt> {
+    super::newest_record::newest(study, "fault-matrix-", |receipt: &FaultMatrixReceipt| {
+        receipt.captured_unix
+    })
 }
 
 /// The directory beside a receipt that holds the raw record each case names, one file per case called
@@ -223,9 +207,11 @@ pub fn artifacts_verified(receipt: &FaultMatrixReceipt, study: &Path) -> Result<
 /// G6's status from the study directory: `Ok` when the newest receipt attests, otherwise the typed
 /// reason (`NoFaultMatrixReceipt` when there is none).
 pub fn gate_status(study: &Path, own_binary_sha256: &str, now: u64) -> Result<(), &'static str> {
+    use super::newest_record::Newest;
     match read_latest(study) {
-        None => Err("NoFaultMatrixReceipt"),
-        Some(receipt) => {
+        Newest::None => Err("NoFaultMatrixReceipt"),
+        Newest::Invalid => Err("FaultMatrixInvalid"),
+        Newest::Found(receipt) => {
             attested(&receipt, own_binary_sha256, now)?;
             artifacts_verified(&receipt, study)
         }
