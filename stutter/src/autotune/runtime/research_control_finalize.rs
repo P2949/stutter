@@ -348,6 +348,30 @@ impl ResearchCoordinator {
             let dir = self
                 .open_campaign_study_dir()
                 .ok_or_else(|| anyhow::anyhow!("campaign study unavailable"))?;
+            // The protected-state seal is part of this durable preterminal step: written once, here, while the lease is
+            // still held, before the evidence that reads it and bound by digest into the decision below.
+            let intent_for_seal = self
+                .active
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("lease lost"))?
+                .intent_sha256
+                .clone();
+            if let Some(steamapps) = self.host_sources.0.as_deref() {
+                let _ = crate::autotune::research::protected_state::seal_unchanged(
+                    steamapps,
+                    &dir,
+                    uid,
+                    &intent_for_seal,
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |elapsed| elapsed.as_secs()),
+                );
+            }
+            let seal_digest = crate::autotune::research::protected_state::seal_digest(
+                &dir,
+                uid,
+                &intent_for_seal,
+            );
             let report =
                 crate::autotune::research::report_store::read_private(&dir, "report.json", uid)?;
             let evidence: serde_json::Value =
@@ -386,6 +410,7 @@ impl ResearchCoordinator {
                 "schema": 1, "intent_sha256": intent,
                 "report_sha256": stutter_core::hash::sha256_hex(&report),
                 "target_phase": phase, "terminal_failure": cause, "verdict": verdict,
+                "protected_state_seal_sha256": seal_digest,
             }))?;
             write_identical(&dir, uid, "finalization-prepared.json", &decision)?;
             Ok(PreparedFinalization {
@@ -459,6 +484,16 @@ impl ResearchCoordinator {
             "terminal report or bundle unavailable"
         );
         let before: serde_json::Value = serde_json::from_slice(prepared)?;
+        // The seal the prepared decision names is the one on disk now: nothing sealed or replaced it afterwards.
+        let sealed_now = crate::autotune::research::protected_state::seal_digest(
+            dir,
+            uid,
+            &terminal.intent_sha256,
+        );
+        anyhow::ensure!(
+            before["protected_state_seal_sha256"] == serde_json::json!(sealed_now),
+            "the protected-state seal changed after the prepared decision"
+        );
         anyhow::ensure!(
             before["intent_sha256"] == terminal.intent_sha256
                 && before["target_phase"] == serde_json::to_value(phase)?,

@@ -321,3 +321,22 @@ fn the_unchanged_state_is_sealed_once_and_a_later_change_cannot_unseal_it_or_sea
         Err("ProtectedStateNotSealedAtFinalization")
     );
 }
+
+#[test]
+fn only_the_preterminal_finalization_step_may_write_the_seal() {
+    // Ordinary verification must stay read-only, or a later report could create the fact it then reports.
+    let report = include_str!("../runtime/research_control_report.rs");
+    assert!(
+        !report.contains("seal_unchanged("),
+        "report verification must not seal"
+    );
+    let finalize = include_str!("../runtime/research_control_finalize.rs");
+    assert!(
+        finalize.contains("seal_unchanged("),
+        "the preterminal step seals"
+    );
+    assert!(
+        finalize.contains("protected_state_seal_sha256"),
+        "and binds the digest into the decision"
+    );
+}

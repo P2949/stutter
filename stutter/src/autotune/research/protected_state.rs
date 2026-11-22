@@ -270,6 +270,13 @@ pub fn seal_unchanged(
     }
 }
 
+/// SHA-256 of the sealed record, which the preterminal decision binds; `None` when nothing is sealed.
+pub fn seal_digest(study_dir: &std::fs::File, uid: u32, campaign: &str) -> Option<String> {
+    let file = super::report_store::baseline_name("protected-state-final", campaign).ok()?;
+    let bytes = read_private(study_dir, &file, uid).ok()?;
+    Some(stutter_core::hash::sha256_hex(&bytes))
+}
+
 /// Whether the unchanged protected state was sealed at finalization (`seal_unchanged`), whatever the saves look
 /// like now.
 pub fn sealed(study_dir: &std::fs::File, uid: u32, campaign: &str) -> Result<(), &'static str> {

@@ -210,19 +210,9 @@ impl ResearchCoordinator {
                                 .and_then(|study| std::fs::File::open(study).ok()),
                         ) {
                             (Some(steamapps), Some(study)) => {
-                                // The first evaluation that is not still preparing, with the saves unchanged, seals
-                                // that fact once; later changes cannot rewrite it.
-                                if !preparing {
-                                    let _ = crate::autotune::research::protected_state::seal_unchanged(
-                                        steamapps,
-                                        &study,
-                                        uid,
-                                        &report.intent_sha256,
-                                        std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .map_or(0, |elapsed| elapsed.as_secs()),
-                                    );
-                                }
+                                // Read-only: the seal is written by the durable preterminal finalization step and
+                                // nowhere else, so a later verification can never create the fact it reports.
+                                let _ = steamapps;
                                 crate::autotune::research::protected_state::sealed(
                                     &study,
                                     uid,
