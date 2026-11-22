@@ -412,7 +412,10 @@ fn builder_with_file_profile(
         FunnelDriver::new(
             campaign,
             intent,
-            Box::new(FileProfileHook::new(vec![file], spec, idle)),
+            Box::new(FileProfileHook::new(vec![file], spec, idle).with_arm_map(
+                vec![crate::autotune::research::ProtonSource::Ge],
+                Vec::new(),
+            )),
             attempts,
             |_| None,
             Default::default(),
