@@ -414,25 +414,7 @@ fn completed_processes(studies: &File, name: &str, uid: u32) -> Vec<AttemptProce
         return Vec::new();
     };
     super::report_store::read_evidence(&File::from(evidence), uid)
-        .map(|items| {
-            items
-                .into_iter()
-                .filter_map(|(slot, item)| {
-                    let native = item.native_completion.as_ref()?;
-                    let process = &native.process;
-                    Some(AttemptProcess {
-                        slot,
-                        pid: process.pid,
-                        start_ticks: process.start_ticks,
-                        uid: process.uid,
-                        started_unix: u64::try_from(native.started_unix_nanos / 1_000_000_000)
-                            .unwrap_or(u64::MAX),
-                        completed_unix: u64::try_from(native.completed_unix_nanos / 1_000_000_000)
-                            .unwrap_or(u64::MAX),
-                    })
-                })
-                .collect()
-        })
+        .map(|items| super::child_verify_rules::processes_of(&items))
         .unwrap_or_default()
 }
 

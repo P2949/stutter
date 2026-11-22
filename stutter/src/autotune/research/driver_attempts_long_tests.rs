@@ -120,7 +120,8 @@ fn build_with<D: LongSessionDriver + Send + 'static>(
             Some(KernelState {
                 cpus_allowed: "0-15".into(),
                 cgroup: "0::/app.slice".into(),
-                ..Default::default()
+                tasks: [(4242, "0-15".to_owned())].into(),
+                identity: Some((99, crate::syscall::geteuid())),
             })
         })),
     ));
@@ -271,4 +272,107 @@ fn the_real_route_driver_plays_the_unit_through_the_host_and_the_study_qualifies
     )
     .unwrap();
     assert!(raw && runtime);
+}
+
+/// A qualified action's `stage_evidence` is rebuilt for replay from the sealed receipts and the schedule, so the
+/// shared judgement accepts the live qualification; forged, missing, partial or misattributed receipts do not.
+#[test]
+fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_of_its_own_process()
+{
+    use std::{collections::BTreeMap, os::unix::fs::PermissionsExt};
+
+    use crate::autotune::research::{
+        child_judgement::action_replay, report::AttemptEvidenceV1, treatment::treatments_of,
+    };
+    let (root, mut runner, study, gate, parent) = build(&"a".repeat(64));
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    act(&gate, &parent);
+    let outcome = run_to_end(&mut runner, &study);
+    assert_eq!(judge(&study, &outcome).result, StudyResult::Qualified);
+    let path = root.path().join("studies").join(&study.study_sha256[..16]);
+    let dir = std::fs::File::open(&path).unwrap();
+    let uid = crate::syscall::geteuid();
+    let intent: ResearchIntentV1 =
+        serde_json::from_slice(&std::fs::read(path.join("intent.json")).unwrap()).unwrap();
+    let schedule = treatments_of(&intent).unwrap().unwrap();
+    // One distinct game process per attempt, as a real campaign has.
+    let evidence: BTreeMap<u32, AttemptEvidenceV1> = (0..schedule.len() as u32)
+        .map(|slot| {
+            let mut record = session(&"a".repeat(64));
+            record.process = SessionProcess {
+                pid: stutter_core::ids::Pid::new(5000 + slot),
+                start_ticks: 100 + u64::from(slot),
+                uid,
+            };
+            let item = AttemptEvidenceV1 {
+                schema_version: 1,
+                slot_index: slot,
+                average_fps: 1.0,
+                native_completion: None,
+                long_session: Some(Box::new(record)),
+                thermal: None,
+            };
+            (slot, item)
+        })
+        .collect();
+    let state = |pid: u32, ticks: u64| {
+        serde_json::json!({
+            "cgroup": "0::/app.slice", "cpus_allowed": "0-15",
+            "tasks": { pid.to_string(): "0-15" }, "identity": [ticks, uid],
+        })
+    };
+    let receipt = |slot: u32| {
+        let (pid, ticks) = (5000 + slot, 100 + u64::from(slot));
+        serde_json::json!({
+            "transaction": format!("exp-{slot}"), "action": "CpuAffinityProfile",
+            "pid": pid, "start_ticks": ticks, "uid": uid,
+            "original": state(pid, ticks), "restored": state(pid, ticks),
+        })
+    };
+    let treated: Vec<u32> = schedule
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| **t == crate::autotune::research::Treatment::On)
+        .map(|(slot, _)| slot as u32)
+        .collect();
+    let untreated = (0..schedule.len() as u32)
+        .find(|slot| !treated.contains(slot))
+        .unwrap();
+    let write = |items: Vec<serde_json::Value>| {
+        let file = path.join("action-receipts.json");
+        let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
+        std::fs::write(&file, serde_json::to_vec(&items).unwrap()).unwrap();
+    };
+    let replay = || {
+        action_replay(
+            &dir,
+            uid,
+            uid,
+            ResearchAction::CpuAffinityProfile,
+            &intent,
+            &evidence,
+        )
+    };
+
+    write(treated.iter().map(|slot| receipt(*slot)).collect());
+    assert!(replay(), "every treated attempt has its own valid receipt");
+    // One treated attempt without a receipt is a partly applied action.
+    write(treated[1..].iter().map(|slot| receipt(*slot)).collect());
+    assert!(!replay());
+    // A receipt on an attempt the schedule left untreated is not an applied action.
+    let mut extra: Vec<_> = treated.iter().map(|slot| receipt(*slot)).collect();
+    extra.push(receipt(untreated));
+    write(extra);
+    assert!(!replay());
+    // A receipt whose restored placement differs is not restoration.
+    let mut broken = treated
+        .iter()
+        .map(|slot| receipt(*slot))
+        .collect::<Vec<_>>();
+    broken[0]["restored"]["cpus_allowed"] = "0-3".into();
+    write(broken);
+    assert!(!replay());
+    // No receipts file at all.
+    std::fs::remove_file(path.join("action-receipts.json")).unwrap();
+    assert!(!replay());
 }

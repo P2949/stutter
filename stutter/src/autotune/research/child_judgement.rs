@@ -95,8 +95,13 @@ pub(super) fn verify_qualification(
             read_private(dir, super::init_receipt::INIT_RECEIPT, uid)
                 .ok()
                 .and_then(|bytes| super::init_receipt::read_init_receipt(&bytes, &arms))
+        } else if let Stage::Action(action) = study.stage {
+            // Rebuilt from the sealed receipts and the schedule, the way the live run derived it from its gate.
+            Some(action_replay(
+                dir, uid, parent.uid, action, &intent, &evidence,
+            ))
         } else {
-            matches!(study.stage, Stage::Feature(_) | Stage::Action(_)).then_some(false)
+            matches!(study.stage, Stage::Feature(_)).then_some(false)
         },
         activation,
         functional,
@@ -168,4 +173,28 @@ fn feature_replay(
         ))
     })();
     replayed.unwrap_or((None, None))
+}
+
+/// Whether an action study's sealed receipts show an applied and restored action on every attempt the
+/// schedule treated On, each attributed to the very process that attempt recorded. This is what the live gate
+/// proved when it said the action had evidence; anything missing, malformed or unattributable is `false`.
+pub(super) fn action_replay(
+    dir: &File,
+    uid: u32,
+    owner: u32,
+    action: super::ResearchAction,
+    intent: &ResearchIntentV1,
+    evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+) -> bool {
+    (|| -> Option<bool> {
+        let receipts: serde_json::Value =
+            serde_json::from_slice(&read_private(dir, "action-receipts.json", uid).ok()?).ok()?;
+        super::child_verify_rules::receipts_valid(&receipts, action, owner).ok()?;
+        let treatments = super::treatment::treatments_of(intent).ok()??;
+        let processes = super::child_verify_rules::processes_of(evidence);
+        let coverage =
+            super::action_coverage::attribute(&receipts, &processes, &treatments).ok()?;
+        Some(coverage.applied_on_every_treated_attempt())
+    })()
+    .unwrap_or(false)
 }

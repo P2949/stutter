@@ -2,11 +2,48 @@
 //! acknowledged once durable) and a settled attempt's accounting and outcome.
 
 use super::{
-    super::{child_study::ChildStudy, report_store::write_new, study_executor::AttemptsOutcome},
+    super::{
+        action_child::ActionChildScope,
+        child_study::{ChildStudy, Stage},
+        report_store::write_new,
+        study_executor::AttemptsOutcome,
+    },
     DriverStudyAttempts, STUDIES_DIR, dir_name, open_dir,
 };
 
 impl DriverStudyAttempts {
+    /// An Action study arms the gate (once) on the game process the host has sighted and attested,
+    /// authorizing only that study's action, for the rest of the campaign's window.
+    pub(super) fn arm_gate_for(&mut self, study: &ChildStudy) {
+        let (Some(gate), Stage::Action(action)) = (&self.gate, study.stage) else {
+            return;
+        };
+        if self.armed_for.as_deref() != Some(study.study_sha256.as_str())
+            && let Some(target) = self.host.game_process()
+        {
+            let scope = ActionChildScope::new([action], target, self.parent.deadline_unix_seconds);
+            if gate.lock().is_ok_and(|mut gate| gate.arm(scope)) {
+                self.armed_for = Some(study.study_sha256.clone());
+                self.armed_target = Some(target);
+            }
+        } else if let Some(target) = self.host.game_process()
+            && self.armed_target != Some(target)
+            && gate.lock().is_ok_and(|mut gate| gate.rebind(target))
+        {
+            // A later attempt is a new game process: the action is scoped to that process alone,
+            // never inherited from the previous launch.
+            self.armed_target = Some(target);
+        }
+        // In a treatment study the action may be applied only while an attempt treated On runs; this
+        // is set after arming, which starts from permitting.
+        if self.treatment_study {
+            let on = self.host.attempt_treatment() == Some(super::super::Treatment::On);
+            if let Ok(mut gate) = gate.lock() {
+                gate.set_attempt_on(on);
+            }
+        }
+    }
+
     /// Keep every attempt's telemetry receipt beside the study (write-once; a conflicting file means
     /// the receipts cannot be recorded and the study simply has none).
     pub(super) fn record_telemetry(&self, study: &ChildStudy) -> anyhow::Result<()> {

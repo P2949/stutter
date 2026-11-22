@@ -292,3 +292,38 @@ fn frames_in_window(receipt: &serde_json::Value, process: &AttemptProcess) -> u6
         })
         .unwrap_or(0)
 }
+
+/// The game process of every completed attempt, from its sealed record: a native completion's process, or a
+/// long session's. A long attempt has no native result, so without this its action receipts could never be
+/// attributed to an attempt.
+pub(super) fn processes_of(
+    evidence: &std::collections::BTreeMap<u32, super::report::AttemptEvidenceV1>,
+) -> Vec<AttemptProcess> {
+    evidence
+        .iter()
+        .filter_map(|(slot, item)| {
+            if let Some(native) = item.native_completion.as_ref() {
+                let process = &native.process;
+                return Some(AttemptProcess {
+                    slot: *slot,
+                    pid: process.pid,
+                    start_ticks: process.start_ticks,
+                    uid: process.uid,
+                    started_unix: u64::try_from(native.started_unix_nanos / 1_000_000_000)
+                        .unwrap_or(u64::MAX),
+                    completed_unix: u64::try_from(native.completed_unix_nanos / 1_000_000_000)
+                        .unwrap_or(u64::MAX),
+                });
+            }
+            let session = item.long_session.as_ref()?;
+            Some(AttemptProcess {
+                slot: *slot,
+                pid: session.process.pid,
+                start_ticks: session.process.start_ticks,
+                uid: session.process.uid,
+                started_unix: session.started_unix,
+                completed_unix: session.ended_unix,
+            })
+        })
+        .collect()
+}
