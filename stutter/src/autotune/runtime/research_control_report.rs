@@ -246,6 +246,21 @@ impl ResearchCoordinator {
                             }
                             _ => Err("NoFaultMatrixReceipt"),
                         },
+                        pressure_control: match (
+                            self.study_dir.as_deref(),
+                            crate::autotune::research::deploy_receipt::own_binary_sha256(),
+                        ) {
+                            (Some(study), Some(own)) => {
+                                crate::autotune::research::pressure_control::status(
+                                    study,
+                                    &own,
+                                    std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map_or(0, |elapsed| elapsed.as_secs()),
+                                )
+                            }
+                            _ => Err("NoPressureControl"),
+                        },
                         // G8 stands on a receipt of what is deployed, about the very binary
                         // doing this verification; none is inferred from the Nix pin.
                         lease: self.lease_facts(&report.intent_sha256, uid),

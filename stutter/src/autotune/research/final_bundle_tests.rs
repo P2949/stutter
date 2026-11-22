@@ -194,6 +194,7 @@ fn real_campaign_bundle() {
         child_telemetry: None,
         child_replication: None,
         fault_matrix: Err("NoFaultMatrixReceipt"),
+        pressure_control: Err("NoPressureControl"),
         protected_state: Ok(()),
         hardware: Ok(()),
         control_socket: None,

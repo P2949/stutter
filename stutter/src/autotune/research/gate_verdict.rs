@@ -72,6 +72,9 @@ pub struct GateInputs<'a> {
     pub replication: Option<bool>,
     /// G6: whether a physical fault-matrix receipt for this binary attests (`fault_matrix`), or why not.
     pub fault_matrix: Result<(), &'static str>,
+    /// G5: the owned-pressure control receipt status (`pressure_control::status`); only consulted when an
+    /// action study ended as a justified no-op.
+    pub pressure_control: Result<(), &'static str>,
     /// G2: the player's saves and cloud copy are unchanged since before the campaign (`protected_state`).
     pub protected_state: Result<(), &'static str>,
     /// G0: the kernel, CPU topology and GPU are the ones recorded before the campaign (`host_hardware`).
@@ -99,6 +102,13 @@ pub(super) fn legitimately_excluded(study: &Disposition) -> bool {
             // reported off, or whose activation is unproven, stays unresolved.
             || study.result == Some(StudyResult::Unqualified)
                 && study.reason == "FeatureNotObservable")
+}
+
+/// An action study that ran and found nothing to act on, by the reason the judgement gives it.
+pub(super) fn not_indicated(study: &Disposition) -> bool {
+    matches!(study.stage, Stage::Action(_))
+        && study.result == Some(StudyResult::Unqualified)
+        && study.reason == "ActionNotIndicated"
 }
 
 /// Whether a study reached an acceptable terminal disposition: qualified, or a legitimate exclusion.
@@ -289,6 +299,18 @@ fn gates_inner(inputs: &GateInputs<'_>, preparing: bool) -> Vec<GateVerdict> {
 
     // G5: a real Supported action, with restoration proven by a verifier independent of its token.
     let mut g5 = study_blockers(studies, action, "NoActionStudy", "ActionNotQualified");
+    // A justified no-op (the controller saw no eligible pressure and abstained) is a result, but only beside
+    // an owned-pressure control showing the same binary acts when pressure exists. A mere refusal is not it.
+    let mut g5_note: Vec<&'static str> = Vec::new();
+    let actions: Vec<&Disposition> = studies.iter().filter(|s| action(&s.stage)).collect();
+    let abstained = |s: &&Disposition| not_indicated(s);
+    if actions.iter().any(abstained) && actions.iter().all(|s| resolved(s) || not_indicated(s)) {
+        g5.clear();
+        match inputs.pressure_control {
+            Ok(()) => g5_note.push("ActionAbstainedNoPressure"),
+            Err(reason) => g5.push(reason),
+        }
+    }
     if !inputs.restoration_verified {
         g5.push("RestorationUnverified");
     }
@@ -354,7 +376,10 @@ fn gates_inner(inputs: &GateInputs<'_>, preparing: bool) -> Vec<GateVerdict> {
             ..gate("G3", health(g3))
         },
         gate("G4", health(g4)),
-        gate("G5", health(g5)),
+        GateVerdict {
+            notes: g5_note,
+            ..gate("G5", health(g5))
+        },
         // A matrix for this very binary stands for G6: physical passes for the benign classes, fixtures for
         // the destructive ones.
         gate("G6", inputs.fault_matrix.err().into_iter().collect()),

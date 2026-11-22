@@ -177,6 +177,7 @@ pub(crate) mod prefix_freeze;
     )
 )]
 pub(crate) mod prefix_init;
+pub mod pressure_control;
 pub(crate) mod profile_mappings;
 pub(crate) mod protected_state;
 pub(crate) mod raw_archive;

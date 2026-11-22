@@ -545,3 +545,10 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - Practical-effect scale: the threshold is stated on the frame-time (ms) scale that confirmation analyses; the pilot uses 1000/p99 only to estimate variability, and a test shows the coefficient of variation agrees between the two scales within 8 % for any spread a pilot accepts.
 - Thermal: the production host always seals a thermal context (readings may be unknown), so a new study without sensors is `Unproven`, never `NotRecorded`; only results sealed before the field existed read as not recorded, and sealed evidence cannot have the field removed without breaking its digest.
 - Open (typed, not done offline): G5 still has no justified no-pressure no-op disposition (needs an owned-pressure control record); a feature cannot qualify without an independent effective DLL/backend proof; the mandatory resident game-scoped CPU/GPU/PSI/ownership observation is not produced offline; historical verification still reads some current-host facts at finalization.
+
+## Fourteenth audit: G5 no-op and owned-pressure control
+
+- `pressure_control` defines the receipt (`pressure-control.json`: campaign-owned load, at least 1000 scoped events, runnable p95 visibly worse under load, action applied, restoration independently proven, fresh, this binary) and an independent reader; the control-report path passes its status into the gate.
+- G5 accepts an action study that ended `Unqualified` with reason `ActionNotIndicated` only beside a passing control (note `ActionAbstainedNoPressure`); without the control the blocker is the control's own reason. Any other refusal is never a justified no-op.
+- Not done: nothing produces `ActionNotIndicated` or the receipt yet; both belong to a physical run, so G5 cannot pass offline.
+- Verified this pass: `cargo test -p xtask` (620+1 passed), `release-check` PASS, NixosConf research remote is e2f5ff37 pinning Stutter 9ceaef38 / binary 8d0f57ce.

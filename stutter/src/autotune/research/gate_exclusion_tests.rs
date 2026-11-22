@@ -92,3 +92,47 @@ fn a_feature_that_reached_the_game_but_has_no_function_report_is_excluded_by_nam
     };
     assert!(!resolved(&action));
 }
+
+#[test]
+fn a_justified_no_op_resolves_g5_only_beside_a_passing_owned_pressure_control() {
+    let action = Stage::Action(ResearchAction::CpuAffinityProfile);
+    let noop = Disposition {
+        reason: "ActionNotIndicated".into(),
+        ..study(action, Some(StudyResult::Unqualified))
+    };
+    assert!(not_indicated(&noop) && !resolved(&noop));
+    let mut studies = full(Some(StudyResult::Qualified));
+    studies.retain(|s| !matches!(s.stage, Stage::Action(_)));
+    studies.push(noop.clone());
+    let g5 = |control: Result<(), &'static str>| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: false,
+            telemetry: None,
+            replication: Some(true),
+            fault_matrix: Err("NoFaultMatrixReceipt"),
+            pressure_control: control,
+            protected_state: Ok(()),
+            hardware: Ok(()),
+            control_socket: None,
+            deployment_attested: false,
+            lease: None,
+            host: None,
+        });
+        of(&verdicts, "G5").clone()
+    };
+    let with = g5(Ok(()));
+    assert!(with.blockers.is_empty() && with.notes == ["ActionAbstainedNoPressure"]);
+    // Without the control the abstention proves nothing about the controller's ability to act.
+    assert_eq!(g5(Err("NoPressureControl")).blockers, ["NoPressureControl"]);
+    // A refusal for another reason is never a justified no-op.
+    let refused = Disposition {
+        reason: "ActionEvidenceMissing".into(),
+        ..noop
+    };
+    assert!(!not_indicated(&refused));
+}
