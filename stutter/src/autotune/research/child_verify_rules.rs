@@ -123,11 +123,33 @@ pub(super) fn receipts_valid(
                 && after.tasks.values().all(|cpus| !cpus.is_empty()),
             "a receipt shows a different placement or process after the restore"
         );
-        // An absent task is not proof that it exited; that would need a separate identity witness.
+        // A thread missing afterwards is a difference unless the receipt names it as exited: the post-restore
+        // listing was complete and read from the same process identity (checked above), so a thread absent
+        // from it and named here is a witnessed exit. An unnamed absence is unknown, never an exit; a named
+        // exit that is still listed, that was never seen, or that is the leader itself is a contradiction.
+        let exited: std::collections::BTreeSet<u32> = item["exited"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|tid| tid.as_u64().and_then(|tid| u32::try_from(tid).ok()))
+                    .collect::<Option<_>>()
+            })
+            .unwrap_or(Some(Default::default()))
+            .ok_or_else(|| anyhow::anyhow!("a receipt's exited threads are malformed"))?;
+        anyhow::ensure!(
+            exited.iter().all(|tid| {
+                before.tasks.contains_key(tid) && !after.tasks.contains_key(tid) && *tid != pid
+            }),
+            "a receipt names an exit its own listings contradict"
+        );
         let moved = before
             .tasks
             .iter()
-            .any(|(tid, cpus)| after.tasks.get(tid) != Some(cpus));
+            .any(|(tid, cpus)| match after.tasks.get(tid) {
+                Some(now) => now != cpus,
+                None => !exited.contains(tid),
+            });
         anyhow::ensure!(!moved, "a thread was not restored");
     }
     Ok(())

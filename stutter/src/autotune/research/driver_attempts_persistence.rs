@@ -9,7 +9,7 @@ use super::{
         report_store::write_new,
         study_executor::AttemptsOutcome,
     },
-    DriverStudyAttempts, STUDIES_DIR, dir_name, open_dir,
+    DriverStudyAttempts, STUDIES_DIR, StudyInputs, dir_name, open_dir,
 };
 
 impl DriverStudyAttempts {
@@ -282,5 +282,39 @@ impl DriverStudyAttempts {
             )),
             Err(_) => Ok(None),
         }
+    }
+}
+
+impl DriverStudyAttempts {
+    /// The study's inputs, frozen the first time they are asked for and returned unchanged afterwards, so the
+    /// profile application, the attempt count and the child intent can never be made from different selections.
+    pub(super) fn frozen_inputs(&mut self, study: &ChildStudy) -> anyhow::Result<StudyInputs> {
+        if let Some((digest, arms, rule)) = &self.frozen
+            && *digest == study.study_sha256
+        {
+            return Ok(StudyInputs {
+                arms: arms.clone(),
+                rule: rule.clone(),
+            });
+        }
+        let fresh = (self.select_arms)(study)?;
+        self.frozen = Some((
+            study.study_sha256.clone(),
+            fresh.arms.clone(),
+            fresh.rule.clone(),
+        ));
+        Ok(fresh)
+    }
+
+    /// As `frozen_inputs`, and the selection read once more now that the child is created must still be the same:
+    /// anything that changed between profile application and launch fails the study instead of running it.
+    pub(super) fn verified_inputs(&mut self, study: &ChildStudy) -> anyhow::Result<StudyInputs> {
+        let frozen = self.frozen_inputs(study)?;
+        let again = (self.select_arms)(study)?;
+        anyhow::ensure!(
+            again.arms == frozen.arms && again.rule == frozen.rule,
+            "SelectionChangedAfterItWasFrozen"
+        );
+        Ok(frozen)
     }
 }

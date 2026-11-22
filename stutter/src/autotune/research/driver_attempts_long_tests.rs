@@ -373,6 +373,41 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
 
     write(treated.iter().map(|slot| receipt(*slot)).collect());
     assert!(replay(), "every treated attempt has its own valid receipt");
+    // A worker thread that exited while the action ran: valid only when the receipt names it, the post-restore
+    // listing no longer has it, and it is not the leader.
+    let with_exit = |named: Option<serde_json::Value>, still_listed: bool| {
+        treated
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| {
+                let mut item = receipt(*slot);
+                if index == 0 {
+                    let tid = 9_000 + slot;
+                    item["original"]["tasks"][tid.to_string()] = "0-15".into();
+                    if still_listed {
+                        item["restored"]["tasks"][tid.to_string()] = "0-15".into();
+                    }
+                    if let Some(named) = &named {
+                        item["exited"] = named.clone();
+                    }
+                }
+                item
+            })
+            .collect::<Vec<_>>()
+    };
+    let first_tid = 9_000 + treated[0];
+    write(with_exit(Some(serde_json::json!([first_tid])), false));
+    assert!(replay(), "a named, witnessed exit is not a difference");
+    write(with_exit(None, false));
+    assert!(!replay(), "an unnamed absence is unknown, never an exit");
+    write(with_exit(Some(serde_json::json!([first_tid])), true));
+    assert!(!replay(), "a thread still listed has not exited");
+    write(with_exit(
+        Some(serde_json::json!([5000 + treated[0]])),
+        false,
+    ));
+    assert!(!replay(), "the leader cannot be the thread that exited");
+    write(treated.iter().map(|slot| receipt(*slot)).collect());
     // One treated attempt without a receipt is a partly applied action.
     write(treated[1..].iter().map(|slot| receipt(*slot)).collect());
     assert!(!replay());

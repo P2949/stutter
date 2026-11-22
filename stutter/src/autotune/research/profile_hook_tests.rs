@@ -555,3 +555,17 @@ fn an_unusable_unselected_arm_does_not_block_a_selected_pair_but_a_selected_one_
         Err(ProfileFailure::Blocked("BlockedPrefixNotInitialized"))
     );
 }
+
+#[test]
+fn a_requested_subset_without_an_arm_map_is_refused_not_widened_to_every_arm() {
+    let a = arms(3, &[]);
+    let original = bytes(&a);
+    let paths = a.paths.clone();
+    let study = child_study(Profile::Cpu);
+    let mut hook = FileProfileHook::new(a.files, index_free, idle);
+    assert_eq!(
+        hook.apply_arms(&study, Some(&[ProtonSource::Ge, ProtonSource::CachyOs])),
+        Err(ProfileFailure::Failed("ProfileArmMapMissing"))
+    );
+    assert_eq!(bytes(&a_paths(&paths)), original, "no arm was edited");
+}

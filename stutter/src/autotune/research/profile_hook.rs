@@ -114,6 +114,10 @@ impl FileProfileHook {
         // Only the arms this study runs matter: an unusable unselected arm neither blocks nor is edited.
         let mapped = self.file_arms.len() == self.files.len()
             && self.unavailable_arms.len() == self.unavailable.len();
+        // A requested subset needs the arm map to be honoured; without one the hook must not quietly apply every arm.
+        if selected.is_some() && !mapped {
+            return Err(ProfileFailure::Failed("ProfileArmMapMissing"));
+        }
         let wanted = |arm: &super::ProtonSource| match (selected, mapped) {
             (Some(selected), true) => selected.contains(arm),
             _ => true,

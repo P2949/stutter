@@ -23,6 +23,11 @@ pub enum Observation {
 /// an observation is not itself proof; the production source still requires live qualification.
 pub trait NativeObservationSource {
     fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()>;
+    /// As `begin`, for an initialization attempt: nothing is measured, and the arm's settings file may not exist
+    /// yet (creating it is what the attempt is for), so its absence at first sight is not an identity failure.
+    fn begin_initialization(&mut self, arm: super::ProtonSource) -> anyhow::Result<()> {
+        self.begin(arm)
+    }
     fn poll(&mut self) -> Observation;
     /// The game process this attempt's source has sighted and attested, if any.
     fn sighted_process(&self) -> Option<super::action_child::ChildTarget> {
@@ -64,18 +69,36 @@ impl<S> NativeResultProbe<S> {
     }
 }
 
+impl<S: NativeObservationSource> NativeResultProbe<S> {
+    fn begin_inner(
+        &mut self,
+        arm: super::ProtonSource,
+        initialization: bool,
+    ) -> anyhow::Result<()> {
+        self.before = None;
+        self.results_dir = (self.results_for)(arm);
+        let snapshot = snapshot_benchmark_results_or_absent(&self.results_dir, self.owner_uid)?;
+        if initialization {
+            self.source.begin_initialization(arm)?;
+        } else {
+            self.source.begin(arm)?;
+        }
+        self.before = Some(snapshot);
+        Ok(())
+    }
+}
+
 impl<S: NativeObservationSource> ResultProbe for NativeResultProbe<S> {
+    fn begin_initialization(&mut self, arm: super::ProtonSource) -> anyhow::Result<()> {
+        self.begin_inner(arm, true)
+    }
+
     fn game_process(&self) -> Option<super::action_child::ChildTarget> {
         self.source.sighted_process()
     }
 
     fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()> {
-        self.before = None;
-        self.results_dir = (self.results_for)(arm);
-        let snapshot = snapshot_benchmark_results_or_absent(&self.results_dir, self.owner_uid)?;
-        self.source.begin(arm)?;
-        self.before = Some(snapshot);
-        Ok(())
+        self.begin_inner(arm, false)
     }
 
     fn poll(&mut self) -> GameState {

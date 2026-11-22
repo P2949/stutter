@@ -45,6 +45,9 @@ pub struct DriverStudyAttempts {
     /// The arms a study runs across: every authorized tool for a screen, and the two arms chosen from
     /// the screen's results for a confirmation, feature or action study.
     select_arms: SelectArms,
+    /// The inputs one study was frozen with (its digest, arms in order, confirmation rule): profile application,
+    /// the attempt count, the child intent and the launches all use this one selection.
+    frozen: Option<(String, Vec<ProtonSource>, Option<FrozenConfirmationRule>)>,
     claim_verifier: Option<Box<dyn Fn() -> Box<dyn super::driver::ClaimSettlementVerifier> + Send>>,
     running: Option<(String, Driver)>,
     /// The driver step of the last poll, for the controller to advance the lease from.
@@ -112,6 +115,7 @@ impl DriverStudyAttempts {
             launch_fence,
             results_for,
             select_arms,
+            frozen: None,
             claim_verifier: None,
             running: None,
             last_step: None,
@@ -296,7 +300,7 @@ impl DriverStudyAttempts {
     }
 
     fn begin(&mut self, study: &ChildStudy, remaining_attempts: u32) -> anyhow::Result<()> {
-        let inputs = (self.select_arms)(study)?;
+        let inputs = self.verified_inputs(study)?;
         let mut intent = child_intent(&self.parent, study, &inputs.arms, inputs.rule.as_ref())?;
         anyhow::ensure!(
             intent.max_attempts <= remaining_attempts,
@@ -494,7 +498,7 @@ impl DriverStudyAttempts {
 
 impl StudyAttempts for DriverStudyAttempts {
     fn selected_arms(&mut self, study: &ChildStudy) -> anyhow::Result<Option<Vec<ProtonSource>>> {
-        Ok(Some((self.select_arms)(study)?.arms))
+        Ok(Some(self.frozen_inputs(study)?.arms))
     }
 
     fn record_applied_settings(&mut self, _study: &ChildStudy, digests: Vec<String>) {
@@ -502,7 +506,7 @@ impl StudyAttempts for DriverStudyAttempts {
     }
 
     fn required_attempts(&mut self, study: &ChildStudy) -> anyhow::Result<u32> {
-        let inputs = (self.select_arms)(study)?;
+        let inputs = self.frozen_inputs(study)?;
         if study.stage == Stage::Pilot {
             return u32::try_from(inputs.arms.len())?
                 .checked_mul(3)

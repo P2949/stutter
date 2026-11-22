@@ -54,6 +54,8 @@ pub struct AttestedNativeSource<F> {
     current: Option<ResearchTool>,
     owner_uid: u32,
     seen: Option<Seen>,
+    /// The running attempt only initializes a prefix: its settings file may not exist at first sight.
+    initializing: bool,
 }
 
 impl<F> AttestedNativeSource<F> {
@@ -70,6 +72,7 @@ impl<F> AttestedNativeSource<F> {
             current: None,
             owner_uid,
             seen: None,
+            initializing: false,
         }
     }
 
@@ -141,7 +144,13 @@ impl<F: GameFacts> AttestedNativeSource<F> {
                 }
             }
             (Sighting::One(process), None) => {
-                let settings_sha256 = self.facts.settings_sha256()?;
+                // An initialization attempt may sight the game before it has written its settings: there is nothing to
+                // attest yet, and nothing is measured, so the digest is empty rather than an identity failure.
+                let settings_sha256 = match self.facts.settings_sha256() {
+                    Ok(digest) => digest,
+                    Err(_) if self.initializing => String::new(),
+                    Err(error) => return Err(error),
+                };
                 let started_unix_nanos = self.facts.now_unix_nanos()?;
                 // Best effort: a runtime that cannot be read is recorded as absent, never invented.
                 let runtime = self
@@ -172,7 +181,14 @@ impl<F: GameFacts> NativeObservationSource for AttestedNativeSource<F> {
             })
     }
 
+    fn begin_initialization(&mut self, arm: ProtonSource) -> anyhow::Result<()> {
+        self.begin(arm)?;
+        self.initializing = true;
+        Ok(())
+    }
+
     fn begin(&mut self, arm: ProtonSource) -> anyhow::Result<()> {
+        self.initializing = false;
         self.seen = None;
         self.facts.begin_arm(arm);
         // An arm outside the frozen tool set can never be attributed: refuse to begin.
@@ -211,6 +227,8 @@ mod tests {
         sights: VecDeque<anyhow::Result<Sighting>>,
         clock: u128,
         settings_reads: u32,
+        /// The arm's UserSettings.json does not exist yet (a cold prefix).
+        settings_missing: bool,
     }
 
     impl GameFacts for Script {
@@ -219,6 +237,7 @@ mod tests {
         }
         fn settings_sha256(&mut self) -> anyhow::Result<String> {
             self.settings_reads += 1;
+            anyhow::ensure!(!self.settings_missing, "no UserSettings.json yet");
             Ok("c".repeat(64))
         }
         fn now_unix_nanos(&mut self) -> anyhow::Result<u128> {
@@ -258,6 +277,7 @@ mod tests {
                 sights: sights.into(),
                 clock: 10_000,
                 settings_reads: 0,
+                settings_missing: false,
             },
             installation(),
             vec![ResearchTool {
@@ -266,6 +286,27 @@ mod tests {
             }],
             1000,
         )
+    }
+
+    #[test]
+    fn a_cold_prefix_is_an_identity_failure_for_a_measurement_but_not_for_its_initialization() {
+        let one = || Ok(Sighting::One(process(500, 9)));
+        // A measuring attempt cannot attest settings that do not exist.
+        let mut measuring = source(vec![one()]);
+        measuring.facts.settings_missing = true;
+        measuring.begin(ProtonSource::ValveStable).unwrap();
+        assert!(matches!(measuring.poll(), Observation::IdentityMismatch));
+        // Initialization sights the game before the file exists and keeps waiting, still bound to that process.
+        let mut init = source(vec![one(), one()]);
+        init.facts.settings_missing = true;
+        init.begin_initialization(ProtonSource::ValveStable)
+            .unwrap();
+        assert!(matches!(init.poll(), Observation::Running));
+        assert!(matches!(init.poll(), Observation::Running));
+        assert!(init.sighted_process().is_some());
+        // The next ordinary attempt is strict again.
+        init.begin(ProtonSource::ValveStable).unwrap();
+        assert!(!init.initializing);
     }
 
     #[test]
@@ -344,6 +385,7 @@ mod tests {
                 sights: vec![one(), Ok(Sighting::None), one(), Ok(Sighting::None)].into(),
                 clock: 10_000,
                 settings_reads: 0,
+                settings_missing: false,
             },
             installation(),
             tools,

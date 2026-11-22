@@ -269,6 +269,14 @@ impl GateEvidence {
                         "uid": receipt.target.uid,
                         "original": state(&receipt.original),
                         "restored": state(&receipt.restored),
+                        // Threads the original listing had and the complete post-restore listing no longer has: the
+                        // witnessed exits that make the live rule and the verifier agree.
+                        "exited": receipt
+                            .original
+                            .tasks
+                            .keys()
+                            .filter(|tid| !receipt.restored.tasks.contains_key(tid))
+                            .collect::<Vec<_>>(),
                     })
                 })
                 .collect(),

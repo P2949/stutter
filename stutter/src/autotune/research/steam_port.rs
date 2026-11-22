@@ -285,6 +285,10 @@ pub fn launch_argv() -> Vec<String> {
 pub trait ResultProbe {
     /// Prepare for a new launch (for example snapshot the native results directory).
     fn begin(&mut self, arm: super::ProtonSource) -> anyhow::Result<()>;
+    /// As `begin`, for an initialization attempt (no measurement, settings file possibly not created yet).
+    fn begin_initialization(&mut self, arm: super::ProtonSource) -> anyhow::Result<()> {
+        self.begin(arm)
+    }
     fn poll(&mut self) -> GameState;
     fn game_process(&self) -> Option<super::action_child::ChildTarget> {
         None

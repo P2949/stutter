@@ -44,7 +44,12 @@ impl<R: ResultProbe> ProductionSteamPort<R> {
         if let Some(guard) = self.gpu.as_mut() {
             guard.begin_attempt();
         }
-        self.probe.begin(slot.arm).map_err(|_| LaunchFailure {
+        let begun = if context.intent.initialization {
+            self.probe.begin_initialization(slot.arm)
+        } else {
+            self.probe.begin(slot.arm)
+        };
+        begun.map_err(|_| LaunchFailure {
             class: Class::Integrity,
             code: "NativeProbeAdmissionUnverified",
         })?;
