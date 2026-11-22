@@ -49,26 +49,50 @@ pub fn exists(study_dir: &File) -> bool {
         .is_ok_and(|meta| meta.is_dir())
 }
 
-fn private_dir(path: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(path)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
-    Ok(())
+/// Open (creating private directories as needed) the folder holding `components`, walking from `root` one
+/// directory descriptor at a time without following any link. Each directory must be a private directory
+/// owned by this user, whether it was just made or already there.
+fn open_chain(
+    root: &File,
+    components: &[std::ffi::OsString],
+    create: bool,
+) -> anyhow::Result<File> {
+    use std::os::{fd::AsFd, unix::fs::MetadataExt};
+    let mut dir = root.try_clone()?;
+    for component in components {
+        let name = component
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("a raw path component is not text"))?;
+        if create {
+            match crate::syscall::mkdir_private_at(dir.as_fd(), name) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let next = File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), name)?);
+        let meta = next.metadata()?;
+        anyhow::ensure!(
+            meta.uid() == crate::syscall::geteuid() && meta.mode() & 0o077 == 0,
+            "an archive directory is not private to this user"
+        );
+        dir = next;
+    }
+    Ok(dir)
 }
 
-fn read_bounded(path: &Path) -> anyhow::Result<Vec<u8>> {
-    let meta = std::fs::symlink_metadata(path)?;
+/// A regular file's bytes, read through its directory descriptor without following a link, and bounded.
+/// The length is taken from the open descriptor, so a swap after opening cannot change what was checked.
+fn read_at(dir: &File, name: &str) -> anyhow::Result<Vec<u8>> {
+    use std::os::fd::AsFd;
+    let file = crate::syscall::openat_nofollow(dir.as_fd(), name)?;
+    let meta = file.metadata()?;
     anyhow::ensure!(
         meta.is_file() && meta.len() <= MAX_FILE_BYTES,
         "a raw native file is missing, not a regular file, or too large"
     );
     let mut bytes = Vec::new();
-    File::open(path)?
-        .take(MAX_FILE_BYTES + 1)
-        .read_to_end(&mut bytes)?;
+    file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
     anyhow::ensure!(
         bytes.len() as u64 == meta.len(),
         "a raw native file changed while it was read"
@@ -76,8 +100,16 @@ fn read_bounded(path: &Path) -> anyhow::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn components_of(relative: &Path) -> Vec<std::ffi::OsString> {
+    relative
+        .components()
+        .map(|part| part.as_os_str().to_owned())
+        .collect()
+}
+
 /// Copy every completed attempt's sealed native files from `results_for(arm)` into the study's archive.
-/// Idempotent: a copy already present must be byte-identical.
+/// Idempotent: a copy already present must be byte-identical. Both trees are walked by directory
+/// descriptor without following links.
 pub fn archive(
     study_dir: &File,
     evidence: &BTreeMap<u32, AttemptEvidenceV1>,
@@ -88,12 +120,23 @@ pub fn archive(
         let Some(native) = item.native_completion.as_deref() else {
             continue;
         };
-        let source_root = results_for(native.proton_source);
-        let archive_root = arm_root(study_dir, native.proton_source);
+        let source_root = File::from(crate::syscall::open_dir_no_symlinks(&results_for(
+            native.proton_source,
+        ))?);
+        let arm_components = vec![
+            std::ffi::OsString::from(RAW_DIR),
+            std::ffi::OsString::from(native.proton_source.dir_name()),
+        ];
         for file in &native.files {
             let relative = safe_relative(&file.path)
                 .ok_or_else(|| anyhow::anyhow!("a sealed native path escapes its folder"))?;
-            let bytes = read_bounded(&source_root.join(&relative))?;
+            let mut parts = components_of(&relative);
+            let leaf = parts
+                .pop()
+                .and_then(|leaf| leaf.into_string().ok())
+                .ok_or_else(|| anyhow::anyhow!("a native file has no folder or name"))?;
+            let source_dir = open_foreign_chain(&source_root, &parts)?;
+            let bytes = read_at(&source_dir, &leaf)?;
             anyhow::ensure!(
                 bytes.len() as u64 == file.size_bytes
                     && stutter_core::hash::sha256_hex(&bytes) == file.sha256,
@@ -104,27 +147,40 @@ pub fn archive(
                 total <= MAX_STUDY_BYTES,
                 "the raw archive exceeds its bound"
             );
-            let target = archive_root.join(&relative);
-            if let Some(parent) = target.parent() {
-                private_dir(parent)?;
-            }
-            match std::fs::symlink_metadata(&target) {
-                Ok(_) => anyhow::ensure!(
-                    read_bounded(&target)? == bytes,
+            let mut target = arm_components.clone();
+            target.extend(parts);
+            let folder = open_chain(study_dir, &target, true)?;
+            match read_at(&folder, &leaf) {
+                Ok(existing) => anyhow::ensure!(
+                    existing == bytes,
                     "the archived copy differs from the sealed file"
                 ),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    let (Some(folder), Some(leaf)) = (target.parent(), target.file_name()) else {
-                        anyhow::bail!("a native file has no folder or name");
-                    };
-                    let parent = File::open(folder)?;
-                    write_new_bounded(&parent, &leaf.to_string_lossy(), &bytes, MAX_FILE_BYTES)?;
+                Err(error)
+                    if error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+                {
+                    write_new_bounded(&folder, &leaf, &bytes, MAX_FILE_BYTES)?;
                 }
-                Err(error) => return Err(error.into()),
+                Err(error) => return Err(error),
             }
         }
     }
     Ok(())
+}
+
+/// The source tree belongs to the game, not to the campaign: walk it without following links but without
+/// requiring it to be private.
+fn open_foreign_chain(root: &File, components: &[std::ffi::OsString]) -> anyhow::Result<File> {
+    use std::os::fd::AsFd;
+    let mut dir = root.try_clone()?;
+    for component in components {
+        let name = component
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("a raw path component is not text"))?;
+        dir = File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), name)?);
+    }
+    Ok(dir)
 }
 
 #[cfg(test)]

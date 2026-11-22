@@ -153,12 +153,63 @@ pub fn read_latest(study: &Path) -> Option<FaultMatrixReceipt> {
     best
 }
 
+/// The directory beside a receipt that holds the raw record each case names, one file per case called
+/// `<evidence_sha256>.json`.
+pub const EVIDENCE_DIR: &str = "fault-evidence";
+const MAX_EVIDENCE_BYTES: u64 = 256 * 1024;
+
+/// Every required case's named record is really there: a regular file (not a link) whose bytes hash to
+/// the digest, that says it is this class, in this mode, with this outcome, for this binary, and that is
+/// not shared with another case. Missing, modified, duplicated or misclassified evidence is refused.
+pub fn artifacts_verified(receipt: &FaultMatrixReceipt, study: &Path) -> Result<(), &'static str> {
+    let dir = study.join(EVIDENCE_DIR);
+    let mut seen = std::collections::BTreeSet::new();
+    for class in REQUIRED_CLASSES {
+        let Some(case) = receipt.cases.iter().find(|case| case.class == class) else {
+            return Err("FaultClassMissingOrDuplicated");
+        };
+        if !seen.insert(case.evidence_sha256.as_str()) {
+            return Err("FaultEvidenceShared");
+        }
+        let path = dir.join(format!("{}.json", case.evidence_sha256));
+        let meta = std::fs::symlink_metadata(&path).map_err(|_| "FaultEvidenceMissing")?;
+        if !meta.is_file() || meta.len() > MAX_EVIDENCE_BYTES {
+            return Err("FaultEvidenceUnusable");
+        }
+        let bytes = std::fs::read(&path).map_err(|_| "FaultEvidenceMissing")?;
+        if stutter_core::hash::sha256_hex(&bytes) != case.evidence_sha256 {
+            return Err("FaultEvidenceModified");
+        }
+        let record: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| "FaultEvidenceUnusable")?;
+        let mode = match case.mode {
+            Mode::Fixture => "fixture",
+            Mode::Physical => "physical",
+        };
+        let outcome = match case.outcome {
+            Outcome::Passed => "passed",
+            Outcome::Failed => "failed",
+        };
+        if record["class"] != class
+            || record["mode"] != mode
+            || record["outcome"] != outcome
+            || record["binary_sha256"] != receipt.binary_sha256
+        {
+            return Err("FaultEvidenceMisclassified");
+        }
+    }
+    Ok(())
+}
+
 /// G6's status from the study directory: `Ok` when the newest receipt attests, otherwise the typed
 /// reason (`NoFaultMatrixReceipt` when there is none).
 pub fn gate_status(study: &Path, own_binary_sha256: &str, now: u64) -> Result<(), &'static str> {
     match read_latest(study) {
         None => Err("NoFaultMatrixReceipt"),
-        Some(receipt) => attested(&receipt, own_binary_sha256, now),
+        Some(receipt) => {
+            attested(&receipt, own_binary_sha256, now)?;
+            artifacts_verified(&receipt, study)
+        }
     }
 }
 

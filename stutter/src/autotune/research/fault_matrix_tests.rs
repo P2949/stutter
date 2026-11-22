@@ -129,6 +129,9 @@ fn the_gate_reads_the_newest_receipt_and_without_one_says_so() {
         Err("NoFaultMatrixReceipt")
     );
     let write = |name: &str, receipt: &FaultMatrixReceipt| {
+        let mut receipt = receipt.clone();
+        seal_evidence(study.path(), &mut receipt);
+        let receipt = &receipt;
         let path = study.path().join(name);
         std::fs::write(&path, serde_json::to_vec(receipt).unwrap()).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -149,5 +152,78 @@ fn the_gate_reads_the_newest_receipt_and_without_one_says_so() {
     assert_eq!(
         gate_status(study.path(), &me(), NOW),
         Err("FaultClassOnlyFixtureTested")
+    );
+}
+
+/// Write each case's raw record beside the receipt and point the case at it by its real digest.
+fn seal_evidence(study: &Path, receipt: &mut FaultMatrixReceipt) {
+    let dir = study.join(EVIDENCE_DIR);
+    std::fs::create_dir_all(&dir).unwrap();
+    for case in &mut receipt.cases {
+        let record = serde_json::json!({
+            "class": case.class,
+            "mode": if case.mode == Mode::Fixture { "fixture" } else { "physical" },
+            "outcome": if case.outcome == Outcome::Passed { "passed" } else { "failed" },
+            "binary_sha256": receipt.binary_sha256,
+        });
+        let bytes = serde_json::to_vec(&record).unwrap();
+        case.evidence_sha256 = stutter_core::hash::sha256_hex(&bytes);
+        std::fs::write(dir.join(format!("{}.json", case.evidence_sha256)), bytes).unwrap();
+    }
+}
+
+#[test]
+fn every_case_must_name_a_real_unmodified_correctly_classified_unshared_record() {
+    let study = tempfile::tempdir().unwrap();
+    let mut receipt = complete();
+    seal_evidence(study.path(), &mut receipt);
+    assert_eq!(artifacts_verified(&receipt, study.path()), Ok(()));
+    let file = |case: &FaultCase| {
+        study
+            .path()
+            .join(EVIDENCE_DIR)
+            .join(format!("{}.json", case.evidence_sha256))
+    };
+
+    // Modified after the digest was recorded.
+    std::fs::write(file(&receipt.cases[0]), b"{}").unwrap();
+    assert_eq!(
+        artifacts_verified(&receipt, study.path()),
+        Err("FaultEvidenceModified")
+    );
+    // Missing.
+    std::fs::remove_file(file(&receipt.cases[0])).unwrap();
+    assert_eq!(
+        artifacts_verified(&receipt, study.path()),
+        Err("FaultEvidenceMissing")
+    );
+    // A record that describes another class, however well it hashes.
+    let mut wrong = complete();
+    seal_evidence(study.path(), &mut wrong);
+    let (first, second) = (wrong.cases[0].clone(), wrong.cases[1].clone());
+    wrong.cases[0].evidence_sha256 = second.evidence_sha256.clone();
+    wrong.cases[1].evidence_sha256 = first.evidence_sha256.clone();
+    assert_eq!(
+        artifacts_verified(&wrong, study.path()),
+        Err("FaultEvidenceMisclassified")
+    );
+    // One record standing for two cases.
+    let mut shared = complete();
+    seal_evidence(study.path(), &mut shared);
+    shared.cases[1].evidence_sha256 = shared.cases[0].evidence_sha256.clone();
+    assert_eq!(
+        artifacts_verified(&shared, study.path()),
+        Err("FaultEvidenceShared")
+    );
+    // A link in place of the record.
+    let mut linked = complete();
+    seal_evidence(study.path(), &mut linked);
+    let target = file(&linked.cases[2]);
+    let moved = study.path().join("moved");
+    std::fs::rename(&target, &moved).unwrap();
+    std::os::unix::fs::symlink(&moved, &target).unwrap();
+    assert_eq!(
+        artifacts_verified(&linked, study.path()),
+        Err("FaultEvidenceUnusable")
     );
 }

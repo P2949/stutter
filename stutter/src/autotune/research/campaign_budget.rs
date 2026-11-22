@@ -93,6 +93,7 @@ pub fn replay(
 ) -> Option<String> {
     let outcome = (|| -> anyhow::Result<Option<String>> {
         let mut total = Spent::default();
+        let mut sidecars = 0u64;
         for entry in std::fs::read_dir(format!(
             "/proc/self/fd/{}",
             std::os::fd::AsRawFd::as_raw_fd(studies)
@@ -114,12 +115,15 @@ pub fn replay(
             if actual != recorded.evidence_bytes {
                 return Ok(Some(format!("BudgetEvidenceBytesMismatch:{name}")));
             }
+            // What is on disk beside the sealed records (the raw archive, receipts) counts toward the
+            // same cap, measured now rather than read from a record.
+            sidecars = sidecars.saturating_add(sidecar_bytes(&dir, 0)?);
             total = total.plus(recorded);
         }
         if total.active_seconds > u64::from(parent.max_active_seconds) {
             return Ok(Some("CampaignActiveSecondsExceeded".into()));
         }
-        if total.evidence_bytes > parent.max_evidence_bytes {
+        if total.evidence_bytes.saturating_add(sidecars) > parent.max_evidence_bytes {
             return Ok(Some("CampaignEvidenceBytesExceeded".into()));
         }
         if attempts.values().map(|n| u64::from(*n)).sum::<u64>() > u64::from(parent.max_attempts) {
@@ -128,6 +132,33 @@ pub fn replay(
         Ok(None)
     })();
     outcome.unwrap_or_else(|error| Some(format!("BudgetReplayFailed:{error:#}")))
+}
+
+/// The bytes every regular file under a study directory occupies besides its sealed evidence records
+/// and journal (which the budget already counts): the raw archive and every sidecar receipt. Entries
+/// are opened through directory descriptors without following links; a link, a special file or a tree
+/// that is too deep is an error rather than a smaller number.
+fn sidecar_bytes(dir: &File, depth: u32) -> anyhow::Result<u64> {
+    anyhow::ensure!(depth <= 8, "study tree too deep");
+    let base = format!("/proc/self/fd/{}", std::os::fd::AsRawFd::as_raw_fd(dir));
+    let mut total = 0u64;
+    for entry in std::fs::read_dir(&base)? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if depth == 0 && matches!(name.as_str(), "evidence" | "journal") {
+            continue;
+        }
+        let kind = std::fs::symlink_metadata(format!("{base}/{name}"))?.file_type();
+        if kind.is_file() {
+            let file = crate::syscall::openat_nofollow(dir.as_fd(), &name)?;
+            total = total.saturating_add(file.metadata()?.len());
+        } else if kind.is_dir() {
+            let child = File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), &name)?);
+            total = total.saturating_add(sidecar_bytes(&child, depth + 1)?);
+        } else {
+            anyhow::bail!("unexpected file type: {name}");
+        }
+    }
+    Ok(total)
 }
 
 #[cfg(test)]

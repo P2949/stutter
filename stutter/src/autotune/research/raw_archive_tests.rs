@@ -106,3 +106,34 @@ fn a_path_that_escapes_its_folder_or_an_oversized_file_is_refused() {
     let results = w.results.clone();
     assert!(archive(&w.study, &w.evidence, &move |_| results.clone()).is_err());
 }
+
+#[test]
+fn a_planted_link_or_a_loose_directory_in_the_archive_is_refused_never_followed() {
+    // The arm folder is a link to somewhere else: nothing is written through it.
+    let w = world();
+    let elsewhere = w.results.parent().unwrap().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    let study = std::fs::read_link(format!("/proc/self/fd/{}", w.study.as_raw_fd())).unwrap();
+    std::fs::create_dir(study.join("raw")).unwrap();
+    std::fs::set_permissions(study.join("raw"), std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, study.join("raw").join("ge")).unwrap();
+    let results = w.results.clone();
+    assert!(archive(&w.study, &w.evidence, &move |_| results.clone()).is_err());
+    assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
+
+    // A pre-existing archive folder that others can write to is not trusted.
+    let w = world();
+    let study = std::fs::read_link(format!("/proc/self/fd/{}", w.study.as_raw_fd())).unwrap();
+    std::fs::create_dir(study.join("raw")).unwrap();
+    std::fs::set_permissions(study.join("raw"), std::fs::Permissions::from_mode(0o777)).unwrap();
+    let results = w.results.clone();
+    assert!(archive(&w.study, &w.evidence, &move |_| results.clone()).is_err());
+
+    // A sealed file that is a link in the game's results folder is not read.
+    let w = world();
+    let run = w.results.join("run-0001");
+    std::fs::remove_file(run.join("summary.json")).unwrap();
+    std::os::unix::fs::symlink(run.join("frames.csv"), run.join("summary.json")).unwrap();
+    let results = w.results.clone();
+    assert!(archive(&w.study, &w.evidence, &move |_| results.clone()).is_err());
+}

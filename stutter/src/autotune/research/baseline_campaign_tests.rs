@@ -664,3 +664,36 @@ fn a_study_that_applied_a_profile_cannot_lose_or_scramble_its_settings_record() 
     std::fs::remove_file(&receipt).unwrap();
     assert!(verify(&run).children.iter().any(|c| c.problem.is_some()));
 }
+
+#[test]
+fn the_raw_archive_and_receipts_count_toward_the_campaign_storage_cap() {
+    let mut run = run_campaign();
+    let campaign_path = std::fs::read_link(format!(
+        "/proc/self/fd/{}",
+        std::os::fd::AsRawFd::as_raw_fd(&run.campaign)
+    ))
+    .unwrap();
+    // A cap equal to exactly the sealed evidence the children recorded leaves no room for the archive.
+    let sealed: u64 = std::fs::read_dir(campaign_path.join("studies"))
+        .unwrap()
+        .flatten()
+        .map(|entry| {
+            let spent: crate::autotune::research::campaign_budget::Spent =
+                serde_json::from_slice(&std::fs::read(entry.path().join("budget.json")).unwrap())
+                    .unwrap();
+            spent.evidence_bytes
+        })
+        .sum();
+    run.parent.max_evidence_bytes = sealed;
+    let studies = File::open(campaign_path.join("studies")).unwrap();
+    assert_eq!(
+        crate::autotune::research::campaign_budget::replay(
+            &studies,
+            crate::syscall::geteuid(),
+            &run.parent,
+            &Default::default(),
+        )
+        .as_deref(),
+        Some("CampaignEvidenceBytesExceeded")
+    );
+}

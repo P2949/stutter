@@ -527,3 +527,9 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - The profile hook no longer drops an arm whose file cannot be read back after the edit: the application fails and the edits are put back, so the record has one digest per arm in the child's tool order.
 - `settings_binding` holds each attempt to the digest of its own arm (from the journal schedule), not to any digest in the list. A record of the wrong length, a missing record in a study that keeps a raw archive and applied a profile, and a scrambled one all fail conformance (`ProfileViolated` live, a verifier problem on replay). Older studies without a raw archive keep replaying as before.
 - Still not verified: the effective resolution and render scale are covered only through the settings hash, not parsed.
+
+## Fourteenth audit: archive, budget and G6 evidence
+
+- `raw_archive` walks both the game's result folders and the study's archive by directory descriptor without following links; every archive folder must be private and owned by this user, and a link or loose folder is refused (tested).
+- `campaign_budget::replay` now also measures, from disk and without following links, every file under each study besides its sealed records and journal (the raw archive and receipts) and counts them toward `max_evidence_bytes`. Active time is still only bounded, not recomputed.
+- G6: `fault_matrix::artifacts_verified` opens each required case's `fault-evidence/<sha256>.json`, re-hashes it, and requires it to say the same class, mode, outcome and binary; missing, modified, shared, misclassified or linked records are refused. A receipt of digests alone no longer attests.
