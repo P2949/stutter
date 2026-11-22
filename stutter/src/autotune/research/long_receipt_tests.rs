@@ -40,6 +40,7 @@ fn record() -> LongSessionRecord {
                 ended_unix: start + 26 * 60,
             },
         ],
+        max_poll_gap_seconds: Some(1),
         settled: true,
     }
 }
@@ -155,4 +156,22 @@ fn a_drivers_completed_session_is_accepted_only_through_the_verifier() {
         verify(&claimed, &unit(), WINDOW),
         Err("LongSessionShorterThanTheUnit")
     );
+}
+
+#[test]
+fn a_session_must_show_how_closely_its_route_was_watched() {
+    let mut unproven = record();
+    unproven.max_poll_gap_seconds = None;
+    assert_eq!(
+        verify(&unproven, &unit(), WINDOW),
+        Err("LongSessionDeliveryUnproven")
+    );
+    let mut gappy = record();
+    gappy.max_poll_gap_seconds =
+        Some(crate::autotune::research::route_driver::MAX_POLL_GAP_SECONDS + 1);
+    assert_eq!(verify(&gappy, &unit(), WINDOW), Err("LongSessionInputGap"));
+    let mut at_bound = record();
+    at_bound.max_poll_gap_seconds =
+        Some(crate::autotune::research::route_driver::MAX_POLL_GAP_SECONDS);
+    assert_eq!(verify(&at_bound, &unit(), WINDOW), Ok(()));
 }

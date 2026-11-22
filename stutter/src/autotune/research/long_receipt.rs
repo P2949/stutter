@@ -44,6 +44,10 @@ pub struct LongSessionRecord {
     pub ended_unix: u64,
     pub process: SessionProcess,
     pub phases: Vec<Phase>,
+    /// The longest silence between two looks at the running route, the bound on how long a scheduled input
+    /// could have gone undelivered. A record without one cannot show the route was driven throughout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_poll_gap_seconds: Option<u64>,
     /// The game process tree is proven settled after the session.
     pub settled: bool,
 }
@@ -109,6 +113,13 @@ pub fn verify(
     }
     if !record.settled {
         return Err("LongSessionNotSettled");
+    }
+    match record.max_poll_gap_seconds {
+        None => return Err("LongSessionDeliveryUnproven"),
+        Some(gap) if gap > super::route_driver::MAX_POLL_GAP_SECONDS => {
+            return Err("LongSessionInputGap");
+        }
+        Some(_) => {}
     }
     // Phases lie inside the session, do not overlap, and account for almost all of it.
     let mut covered = 0u64;

@@ -70,6 +70,7 @@ fn session(definition: &str) -> LongSessionRecord {
             started_unix: 5_000,
             ended_unix: 6_200,
         }],
+        max_poll_gap_seconds: Some(1),
         settled: true,
     }
 }
@@ -228,7 +229,7 @@ impl crate::autotune::research::route_driver::RouteInput for CountingInput {
 fn the_real_route_driver_plays_the_unit_through_the_host_and_the_study_qualifies() {
     use crate::autotune::research::route_driver::{RouteDriver, RouteStep};
     let phases = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-    // Time moves 400 s per look at the clock: the 1200 s route spans a few polls.
+    // Time moves 5 s per look at the clock, the most the driver allows between polls.
     let mut now = 50_000u64;
     let route = [("loading", 120), ("travel", 600), ("combat", 480)]
         .into_iter()
@@ -241,7 +242,7 @@ fn the_real_route_driver_plays_the_unit_through_the_host_and_the_study_qualifies
         CountingInput(phases.clone()),
         route,
         Box::new(move || {
-            now += 400;
+            now += 5;
             now
         }),
     );

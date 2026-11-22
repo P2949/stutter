@@ -130,9 +130,12 @@ impl<S: EventSink> ScriptedInput<S> {
     }
 
     /// Release everything this input holds; never leaves a key down.
+    /// A key whose release write failed stays recorded as held, so `released` says so and a later release retries it.
     fn release_all(&mut self) {
         for key in std::mem::take(&mut self.held) {
-            let _ = self.sink.write(&encode_key(key, false));
+            if self.sink.write(&encode_key(key, false)).is_err() {
+                self.held.push(key);
+            }
         }
     }
 }
@@ -145,6 +148,9 @@ impl<S: EventSink> RouteInput for ScriptedInput<S> {
     fn begin_phase(&mut self, phase: &str) -> Result<(), &'static str> {
         // A phase never inherits the previous one's held keys.
         self.release_all();
+        if !self.held.is_empty() {
+            return Err("LongInputReleaseUnverified");
+        }
         let index = self
             .scripts
             .iter()
@@ -175,6 +181,10 @@ impl<S: EventSink> RouteInput for ScriptedInput<S> {
     fn stop(&mut self) {
         self.running = None;
         self.release_all();
+    }
+
+    fn released(&self) -> bool {
+        self.held.is_empty()
     }
 }
 

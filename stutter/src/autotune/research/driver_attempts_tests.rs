@@ -183,7 +183,7 @@ fn attempts(
 }
 
 fn run_to_end(runner: &mut DriverStudyAttempts, study: &ChildStudy) -> AttemptsOutcome {
-    for _ in 0..200 {
+    for _ in 0..2000 {
         if let Some(outcome) = runner.poll(study, 100).unwrap() {
             return outcome;
         }

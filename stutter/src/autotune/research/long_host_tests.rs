@@ -87,6 +87,7 @@ fn record(definition: &str) -> LongSessionRecord {
             started_unix: 1000,
             ended_unix: 2200,
         }],
+        max_poll_gap_seconds: Some(1),
         settled: true,
     }
 }

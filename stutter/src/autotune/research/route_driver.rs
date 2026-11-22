@@ -32,6 +32,11 @@ pub trait RouteInput: Send {
     }
     /// The route is over or abandoned: stop sending anything.
     fn stop(&mut self);
+    /// Whether, after `stop`, every input this backend sent is known to have been released. A backend whose
+    /// release writes can fail must say so; a session then fails rather than passing as clean.
+    fn released(&self) -> bool {
+        true
+    }
 }
 
 /// The build's input: it cannot drive the game, and says so.
@@ -47,6 +52,10 @@ impl RouteInput for UnavailableInput {
     fn stop(&mut self) {}
 }
 
+/// The longest the controller may go between two polls while the route is playing. A longer silence means
+/// inputs scheduled in it were not delivered when planned, so the session fails instead of crediting phases.
+pub(super) const MAX_POLL_GAP_SECONDS: u64 = 5;
+
 struct Running {
     unit_id: String,
     definition_sha256: String,
@@ -54,6 +63,8 @@ struct Running {
     process: Option<SessionProcess>,
     cursor: usize,
     phase_started: u64,
+    last_poll: u64,
+    max_gap: u64,
     phases: Vec<Phase>,
 }
 
@@ -83,7 +94,11 @@ impl<I: RouteInput> RouteDriver<I> {
     fn fail(&mut self, code: &'static str) -> LongProgress {
         self.input.stop();
         self.state = None;
-        LongProgress::Failed(code)
+        LongProgress::Failed(if self.input.released() {
+            code
+        } else {
+            "LongInputReleaseUnverified"
+        })
     }
 }
 
@@ -107,6 +122,8 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
             process: None,
             cursor: 0,
             phase_started: 0,
+            last_poll: 0,
+            max_gap: 0,
             phases: Vec::new(),
         });
         Ok(())
@@ -126,6 +143,7 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
                 state.process = Some(process);
                 state.started = Some(now);
                 state.phase_started = now;
+                state.last_poll = now;
                 let first = self.route[0].phase.clone();
                 if let Err(code) = self.input.begin_phase(&first) {
                     return self.fail(code);
@@ -135,6 +153,11 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
             (Some(was), Some(is)) if was == is => {}
             _ => return self.fail("LongSessionProcessLost"),
         }
+        if now.saturating_sub(state.last_poll) > MAX_POLL_GAP_SECONDS {
+            return self.fail("LongSessionInputGap");
+        }
+        state.max_gap = state.max_gap.max(now.saturating_sub(state.last_poll));
+        state.last_poll = now;
         // Close every phase whose time has come (a late poll closes several, at their true boundaries).
         loop {
             let step = &self.route[state.cursor];
@@ -161,6 +184,9 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
             }
         }
         self.input.stop();
+        if !self.input.released() {
+            return self.fail("LongInputReleaseUnverified");
+        }
         let (Some(started), Some(process)) = (state.started, state.process) else {
             return self.fail("LongSessionNotStarted");
         };
@@ -171,6 +197,7 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
             ended_unix: state.phase_started,
             process,
             phases: std::mem::take(&mut state.phases),
+            max_poll_gap_seconds: Some(state.max_gap),
             // Never the driver's claim: the host attests settlement before the record is verified.
             settled: false,
         };
@@ -181,6 +208,7 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
     fn abort(&mut self) -> anyhow::Result<()> {
         self.input.stop();
         self.state = None;
+        anyhow::ensure!(self.input.released(), "LongInputReleaseUnverified");
         Ok(())
     }
 }

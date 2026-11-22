@@ -198,10 +198,52 @@ fn the_route_driver_feeds_the_scripted_input_its_time_and_everything_is_released
     clock.store(1_000 + 3, Ordering::SeqCst); // three seconds in: Shift is due (2 s)
     driver.poll();
     assert_eq!(decoded(&wire.0.lock().unwrap()).last(), Some(&(42, true)));
-    clock.store(1_000 + 1_300, Ordering::SeqCst); // past the whole route
-    assert!(matches!(driver.poll(), LongProgress::Completed(_)));
+    let mut at = 1_003;
+    let finished = loop {
+        at += 5; // polled within the bound the whole way
+        clock.store(at, Ordering::SeqCst);
+        match driver.poll() {
+            LongProgress::Running => {}
+            other => break other,
+        }
+    };
+    assert!(matches!(finished, LongProgress::Completed(_)));
     let all = decoded(&wire.0.lock().unwrap());
     let downs = all.iter().filter(|(_, down)| *down).count();
     let ups = all.iter().filter(|(_, down)| !*down).count();
     assert_eq!(downs, ups, "the route ends with no key held: {all:?}");
+}
+
+/// Accepts key-downs and refuses key-ups: a device that cannot be told to let go.
+struct StuckDevice;
+impl EventSink for StuckDevice {
+    fn write(&mut self, events: &[u8]) -> Result<(), &'static str> {
+        // The value field of the key event is the 4 bytes before the end of its first 24-byte record.
+        let value = u32::from_ne_bytes(events[20..24].try_into().unwrap());
+        if value == 0 {
+            Err("ReleaseRefused")
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn a_key_whose_release_was_not_acknowledged_stays_held_and_is_reported() {
+    let mut input = ScriptedInput::new(StuckDevice, script());
+    input.begin_phase("travel").unwrap();
+    input.tick(1_000).unwrap();
+    input.stop();
+    assert!(!input.released(), "a refused release is never forgotten");
+    // The next phase will not start on top of a key still down.
+    assert_eq!(
+        input.begin_phase("combat"),
+        Err("LongInputReleaseUnverified")
+    );
+    // A device that takes the release clears it.
+    let mut clean = ScriptedInput::new(Wire::default(), script());
+    clean.begin_phase("travel").unwrap();
+    clean.tick(1_000).unwrap();
+    clean.stop();
+    assert!(clean.released());
 }

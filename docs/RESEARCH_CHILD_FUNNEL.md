@@ -533,3 +533,9 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - `raw_archive` walks both the game's result folders and the study's archive by directory descriptor without following links; every archive folder must be private and owned by this user, and a link or loose folder is refused (tested).
 - `campaign_budget::replay` now also measures, from disk and without following links, every file under each study besides its sealed records and journal (the raw archive and receipts) and counts them toward `max_evidence_bytes`. Active time is still only bounded, not recomputed.
 - G6: `fault_matrix::artifacts_verified` opens each required case's `fault-evidence/<sha256>.json`, re-hashes it, and requires it to say the same class, mode, outcome and binary; missing, modified, shared, misclassified or linked records are refused. A receipt of digests alone no longer attests.
+
+## Fourteenth audit: CP-LONG delivery evidence
+
+- `RouteDriver` fails a session with `LongSessionInputGap` when the controller goes more than `MAX_POLL_GAP_SECONDS` (5) between looks at a running route, instead of crediting the phases the silence covered. The sealed `LongSessionRecord` carries `max_poll_gap_seconds`, and `long_receipt::verify` rejects a record without it (`LongSessionDeliveryUnproven`) or over the bound.
+- A key whose release write was refused stays recorded as held (`ScriptedInput::released()` is false); the next phase will not begin on top of it and the driver ends or aborts with `LongInputReleaseUnverified` instead of completing clean.
+- Still no physical input backend: production keeps `UnavailableInput`, so a real long attempt fails with `BlockedNoLongSessionDriver`. Delivery is bounded by polling, not observed at the device.

@@ -90,13 +90,22 @@ fn the_route_is_played_phase_by_phase_on_the_clock_and_the_record_is_what_happen
     assert_eq!(driver.poll(), LongProgress::Running);
     assert_eq!(sent.lock().unwrap().phases, ["loading"]);
     // Mid-route: the travel phase has begun, nothing is complete.
-    clock.store(10_000 + 130, Ordering::SeqCst);
-    assert_eq!(driver.poll(), LongProgress::Running);
+    let mut at = 10_000;
+    while at < 10_130 {
+        at += 5;
+        clock.store(at, Ordering::SeqCst);
+        assert_eq!(driver.poll(), LongProgress::Running);
+    }
     assert_eq!(sent.lock().unwrap().phases, ["loading", "travel"]);
-    // A late poll after the whole route closes the remaining phases at their true boundaries.
-    clock.store(10_000 + 1_500, Ordering::SeqCst);
-    let LongProgress::Completed(record) = driver.poll() else {
-        panic!("the route is over");
+    // Polled within the bound the whole way, the route completes at its true boundaries.
+    let record = loop {
+        at += 5;
+        clock.store(at, Ordering::SeqCst);
+        match driver.poll() {
+            LongProgress::Running => {}
+            LongProgress::Completed(record) => break record,
+            other => panic!("{other:?}"),
+        }
     };
     assert_eq!(record.started_unix, 10_000);
     assert_eq!(record.ended_unix, 11_200);
@@ -188,8 +197,16 @@ fn an_input_the_backend_refuses_and_an_abort_both_stop_sending_inputs() {
     refusing.start(&unit()).unwrap();
     refusing.observe_process(Some(process()));
     refusing.poll();
-    clock.store(200, Ordering::SeqCst);
-    assert_eq!(refusing.poll(), LongProgress::Failed("InputRefused"));
+    let mut at = 0;
+    let refused = loop {
+        at += 5;
+        clock.store(at, Ordering::SeqCst);
+        match refusing.poll() {
+            LongProgress::Running => {}
+            other => break other,
+        }
+    };
+    assert_eq!(refused, LongProgress::Failed("InputRefused"));
     assert!(sent.lock().unwrap().stops >= 1);
 
     let (mut aborted, sent, _) = driver(true);
@@ -202,4 +219,65 @@ fn an_input_the_backend_refuses_and_an_abort_both_stop_sending_inputs() {
         aborted.poll(),
         LongProgress::Failed("LongSessionNotStarted")
     );
+}
+
+#[test]
+fn a_silence_longer_than_the_poll_bound_fails_the_session_instead_of_crediting_its_phases() {
+    let (mut driver, sent, clock) = driver(true);
+    driver.start(&unit()).unwrap();
+    driver.observe_process(Some(process()));
+    driver.poll();
+    // The controller was away for the whole route: nothing scheduled in that time was delivered.
+    clock.store(10_000 + 1_500, Ordering::SeqCst);
+    assert_eq!(driver.poll(), LongProgress::Failed("LongSessionInputGap"));
+    assert_eq!(sent.lock().unwrap().phases, ["loading"]);
+    assert!(sent.lock().unwrap().stops >= 1);
+    // A pause exactly at the bound is still one that polling covered.
+    let (mut steady, _, clock) = self::driver(true);
+    steady.start(&unit()).unwrap();
+    steady.observe_process(Some(process()));
+    steady.poll();
+    clock.store(10_000 + MAX_POLL_GAP_SECONDS, Ordering::SeqCst);
+    assert_eq!(steady.poll(), LongProgress::Running);
+}
+
+struct StuckKey;
+impl RouteInput for StuckKey {
+    fn available(&self) -> bool {
+        true
+    }
+    fn begin_phase(&mut self, _: &str) -> Result<(), &'static str> {
+        Ok(())
+    }
+    fn stop(&mut self) {}
+    fn released(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn a_session_whose_inputs_cannot_be_shown_released_never_completes_clean() {
+    let clock = Arc::new(AtomicU64::new(0));
+    let shared = clock.clone();
+    let mut driver = RouteDriver::new(
+        StuckKey,
+        route(),
+        Box::new(move || shared.load(Ordering::SeqCst)),
+    );
+    driver.start(&unit()).unwrap();
+    driver.observe_process(Some(process()));
+    driver.poll();
+    let mut at = 0;
+    let result = loop {
+        at += 5;
+        clock.store(at, Ordering::SeqCst);
+        match driver.poll() {
+            LongProgress::Running => {}
+            other => break other,
+        }
+    };
+    assert_eq!(result, LongProgress::Failed("LongInputReleaseUnverified"));
+    let mut abandoned = RouteDriver::new(StuckKey, route(), Box::new(|| 0));
+    abandoned.start(&unit()).unwrap();
+    assert!(abandoned.abort().is_err());
 }
