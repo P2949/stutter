@@ -588,3 +588,10 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - Telemetry receipts: absent is the optional probe not run; present but unreadable, not JSON or not a list is carried as `InvalidTelemetryReceipts` and counts every completed attempt of that child as collected but not eligible (`FrameSourceNotEligible`). Tested over the production-composed campaign.
 - Admission (`campaign_budget::spent`) now counts the archive and receipts on disk, the same measurement the final replay uses.
 - `pressure_control::status` and `fault_matrix::artifacts_verified` read through directory descriptors without following links and measure on the open descriptor.
+
+## Fifteenth audit P3: historical result, scope and crosswalk
+
+- `Verdict.historical_evidence_qualified` is now computed from gates recomputed with `health_blocked = false`, `protected_state = Ok` and an expired control receipt read as fresh, so a later GPU incident, different saves or an old receipt cannot move it (tested); `historical_notes` says the protected-state comparison is still not sealed at finalization. The current-host `final_gate_qualified` and `AbortedHealth` are unchanged.
+- `Verdict.qualification_scope`: `QualifiedEndToEnd`, `QualifiedWithUnobservedFeatures` (FeatureNotObservable), `QualifiedWithExcludedOptionalFeatures` (no eligible source) or `QualifiedWithJustifiedAbstention`.
+- Crosswalk rows now carry `planned_closure` (the role, not a result), `observed_disposition` (`NotObservedInThisCampaign` unless the campaign supplies a digest of its own evidence via `build_rows_observed`) and `observed_source_sha256`. The bundle supplies none yet, so no row claims an observation.
+- Tests that sealed native results under tiny evidence caps now use realistic caps, because admission counts the archive.

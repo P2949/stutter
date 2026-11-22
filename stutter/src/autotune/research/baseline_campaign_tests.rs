@@ -21,8 +21,7 @@ use crate::autotune::research::{
 /// The built-in benchmark is a fixed fly-through of this many seconds.
 const SCENE_SECONDS: f64 = 64.25;
 
-/// No settings file is touched; when `digest` is set the profile claims to have applied and to have
-/// left every arm's settings file with that digest.
+/// No settings file is touched; when `digest` is set the profile claims to have left every arm's file with it.
 struct NoProfiles {
     /// The digest every arm's settings file is left with (`None`: no profile is applied).
     digest: Option<String>,

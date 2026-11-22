@@ -122,9 +122,10 @@ fn crosswalk() -> Value {
             }
             json!({
                 "count": rows.len(),
-                "closure_counts": counts,
+                "planned_closure_counts": counts,
+                "observed_in_campaign": rows.iter().filter(|r| r.observed_disposition == "ObservedInCampaign").count(),
                 "rows": rows,
-                "note": "a closed row is not GameBenefitValidated; only a qualified study below can say a benefit was measured",
+                "note": "planned_closure is the plan's intended role for the dossier, not a result; observed_disposition says whether this campaign supplied evidence for it (none is supplied yet); a row is never GameBenefitValidated, and only a qualified study below can say a benefit was measured",
             })
         }
         Err(error) => json!({ "status": "CrosswalkInvalid", "error": format!("{error:?}") }),

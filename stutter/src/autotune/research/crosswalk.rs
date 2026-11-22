@@ -277,7 +277,13 @@ pub struct Row {
     pub specific_test_or_exclusion: &'static str,
     pub signal_quality: &'static str,
     pub permission: &'static str,
+    /// What the plan intends this dossier to be for Cyberpunk. It is a role, not a result.
+    #[serde(rename = "planned_closure")]
     pub closure: Closure,
+    /// `ObservedInCampaign` only when the campaign supplied a digest of its own evidence for this row;
+    /// otherwise `NotObservedInThisCampaign`, whatever the plan intended.
+    pub observed_disposition: &'static str,
+    pub observed_source_sha256: Option<String>,
     pub evidence_digest: String,
     pub next_bug_if_any: Option<&'static str>,
 }
@@ -293,6 +299,15 @@ pub enum CrosswalkError {
 /// Joins the static Cyberpunk roles to the integration coverage ledger. Exactly 34 rows are
 /// required; a ledger with an unknown or missing id is rejected rather than silently padded.
 pub fn build_rows(coverage_json: &str) -> Result<Vec<Row>, CrosswalkError> {
+    build_rows_observed(coverage_json, &std::collections::BTreeMap::new())
+}
+
+/// As `build_rows`, with the digest of the campaign's own evidence for each row it actually observed. A row
+/// with no entry is not claimed as observed, so a planned role never reads as a result.
+pub fn build_rows_observed(
+    coverage_json: &str,
+    observed: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<Row>, CrosswalkError> {
     let doc: serde_json::Value =
         serde_json::from_str(coverage_json).map_err(|_| CrosswalkError::Malformed)?;
     let entries = doc
@@ -345,6 +360,12 @@ pub fn build_rows(coverage_json: &str) -> Result<Vec<Row>, CrosswalkError> {
             signal_quality: "per-attempt provider quality; absent is unknown, never zero",
             permission: spec.2,
             closure: spec.1,
+            observed_disposition: if observed.contains_key(spec.0) {
+                "ObservedInCampaign"
+            } else {
+                "NotObservedInThisCampaign"
+            },
+            observed_source_sha256: observed.get(spec.0).cloned(),
             evidence_digest: digest,
             next_bug_if_any: None,
         });
@@ -370,6 +391,32 @@ mod tests {
         assert_eq!(rows.len(), 34);
         assert!(rows.iter().all(|r| r.evidence_digest.len() == 64));
         assert!(rows.iter().all(|r| r.current_grade == "code_complete"));
+    }
+
+    #[test]
+    fn a_planned_role_is_never_an_observation_unless_the_campaign_supplies_its_evidence() {
+        let plain = build_rows(&ledger()).expect("rows");
+        assert!(
+            plain
+                .iter()
+                .all(|r| r.observed_disposition == "NotObservedInThisCampaign"
+                    && r.observed_source_sha256.is_none())
+        );
+        let observed = [("5.1".to_owned(), "ab".repeat(32))].into();
+        let rows = build_rows_observed(&ledger(), &observed).expect("rows");
+        assert_eq!(
+            rows.iter()
+                .filter(|r| r.observed_disposition == "ObservedInCampaign")
+                .count(),
+            1
+        );
+        let one = rows.iter().find(|r| r.id == "5.1").unwrap();
+        assert_eq!(
+            one.observed_source_sha256.as_deref(),
+            Some(&"ab".repeat(32)[..])
+        );
+        let json = serde_json::to_value(one).unwrap();
+        assert!(json.get("planned_closure").is_some() && json.get("closure").is_none());
     }
 
     #[test]
@@ -412,7 +459,7 @@ mod tests {
         }
         let document = serde_json::json!({
             "rows": rows,
-            "closure_counts": by_closure,
+            "planned_closure_counts": by_closure,
             "note": "A row closing as Observed/Tested/Excluded/Blocked/AlreadySatisfied/FutureGraduation is not a game-benefit validation; none is GameBenefitValidated."
         });
         std::fs::write(out, serde_json::to_vec_pretty(&document).unwrap()).unwrap();

@@ -59,7 +59,7 @@ async fn resident_transport_authenticates_and_blocks_without_independent_host_fa
         "factors": [], "actions": [], "issued_unix_seconds": 10,
         "deadline_unix_seconds": 3610, "max_active_seconds": 3600,
         "max_attempt_seconds": 720, "max_owned_pressure_seconds_per_study": 600,
-        "max_attempts": 10, "max_evidence_bytes": 1024,
+        "max_attempts": 10, "max_evidence_bytes": 1048576,
         "desktop_research_consented": true
     });
     submit
@@ -158,7 +158,7 @@ fn fixture() -> (crate::autotune::research::ResearchIntentV1, CampaignFacts) {
         max_attempt_seconds: 720,
         max_owned_pressure_seconds_per_study: 600,
         max_attempts: 10,
-        max_evidence_bytes: 1_024,
+        max_evidence_bytes: 1_048_576,
         desktop_research_consented: true,
         child_study_sha256: None,
         confirmation_rule: None,

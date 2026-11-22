@@ -32,6 +32,11 @@ pub struct Verdict {
     /// whatever the host looks like now. A later reboot or package change can move `final_gate_qualified`
     /// through G0, G1, G6 and G8; it cannot move this.
     pub historical_evidence_qualified: bool,
+    /// `QualifiedEndToEnd` when every study qualified; otherwise what stood in for a qualification (a feature
+    /// no build supports, or one whose function the game cannot report) or a justified abstention.
+    pub qualification_scope: &'static str,
+    /// Facts the historical result still cannot take from sealed evidence.
+    pub historical_notes: Vec<&'static str>,
     /// `AbortedHealth`, `Qualified`, `PartiallyQualified` or `Unverified`.
     pub disposition: &'static str,
     /// One verdict per PLAN gate, each from its own evidence (`gate_verdict`).
@@ -74,6 +79,24 @@ pub struct VerdictInputs<'a> {
     pub restoration_verified: bool,
     /// An unacknowledged GPU-health incident is on record.
     pub health_blocked: bool,
+}
+
+/// What the qualified studies of a campaign add up to: the plan distinguishes a full end-to-end qualification
+/// from one with excluded optional features or a justified abstention.
+fn qualification_scope(studies: &[Disposition]) -> &'static str {
+    use super::{child_study::StudyResult, gate_verdict};
+    if studies
+        .iter()
+        .any(|s| s.result == Some(StudyResult::Unqualified) && s.reason == "FeatureNotObservable")
+    {
+        "QualifiedWithUnobservedFeatures"
+    } else if studies.iter().any(gate_verdict::legitimately_excluded) {
+        "QualifiedWithExcludedOptionalFeatures"
+    } else if studies.iter().any(gate_verdict::not_indicated) {
+        "QualifiedWithJustifiedAbstention"
+    } else {
+        "QualifiedEndToEnd"
+    }
 }
 
 pub fn judge(inputs: &VerdictInputs<'_>) -> Verdict {
@@ -143,17 +166,31 @@ fn judge_inner(inputs: &VerdictInputs<'_>, preparing: bool) -> Verdict {
         && inputs.restoration_verified
         && !inputs.health_blocked
         && gates.iter().all(|gate| gate.accepted);
+    // The historical result rests on the campaign's own sealed evidence only. The gates are recomputed with the
+    // facts that describe today rather than the campaign: a later GPU incident (`health_blocked`), the player's
+    // saves as they are now (`protected_state`) and the age of the control receipt cannot move it. Sealing the
+    // protected-state comparison at finalization is not yet done, which `historical_notes` says.
+    let historical_gate_inputs = super::gate_verdict::GateInputs {
+        health_blocked: false,
+        protected_state: Ok(()),
+        pressure_control: match inputs.pressure_control {
+            Err("PressureControlNotFresh") => Ok(()),
+            other => other,
+        },
+        ..gate_inputs
+    };
+    let historical_gates = super::gate_verdict::gates_preparing(&historical_gate_inputs);
     let historical_evidence_qualified = inputs.reconstruction_passed
         && raw_files_verified
         && loaded_runtime_qualified
         && child_studies_qualified
         && inputs.child_reports_verified
         && inputs.restoration_verified
-        && !inputs.health_blocked
-        && gates
+        && historical_gates
             .iter()
             .filter(|gate| ["G2", "G3", "G4", "G5", "G7", "G9"].contains(&gate.gate))
             .all(|gate| gate.accepted);
+    let qualification_scope = qualification_scope(inputs.child_studies);
     let disposition = if inputs.health_blocked {
         "AbortedHealth"
     } else if final_gate_qualified {
@@ -172,6 +209,8 @@ fn judge_inner(inputs: &VerdictInputs<'_>, preparing: bool) -> Verdict {
         restoration_verified: inputs.restoration_verified,
         final_gate_qualified,
         historical_evidence_qualified,
+        qualification_scope,
+        historical_notes: vec!["ProtectedStateNotSealedAtFinalization"],
         disposition,
         gates,
     }

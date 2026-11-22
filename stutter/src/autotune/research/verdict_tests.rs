@@ -205,3 +205,62 @@ fn a_justified_abstention_is_a_terminal_study_result_and_g5_then_needs_only_the_
     assert_eq!(g5(&without).blockers, ["NoPressureControl"]);
     assert!(!without.final_gate_qualified);
 }
+
+fn plan_of(result: StudyResult) -> Vec<Disposition> {
+    use crate::autotune::research::{ResearchAction, ResearchFactor};
+    let one = |profile: Profile, stage: Stage| Disposition {
+        profile,
+        stage,
+        result: Some(result),
+        ..study(None)
+    };
+    let mut studies = Vec::new();
+    for profile in [Profile::Cpu, Profile::Gpu] {
+        for stage in [Stage::Screen, Stage::Pilot, Stage::Confirm, Stage::Holdout] {
+            studies.push(one(profile, stage));
+        }
+    }
+    studies.push(one(
+        Profile::Long,
+        Stage::Action(ResearchAction::CpuAffinityProfile),
+    ));
+    studies.push(one(Profile::Cpu, Stage::Feature(ResearchFactor::NtSync)));
+    studies
+}
+
+#[test]
+fn the_historical_result_survives_a_later_incident_changed_saves_or_an_expired_control() {
+    let raw = raw(2, 2, 0);
+    let studies = plan_of(StudyResult::Qualified);
+    let base = |edit: &dyn Fn(&mut VerdictInputs<'_>)| {
+        let mut inputs = all_true(&raw, &studies, &[]);
+        inputs.funnel = true;
+        inputs.child_runtime_qualified = true;
+        inputs.child_replication = Some(true);
+        inputs.pressure_control = Ok(());
+        edit(&mut inputs);
+        judge(&inputs)
+    };
+    let clean = base(&|_| {});
+    assert!(clean.historical_evidence_qualified, "{:?}", clean.gates);
+    assert_eq!(clean.qualification_scope, "QualifiedEndToEnd");
+    // The host later changes: a GPU incident, different saves, an old control receipt. The campaign's own
+    // sealed result is the same; the current-host verdict is not.
+    let later = base(&|inputs| {
+        inputs.health_blocked = true;
+        inputs.protected_state = Err("ProtectedStateChanged");
+        inputs.pressure_control = Err("PressureControlNotFresh");
+    });
+    assert!(later.historical_evidence_qualified);
+    assert!(!later.final_gate_qualified);
+    // Evidence that is not sealed in the campaign does move it.
+    let unqualified = {
+        let mut studies = plan_of(StudyResult::Qualified);
+        studies[0].result = Some(StudyResult::Unqualified);
+        let mut inputs = all_true(&raw, &studies, &[]);
+        inputs.funnel = true;
+        inputs.child_runtime_qualified = true;
+        judge(&inputs)
+    };
+    assert!(!unqualified.historical_evidence_qualified);
+}
