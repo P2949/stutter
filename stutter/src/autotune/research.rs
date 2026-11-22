@@ -64,6 +64,14 @@ pub(crate) mod driver;
 pub(crate) mod driver_attempts;
 mod driver_failure;
 pub(crate) mod entitlement;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "fed by the resident runtime's event path once a live game source is qualified"
+    )
+)]
+pub mod evidence_producers;
 pub(crate) mod fault_matrix;
 #[cfg_attr(
     not(test),
