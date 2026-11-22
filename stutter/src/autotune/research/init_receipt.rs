@@ -74,13 +74,18 @@ pub(crate) fn read_settings_receipt(bytes: &[u8]) -> Option<Vec<String>> {
         .then_some(digests)
 }
 
-/// Whether a result ran with the settings the profile left: its sealed settings hash is one of them. With
-/// no recorded digests (no profile was applied, or an older study) there is nothing to hold it to.
+/// Whether a result ran with the settings its own arm's profile left. Without a record to hold it to (no profile, or
+/// an older study) there is nothing to compare; a record that should exist but cannot be tied to the arm fails.
 pub(crate) fn settings_conform(
-    applied: &[String],
+    expected: &super::settings_binding::ArmSettings,
     native: &super::cyberpunk::CyberpunkBenchmarkCompletion,
 ) -> bool {
-    applied.is_empty() || applied.contains(&native.settings_sha256)
+    use super::settings_binding::ArmSettings;
+    match expected {
+        ArmSettings::NotApplied => true,
+        ArmSettings::Digest(digest) => *digest == native.settings_sha256,
+        ArmSettings::Unbound => false,
+    }
 }
 
 /// One completed attempt's conformance to its study's frozen profile: a long session specifies none, a
@@ -88,7 +93,7 @@ pub(crate) fn settings_conform(
 /// reported context is judged. The live outcome and every verifier use this one function.
 pub(crate) fn conformance_of(
     item: &super::report::AttemptEvidenceV1,
-    applied: &[String],
+    expected: &super::settings_binding::ArmSettings,
     study: &super::child_study::ChildStudy,
 ) -> super::native_context::ProfileConformance {
     use super::native_context::ProfileConformance;
@@ -98,7 +103,7 @@ pub(crate) fn conformance_of(
     let Some(native) = item.native_completion.as_deref() else {
         return ProfileConformance::Unproven;
     };
-    if !settings_conform(applied, native) {
+    if !settings_conform(expected, native) {
         return ProfileConformance::Violates;
     }
     native

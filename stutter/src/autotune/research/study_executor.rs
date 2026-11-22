@@ -34,6 +34,11 @@ pub trait ProfileHook {
     /// `Ok(true)` when a profile was applied (and must be restored), `Ok(false)` when the study
     /// needs none.
     fn apply(&mut self, profile: Profile) -> Result<bool, ProfileFailure>;
+    /// As `apply`, for the study whose profile it is; a hook that cares which arms the study runs reads
+    /// it here.
+    fn apply_study(&mut self, study: &ChildStudy) -> Result<bool, ProfileFailure> {
+        self.apply(study.profile)
+    }
     /// After a crash or restart: put back the settings of any application that was never proven
     /// restored. Run before any study; an `Err` means a profile may still be applied.
     fn recover(&mut self) -> Result<(), &'static str>;
@@ -52,6 +57,9 @@ impl ProfileHook for Box<dyn ProfileHook + Send> {
     }
     fn apply(&mut self, profile: Profile) -> Result<bool, ProfileFailure> {
         (**self).apply(profile)
+    }
+    fn apply_study(&mut self, study: &ChildStudy) -> Result<bool, ProfileFailure> {
+        (**self).apply_study(study)
     }
     fn recover(&mut self) -> Result<(), &'static str> {
         (**self).recover()
@@ -447,7 +455,7 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
             let applied = match if study.stage == Stage::Init {
                 Ok(false)
             } else {
-                self.profiles.apply(study.profile)
+                self.profiles.apply_study(study)
             } {
                 Ok(applied) => applied,
                 Err(ProfileFailure::Blocked(reason)) => {

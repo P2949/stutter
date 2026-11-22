@@ -521,3 +521,9 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 
 - G3: `telemetry_summary` now counts only attempts that have a direct-frame receipt. A campaign with no receipts at all is the optional probe not collected (accepted with the note `DirectFrameEvidenceNotCollected`); a receipt that exists but is duplicated, conflicting, unbound or too thin still rejects with `FrameSourceNotEligible`. The mandatory game-scoped CPU/GPU/runnable/PSI/ownership observation is not produced offline and stays a physical item.
 - G7: a feature study whose treatment reached the game but whose result carries no report for the factor (`FeatureNotObservable`) is an exclusion by name, never a qualification. Reported-off, unproven activation and missing function proof remain unresolved.
+
+## Fourteenth audit: settings bound to each arm
+
+- The profile hook no longer drops an arm whose file cannot be read back after the edit: the application fails and the edits are put back, so the record has one digest per arm in the child's tool order.
+- `settings_binding` holds each attempt to the digest of its own arm (from the journal schedule), not to any digest in the list. A record of the wrong length, a missing record in a study that keeps a raw archive and applied a profile, and a scrambled one all fail conformance (`ProfileViolated` live, a verifier problem on replay). Older studies without a raw archive keep replaying as before.
+- Still not verified: the effective resolution and render scale are covered only through the settings hash, not parsed.

@@ -52,12 +52,15 @@ pub(super) fn verify_qualification(
     let evidence: BTreeMap<u32, AttemptEvidenceV1> = read_evidence(&evidence_dir, uid)?;
     let applied = read_private(dir, super::init_receipt::SETTINGS_RECEIPT, uid)
         .ok()
-        .and_then(|bytes| super::init_receipt::read_settings_receipt(&bytes))
-        .unwrap_or_default();
-    let conformance = evidence
-        .values()
-        .map(|item| super::init_receipt::conformance_of(item, &applied, &study))
-        .collect();
+        .and_then(|bytes| super::init_receipt::read_settings_receipt(&bytes));
+    // A study with a campaign raw archive was run by a build that records what its profile left.
+    let conformance = super::settings_binding::conformances(
+        &evidence,
+        applied.as_deref(),
+        &intent,
+        &study,
+        super::raw_archive::exists(dir),
+    );
     let (tail_metric, run_fps) = super::metric_plan::run_values(
         evidence
             .values()

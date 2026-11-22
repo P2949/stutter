@@ -157,12 +157,26 @@ impl ProfileHook for FileProfileHook {
             }
         }
         // What the games will run with: the digest of every file as the profile left it.
-        self.applied_digests = self
+        // One digest per arm or none: an arm whose file cannot be read back is not silently dropped from
+        // the record, it fails the application and puts the edits back.
+        let digests: Option<Vec<String>> = self
             .applied
             .iter()
-            .filter_map(|(index, _)| self.files[*index].read().ok())
-            .map(|bytes| stutter_core::hash::sha256_hex(&bytes))
+            .map(|(index, _)| {
+                self.files[*index]
+                    .read()
+                    .ok()
+                    .map(|bytes| stutter_core::hash::sha256_hex(&bytes))
+            })
             .collect();
+        let Some(digests) = digests else {
+            return Err(if self.restore().is_ok() {
+                ProfileFailure::Failed("SettingsDigestUnreadable")
+            } else {
+                ProfileFailure::Unrestored("RollbackUnproven")
+            });
+        };
+        self.applied_digests = digests;
         Ok(true)
     }
 

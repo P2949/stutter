@@ -190,6 +190,7 @@ pub(crate) mod route_driver;
     )
 )]
 pub(crate) mod scripted_input;
+pub(crate) mod settings_binding;
 pub(crate) mod telemetry_observer;
 pub(crate) mod thermal;
 pub(crate) mod treatment;

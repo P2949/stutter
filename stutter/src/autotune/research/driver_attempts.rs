@@ -427,10 +427,15 @@ impl DriverStudyAttempts {
         let evidence_dir = open_dir(&study_dir, "evidence")?;
         let evidence: BTreeMap<_, _> = read_evidence(&evidence_dir, self.parent.uid)?;
         let applied = self.settings_receipt(&study_dir)?;
-        let conformance = evidence
-            .values()
-            .map(|item| super::init_receipt::conformance_of(item, &applied, study))
-            .collect();
+        // A study this build runs always archives its raw files, so it must also have recorded what its
+        // profile left.
+        let conformance = super::settings_binding::conformances(
+            &evidence,
+            Some(&applied),
+            driver.intent(),
+            study,
+            true,
+        );
         // Keep the campaign's own copy of every completed attempt's native files (hashed against the seal as
         // they are copied), then replay them against the sealed records from that copy, and require every
         // completed result to carry a matched runtime.
