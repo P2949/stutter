@@ -57,27 +57,6 @@ pub struct ChildVerification {
     pub completed_processes: Vec<AttemptProcess>,
 }
 
-/// The frames a receipt counted inside the attempt's native benchmark window. A receipt whose frame
-/// buckets were truncated, or that has none, counts none: it cannot show how many were in the window.
-fn frames_in_window(receipt: &serde_json::Value, process: &AttemptProcess) -> u64 {
-    if receipt["frame_seconds_truncated"] != false {
-        return 0;
-    }
-    receipt["frame_seconds"]
-        .as_array()
-        .map(|buckets| {
-            buckets
-                .iter()
-                .filter_map(|bucket| Some((bucket[0].as_u64()?, bucket[1].as_u64()?)))
-                .filter(|(second, _)| {
-                    (process.started_unix..=process.completed_unix).contains(second)
-                })
-                .fold(0u64, |total, (_, count)| total.saturating_add(count))
-        })
-        .unwrap_or(0)
-}
-
-/// The identity of the game process of one completed attempt, from its sealed native completion.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttemptProcess {
     pub slot: u32,
@@ -131,51 +110,7 @@ impl ChildrenVerification {
     /// any receipt) over every verified child; `None` when no attempt has one, which means the
     /// optional direct-frame probe was not collected (not a failure, and not a pass either).
     pub fn telemetry_summary(&self) -> Option<(u32, u32)> {
-        let (mut eligible, mut collected) = (0u32, 0u32);
-        for child in &self.children {
-            if child.completed_attempts.is_empty() {
-                continue;
-            }
-            let receipts: Vec<&serde_json::Value> = child
-                .telemetry_receipts
-                .as_ref()
-                .and_then(serde_json::Value::as_array)
-                .map(|items| items.iter().collect())
-                .unwrap_or_default();
-            for index in &child.completed_attempts {
-                // One-to-one: exactly one receipt names this attempt, and it is eligible and bound
-                // to the game. Missing, duplicated or conflicting receipts do not count.
-                let mine: Vec<_> = receipts
-                    .iter()
-                    .filter(|item| item["attempt"].as_u64() == Some(u64::from(*index)))
-                    .collect();
-                // The receipt must be about the very process the sealed native completion names:
-                // matching only the attempt number would let another process's receipt stand in.
-                // An attempt with no receipt at all had no direct-frame probe (optional) and counts
-                // neither way; one with a receipt must be sound, so a duplicate or bad one is
-                // collected but not eligible.
-                if !mine.is_empty() {
-                    collected = collected.saturating_add(1);
-                }
-                let process = child
-                    .completed_processes
-                    .iter()
-                    .find(|process| process.slot == *index);
-                if let [only] = mine.as_slice()
-                    && only["frame_verdict"] == "Eligible"
-                    && only["source_bound_to_game"] == true
-                    && process.is_some_and(|process| {
-                        only["pid"].as_u64() == Some(u64::from(process.pid.as_u32()))
-                            && only["start_ticks"].as_u64() == Some(process.start_ticks)
-                            && only["uid"].as_u64() == Some(u64::from(process.uid))
-                            && frames_in_window(only, process) >= super::quality::MIN_DIRECT_FRAMES
-                    })
-                {
-                    eligible = eligible.saturating_add(1);
-                }
-            }
-        }
-        (collected > 0).then_some((eligible, collected))
+        super::child_verify_rules::telemetry_summary(&self.children)
     }
 
     /// Whether every holdout child reproduced its confirmation: `Some(true)` when there is at least
