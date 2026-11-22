@@ -353,7 +353,8 @@ impl ResearchCoordinator {
                         serde_json::Value::Null,
                         |study| match crate::autotune::research::newest_record::newest::<serde_json::Value>(
                             study,
-                            "crosswalk-observations",
+                            crate::autotune::research::crosswalk::OBSERVATIONS_FILE
+                                .trim_end_matches(".json"),
                             |_| 0,
                         ) {
                             crate::autotune::research::newest_record::Newest::Found(value) => value,
