@@ -89,13 +89,8 @@ pub struct VerdictInputs<'a> {
 /// What the qualified studies of a campaign add up to: the plan distinguishes a full end-to-end qualification
 /// from one with excluded optional features or a justified abstention.
 fn qualification_scope(studies: &[Disposition]) -> &'static str {
-    use super::{child_study::StudyResult, gate_verdict};
-    if studies
-        .iter()
-        .any(|s| s.result == Some(StudyResult::Unqualified) && s.reason == "FeatureNotObservable")
-    {
-        "QualifiedWithUnobservedFeatures"
-    } else if studies.iter().any(gate_verdict::legitimately_excluded) {
+    use super::gate_verdict;
+    if studies.iter().any(gate_verdict::legitimately_excluded) {
         "QualifiedWithExcludedOptionalFeatures"
     } else if studies.iter().any(gate_verdict::not_indicated) {
         "QualifiedWithJustifiedAbstention"

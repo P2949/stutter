@@ -96,14 +96,12 @@ pub struct GateInputs<'a> {
 /// system refused to run it rather than failing. That is a finding, not a defect, and it is the only
 /// kind of exclusion PLAN allows to stand in for a qualified study; a comparison or action study never is.
 pub(super) fn legitimately_excluded(study: &Disposition) -> bool {
+    // Only a factor no authorized build can even switch is excluded. A feature whose control exists and reached the
+    // game but whose function was never established (`FeatureNotObservable`, `FeatureFunctionalUnproven`) stays
+    // unresolved: eligible but unproven is not tested, and a full G7 needs the proof.
     matches!(study.stage, Stage::Feature(_))
-        && (study.result == Some(StudyResult::Blocked) && study.reason == "BlockedNoEligibleSource"
-            // The treatment demonstrably reached the game, but the game's own result carries no
-            // report for this factor, so its function cannot be observed. That is an exclusion with
-            // its reason named (never a qualification); a feature that reached the game and was
-            // reported off, or whose activation is unproven, stays unresolved.
-            || study.result == Some(StudyResult::Unqualified)
-                && study.reason == "FeatureNotObservable")
+        && study.result == Some(StudyResult::Blocked)
+        && study.reason == "BlockedNoEligibleSource"
 }
 
 /// An action study that ran and found nothing to act on, by the reason the judgement gives it.

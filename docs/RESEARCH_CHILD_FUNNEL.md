@@ -622,3 +622,7 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - `protected_state::seal_unchanged` writes, once, that the player's saves were unchanged when the campaign was first evaluated after preparation (and never seals a changed state); `sealed` is the historical input, so the historical verdict no longer substitutes a fake `Ok` (`historical_notes` still names a campaign that was never sealed).
 - The duplicate `note` key in `action-transactions.json` is merged.
 - Still open: crosswalk rows have no per-row campaign evidence yet (a provider receipt per dossier does not exist); G7's FeatureNotObservable exclusion is not narrowed (no per-factor optional list); decisions and worker transactions are not independently reconstructed from raw records.
+
+## Sixteenth audit: G7 narrowed
+
+`FeatureNotObservable` is no longer an exclusion (this supersedes the earlier G7 note and the `QualifiedWithUnobservedFeatures` scope). Only `BlockedNoEligibleSource` (no authorized build can switch the factor) resolves a feature study without qualification; a feature whose control exists and reached the game but whose function was not established stays unresolved, so a full G7 needs a real functional proof, which nothing produces offline.

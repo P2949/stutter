@@ -63,13 +63,14 @@ fn nothing_else_blocked_is_acceptable() {
 }
 
 #[test]
-fn a_feature_that_reached_the_game_but_has_no_function_report_is_excluded_by_name_only() {
+fn an_eligible_feature_whose_function_was_never_established_is_never_an_exclusion() {
     let feature = Stage::Feature(ResearchFactor::Fsr4);
     let unobservable = Disposition {
         reason: "FeatureNotObservable".into(),
         ..study(feature, Some(StudyResult::Unqualified))
     };
-    assert!(legitimately_excluded(&unobservable) && resolved(&unobservable));
+    // The control existed and reached the game: eligible but unproven is not tested, so G7 cannot rest on it.
+    assert!(!legitimately_excluded(&unobservable) && !resolved(&unobservable));
     // Reported off, unproven activation or missing function proof are never exclusions.
     for reason in [
         "FeatureActivatedButNotFunctional",
