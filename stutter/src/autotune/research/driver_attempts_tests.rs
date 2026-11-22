@@ -663,6 +663,9 @@ mod frozen;
 #[path = "baseline_campaign_action_tests.rs"]
 mod baseline_action;
 
+#[path = "baseline_campaign_hook_tests.rs"]
+mod baseline_hook;
+
 #[path = "baseline_campaign_integrity_tests.rs"]
 mod baseline_integrity;
 

@@ -1,8 +1,6 @@
-//! One production-composed synthetic campaign: the real funnel, journals, child studies, executor,
-//! selection, raw-evidence replay and per-study reports, over a host that only injects the world. The
-//! host writes real native result files (summary and frame file that agree) for every attempt and
-//! returns a completion that seals their hashes with a matched runtime, so every integrity check the
-//! production path makes runs against real files. Nothing here is measured on hardware.
+//! One production-composed synthetic campaign: the real funnel, journals, child studies, executor, selection,
+//! raw-evidence replay and reports, over a host that only injects the world and writes real native result
+//! files for every attempt. Nothing here is measured on hardware.
 
 use std::{os::unix::fs::PermissionsExt, path::PathBuf};
 
@@ -65,7 +63,8 @@ impl ProfileHook for NoProfiles {
 
 /// Injects only the world: launching "runs" the game, polling returns a real result folder.
 pub(super) struct NativeHost {
-    /// Arms whose prefix is cold until an initialization attempt has run (empty: all warm from the start).
+    /// Where each arm's `UserSettings.json` lives, when a real profile hook edits them (`None`: a fixed digest).
+    pub(super) settings_root: Option<PathBuf>,
     pub(super) cold_until_initialized: bool,
     pub(super) initialized: bool,
     pub(super) initializing: bool,
@@ -128,7 +127,13 @@ impl NativeHost {
             app_id: self.intent.app_id,
             build_id: self.intent.build_id,
             scene: CyberpunkScenario::BuiltinBenchmark,
-            settings_sha256: "c".repeat(64),
+            settings_sha256: self.settings_root.as_ref().map_or_else(
+                || "c".repeat(64),
+                |root| {
+                    let path = root.join(slot.arm.dir_name()).join("UserSettings.json");
+                    stutter_core::hash::sha256_hex(&std::fs::read(path).unwrap())
+                },
+            ),
             proton_source: slot.arm,
             proton_identity_sha256: tool.identity_sha256.clone(),
             process: CyberpunkProcessIdentity {
@@ -264,6 +269,7 @@ fn composed(
         intent: parent.clone(),
         current: None,
         launches: 0,
+        settings_root: None,
         cold_until_initialized: !parent.prefix_init_arms.is_empty(),
         initialized: false,
         initializing: false,
@@ -664,37 +670,4 @@ fn a_study_that_applied_a_profile_cannot_lose_or_scramble_its_settings_record() 
     // A record that is gone from a study that applied a profile is not a study with no profile.
     std::fs::remove_file(&receipt).unwrap();
     assert!(verify(&run).children.iter().any(|c| c.problem.is_some()));
-}
-
-#[test]
-fn the_raw_archive_and_receipts_count_toward_the_campaign_storage_cap() {
-    let mut run = run_campaign();
-    let campaign_path = std::fs::read_link(format!(
-        "/proc/self/fd/{}",
-        std::os::fd::AsRawFd::as_raw_fd(&run.campaign)
-    ))
-    .unwrap();
-    // A cap equal to exactly the sealed evidence the children recorded leaves no room for the archive.
-    let sealed: u64 = std::fs::read_dir(campaign_path.join("studies"))
-        .unwrap()
-        .flatten()
-        .map(|entry| {
-            let spent: crate::autotune::research::campaign_budget::Spent =
-                serde_json::from_slice(&std::fs::read(entry.path().join("budget.json")).unwrap())
-                    .unwrap();
-            spent.evidence_bytes
-        })
-        .sum();
-    run.parent.max_evidence_bytes = sealed;
-    let studies = File::open(campaign_path.join("studies")).unwrap();
-    assert_eq!(
-        crate::autotune::research::campaign_budget::replay(
-            &studies,
-            crate::syscall::geteuid(),
-            &run.parent,
-            &Default::default(),
-        )
-        .as_deref(),
-        Some("CampaignEvidenceBytesExceeded")
-    );
 }

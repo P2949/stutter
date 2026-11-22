@@ -89,6 +89,7 @@ fn campaign_with_an_action() -> Campaign {
     parent.validate().unwrap();
     let rules: RuleRegistry = Default::default();
     let host = NativeHost {
+        settings_root: None,
         results: results.path().to_path_buf(),
         intent: parent.clone(),
         current: None,

@@ -206,3 +206,36 @@ fn the_resident_observation_is_read_from_each_measuring_childs_own_sealed_record
     std::fs::write(first.join("resident-observation.json"), b"{ no").unwrap();
     assert!(verify(&run).resident_summary().is_err());
 }
+
+#[test]
+fn the_raw_archive_and_receipts_count_toward_the_campaign_storage_cap() {
+    let mut run = run_campaign();
+    let campaign_path = std::fs::read_link(format!(
+        "/proc/self/fd/{}",
+        std::os::fd::AsRawFd::as_raw_fd(&run.campaign)
+    ))
+    .unwrap();
+    // A cap equal to exactly the sealed evidence the children recorded leaves no room for the archive.
+    let sealed: u64 = std::fs::read_dir(campaign_path.join("studies"))
+        .unwrap()
+        .flatten()
+        .map(|entry| {
+            let spent: crate::autotune::research::campaign_budget::Spent =
+                serde_json::from_slice(&std::fs::read(entry.path().join("budget.json")).unwrap())
+                    .unwrap();
+            spent.evidence_bytes
+        })
+        .sum();
+    run.parent.max_evidence_bytes = sealed;
+    let studies = std::fs::File::open(campaign_path.join("studies")).unwrap();
+    assert_eq!(
+        crate::autotune::research::campaign_budget::replay(
+            &studies,
+            crate::syscall::geteuid(),
+            &run.parent,
+            &Default::default(),
+        )
+        .as_deref(),
+        Some("CampaignEvidenceBytesExceeded")
+    );
+}
