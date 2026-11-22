@@ -177,3 +177,31 @@ fn the_historical_result_does_not_move_with_the_host_gates() {
         .all(|g| g.accepted);
     assert_eq!(verdict.historical_evidence_qualified, expected);
 }
+
+#[test]
+fn a_justified_abstention_is_a_terminal_study_result_and_g5_then_needs_only_the_control() {
+    let raw = raw(2, 2, 0);
+    let noop = Disposition {
+        stage: Stage::Action(crate::autotune::research::ResearchAction::CpuAffinityProfile),
+        result: Some(StudyResult::Unqualified),
+        reason: "ActionNotIndicated".into(),
+        ..study(None)
+    };
+    let studies = [study(Some(StudyResult::Qualified)), noop];
+    // Resolved as a study result, in the same sense the gates use.
+    let with = |control: Result<(), &'static str>| {
+        let mut inputs = all_true(&raw, &studies, &[]);
+        inputs.pressure_control = control;
+        judge(&inputs)
+    };
+    let verdict = with(Ok(()));
+    assert!(verdict.child_studies_qualified);
+    let g5 = |v: &Verdict| v.gates.iter().find(|g| g.gate == "G5").unwrap().clone();
+    assert!(g5(&verdict).blockers.is_empty());
+    assert_eq!(g5(&verdict).notes, ["ActionAbstainedNoPressure"]);
+    // Without a passing control the same abstention proves nothing, and the gate says why.
+    let without = with(Err("NoPressureControl"));
+    assert!(without.child_studies_qualified);
+    assert_eq!(g5(&without).blockers, ["NoPressureControl"]);
+    assert!(!without.final_gate_qualified);
+}

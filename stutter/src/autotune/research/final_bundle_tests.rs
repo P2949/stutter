@@ -451,3 +451,33 @@ fn host_dependent_gates_are_reported_apart_from_the_historical_ones() {
     assert_eq!(names("historical_sealed_evidence"), ["G2", "G9"]);
     assert_eq!(names("current_host_at_verification"), ["G0", "G8"]);
 }
+
+#[test]
+fn a_numeric_improvement_of_an_unqualified_action_study_is_not_a_demonstrated_benefit() {
+    let response = |result: &str, problem: Value| {
+        json!({
+            "verdict": { "gates": [] },
+            "child_studies": [{
+                "study_sha256": "a".repeat(64), "profile": "long", "stage": "action", "result": result,
+            }],
+            "children": { "children": [{
+                "study": "a".repeat(16), "reconstruction": true, "problem": problem,
+                "report": { "arms": [{ "status": "x", "pairs": 6, "numeric_verdict": "improved" }] },
+            }]},
+        })
+    };
+    let benefit = |response: &Value| -> Value {
+        let files = build(&json!({}), response);
+        let (_, bytes) = files
+            .iter()
+            .find(|(n, _)| *n == "action-transactions.json")
+            .unwrap();
+        serde_json::from_slice::<Value>(bytes).unwrap()["benefit_demonstrated"].clone()
+    };
+    // Whatever the shape of the fixture, a study that is not qualified can never demonstrate a benefit.
+    assert_eq!(benefit(&response("unqualified", Value::Null)), json!(false));
+    assert_eq!(
+        benefit(&response("qualified", json!("a problem"))),
+        json!(false)
+    );
+}

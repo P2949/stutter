@@ -4,6 +4,7 @@
 use super::{
     super::{
         action_child::ActionChildScope,
+        action_coverage::ABSTENTION_RECORD,
         child_study::{ChildStudy, Stage},
         report_store::write_new,
         study_executor::AttemptsOutcome,
@@ -122,24 +123,71 @@ impl DriverStudyAttempts {
 
     /// What the gate saw during an Action study: an applied action, decided, with its restoration
     /// proven. Anything less (nothing applied, or an action still outstanding) is not evidence.
-    pub(super) fn stage_evidence(&self, study: &ChildStudy) -> Option<bool> {
+    /// As above, and whether the action study justified abstaining: the gate armed, nothing was applied or
+    /// left outstanding, every granted action (none) restored, and that was made durable beside the study.
+    pub(super) fn stage_evidence(
+        &self,
+        study: &ChildStudy,
+        completed: u32,
+    ) -> (Option<bool>, bool) {
         use crate::autotune::research::child_study::Stage;
         let (Some(gate), Stage::Action(_)) = (&self.gate, study.stage) else {
-            return None;
+            return (None, false);
         };
-        let evidence = gate.lock().ok()?.disarm();
+        let Some(evidence) = gate.lock().ok().map(|mut gate| gate.disarm()) else {
+            return (None, false);
+        };
         // The receipts must be durable beside the study, where an independent verification reads them:
         // a failed or conflicting write is a failed qualification, never a silent one.
         let durable = !evidence.receipts.is_empty()
             && self
                 .write_receipts(study, &evidence.receipts_json())
                 .is_ok();
-        Some(
-            evidence.clean
-                && !evidence.settled.is_empty()
-                && evidence.kernel_state_proven
-                && durable,
-        )
+        let qualified = evidence.clean
+            && !evidence.settled.is_empty()
+            && evidence.kernel_state_proven
+            && durable;
+        // Nothing applied, nothing outstanding and nothing to restore: the controller abstained for the whole
+        // study. That is recorded (and replayed) as its own disposition, never as a qualified action.
+        let abstained = !qualified
+            && evidence.receipts.is_empty()
+            && evidence.settled.is_empty()
+            && evidence.clean
+            && self
+                .write_study_record(
+                    study,
+                    ABSTENTION_RECORD,
+                    &serde_json::json!({ "completed": completed, "applied": 0 }),
+                )
+                .is_ok();
+        (Some(qualified), abstained)
+    }
+
+    /// A small JSON record beside the study, write-once; an existing one must be byte-identical.
+    fn write_study_record(
+        &self,
+        study: &ChildStudy,
+        name: &str,
+        value: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        let studies = open_dir(&self.campaign, STUDIES_DIR)?;
+        let dir = open_dir(&studies, dir_name(study))?;
+        let bytes = serde_json::to_vec_pretty(value)?;
+        match write_new(&dir, name, &bytes) {
+            Ok(()) => Ok(()),
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                anyhow::ensure!(
+                    super::super::report_store::read_private(&dir, name, self.parent.uid)? == bytes,
+                    "the recorded study record differs"
+                );
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// The settings digests the applied profile left, recorded once beside the study (an existing record

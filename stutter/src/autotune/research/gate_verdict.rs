@@ -113,7 +113,10 @@ pub(super) fn not_indicated(study: &Disposition) -> bool {
 
 /// Whether a study reached an acceptable terminal disposition: qualified, or a legitimate exclusion.
 pub(super) fn resolved(study: &Disposition) -> bool {
-    study.result == Some(StudyResult::Qualified) || legitimately_excluded(study)
+    study.result == Some(StudyResult::Qualified)
+        || legitimately_excluded(study)
+        // A justified abstention is a terminal result; G5 separately demands the control that makes it mean something.
+        || not_indicated(study)
 }
 
 /// `Some(true)` when there is at least one study of the kind and every one is qualified, `Some(false)`
@@ -303,9 +306,7 @@ fn gates_inner(inputs: &GateInputs<'_>, preparing: bool) -> Vec<GateVerdict> {
     // an owned-pressure control showing the same binary acts when pressure exists. A mere refusal is not it.
     let mut g5_note: Vec<&'static str> = Vec::new();
     let actions: Vec<&Disposition> = studies.iter().filter(|s| action(&s.stage)).collect();
-    let abstained = |s: &&Disposition| not_indicated(s);
-    if actions.iter().any(abstained) && actions.iter().all(|s| resolved(s) || not_indicated(s)) {
-        g5.clear();
+    if actions.iter().any(|s| not_indicated(s)) {
         match inputs.pressure_control {
             Ok(()) => g5_note.push("ActionAbstainedNoPressure"),
             Err(reason) => g5.push(reason),

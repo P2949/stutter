@@ -367,6 +367,25 @@ fn treatment_result(
 ) -> anyhow::Result<ArmResult> {
     use super::Treatment::{Off, On};
     let source = intent.tools[0].source;
+    // A long session seals a placeholder FPS only so the record has a valid number; it is not a measurement.
+    // Comparing off and on over a constant is meaningless, so no numeric result is ever derived from it: the
+    // runnable-latency measurement an action study needs is a separate, source-qualified one.
+    if !evidence.is_empty()
+        && evidence
+            .values()
+            .all(|item| item.long_session.is_some() && item.native_completion.is_none())
+    {
+        return Ok(ArmResult {
+            source,
+            status: "ActionMetricUnavailable".into(),
+            numeric_verdict: None,
+            pairs: 0,
+            mean_effect_percent: None,
+            ci_low_percent: None,
+            ci_high_percent: None,
+            rule_sha256: None,
+        });
+    }
     let seed = u64::from_str_radix(&intent.digest()?[16..32], 16)?;
     let blocks = schedule.len() / 2;
     let value = |block: usize, wanted: super::Treatment| -> Option<f64> {

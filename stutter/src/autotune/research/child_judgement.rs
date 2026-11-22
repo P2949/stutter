@@ -27,7 +27,12 @@ pub(super) fn verify_qualification(
     // records and its recorded per-attempt observation, never from a live boolean.
     let feature_unqualified = disposition.result == Some(StudyResult::Unqualified)
         && matches!(disposition.stage, Stage::Feature(_));
-    if !qualified && !feature_unqualified {
+    // A justified abstention is replayed too: the study ran, the controller never applied the action, and its
+    // own recorded abstention (with no receipts) must match the sealed attempt count.
+    let abstained = disposition.result == Some(StudyResult::Unqualified)
+        && matches!(disposition.stage, Stage::Action(_))
+        && disposition.reason == "ActionNotIndicated";
+    if !qualified && !feature_unqualified && !abstained {
         return Ok(());
     }
     let study = super::child_study::plan(parent)?
@@ -86,6 +91,8 @@ pub(super) fn verify_qualification(
         run_fps,
         // The current historical receipts do not independently prove feature activation or an
         // action's objective and guardrails. Never promote those claims from a live boolean.
+        action_not_indicated: matches!(study.stage, Stage::Action(_))
+            && abstention_replay(dir, uid, u32::try_from(report.attempts_completed)?),
         stage_evidence: if study.stage == Stage::Init {
             let arms: Vec<&str> = parent
                 .prefix_init_arms
@@ -197,4 +204,18 @@ pub(super) fn action_replay(
         Some(coverage.applied_on_every_treated_attempt())
     })()
     .unwrap_or(false)
+}
+
+/// Whether the action study's own durable abstention record names exactly the completed attempts, says nothing
+/// was applied, and sits beside no action receipts (an applied action would have left some).
+fn abstention_replay(dir: &File, uid: u32, completed: u32) -> bool {
+    let recorded = read_private(dir, super::action_coverage::ABSTENTION_RECORD, uid)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    recorded.is_some_and(|value| {
+        value["completed"].as_u64() == Some(u64::from(completed)) && value["applied"] == 0
+    }) && matches!(
+        crate::syscall::openat_nofollow(dir.as_fd(), "action-receipts.json"),
+        Err(ref error) if error.kind() == std::io::ErrorKind::NotFound
+    )
 }

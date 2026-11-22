@@ -376,3 +376,60 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
     std::fs::remove_file(path.join("action-receipts.json")).unwrap();
     assert!(!replay());
 }
+
+/// An action study during which the controller never applies the action is a justified abstention, not a
+/// qualified action and not a failure: its own record replays, and the gates need the control beside it.
+#[test]
+fn a_study_in_which_the_action_was_never_applied_is_a_replayable_justified_abstention() {
+    use crate::autotune::research::{
+        child_judgement::verify_qualification, child_ledger::Disposition,
+    };
+    let (root, mut runner, study, _gate, parent) = build(&"a".repeat(64));
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    // No `act`: the controller saw nothing to do for the whole study.
+    let outcome = run_to_end(&mut runner, &study);
+    assert_eq!(outcome.stage_evidence, Some(false));
+    assert!(outcome.action_not_indicated);
+    let run = judge(&study, &outcome);
+    assert_eq!(
+        (run.result, run.reason),
+        (StudyResult::Unqualified, "ActionNotIndicated")
+    );
+    let path = root.path().join("studies").join(&study.study_sha256[..16]);
+    let dir = std::fs::File::open(&path).unwrap();
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path.join("report.json")).unwrap()).unwrap();
+    let disposition = Disposition {
+        study_sha256: study.study_sha256.clone(),
+        profile: study.profile,
+        stage: study.stage,
+        result: Some(StudyResult::Unqualified),
+        reason: "ActionNotIndicated".into(),
+    };
+    let uid = crate::syscall::geteuid();
+    let check = |disposition: &Disposition| {
+        verify_qualification(&dir, uid, &parent, disposition, &report, true, true)
+    };
+    check(&disposition).unwrap();
+    // Receipts beside a claimed abstention mean an action was applied: the claim is contradicted.
+    std::fs::write(path.join("action-receipts.json"), b"[]").unwrap();
+    assert!(check(&disposition).is_err());
+}
+
+/// A long session's sealed placeholder FPS is never analysed as a measurement.
+#[test]
+fn a_long_action_study_reports_no_numeric_result_from_its_placeholder_fps() {
+    let (root, mut runner, study, gate, parent) = build(&"a".repeat(64));
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    act(&gate, &parent);
+    run_to_end(&mut runner, &study);
+    let path = root.path().join("studies").join(&study.study_sha256[..16]);
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path.join("report.json")).unwrap()).unwrap();
+    let result = report
+        .pointer("/arms/0")
+        .or_else(|| report.get("treatment"))
+        .expect("the report's one result");
+    assert_eq!(result["status"], "ActionMetricUnavailable", "{report}");
+    assert!(result["numeric_verdict"].is_null() && result["mean_effect_percent"].is_null());
+}

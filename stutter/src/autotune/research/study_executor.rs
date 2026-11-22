@@ -119,6 +119,9 @@ pub struct AttemptsOutcome {
     /// that the factor was really active, or the action's outcome with proven restoration. `None`
     /// when nothing collects it.
     pub stage_evidence: Option<bool>,
+    /// An action study only: the controller never applied the action during it, nothing was left outstanding, and
+    /// that was recorded durably. Not a qualified action; a justified abstention needs the owned-pressure control.
+    pub action_not_indicated: bool,
     /// A feature study only: every completed attempt's own treatment (factor on or off) was observed in
     /// the game process's environment. This is activation of the control, not proof that the feature
     /// works; `None` for any other study.
@@ -397,6 +400,7 @@ fn stage_gap(study: &ChildStudy, outcome: &AttemptsOutcome) -> Option<&'static s
             })
         }
         Stage::Feature(_) => Some("FeatureActivationUnproven"),
+        Stage::Action(_) if outcome.action_not_indicated => Some("ActionNotIndicated"),
         Stage::Action(_) => Some("ActionEvidenceMissing"),
         Stage::Init => Some("InitializationUnproven"),
         Stage::Screen | Stage::Pilot | Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs => {

@@ -308,6 +308,7 @@ fn child_rows(response: &Value, with_report: bool) -> Vec<Value> {
                         "study": name,
                         "profile": study.and_then(|study| study.get("profile")),
                         "stage": study.map(|study| stage_of(study)),
+                        "study_result": study.map(|study| result_of(study)),
                         "reconstruction": child.get("reconstruction"),
                         "raw_files_verified": child.get("raw_files_verified"),
                         "problem": child.get("problem"),
@@ -365,13 +366,17 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
                 "status": result.get("status"),
                 "pairs": result.get("pairs"),
                 "numeric_verdict": result.get("numeric_verdict"),
+                // A numeric verdict of an unqualified, unreplayed or unverified study is not a result.
+                "study_qualified": row.get("study_result") == Some(&json!("qualified"))
+                    && row.get("reconstruction") == Some(&json!(true))
+                    && row.get("problem").is_none_or(Value::is_null),
             })
         })
         .collect();
     let benefit_demonstrated = !comparison.is_empty()
         && comparison
             .iter()
-            .all(|item| item["numeric_verdict"] == "improved");
+            .all(|item| item["numeric_verdict"] == "improved" && item["study_qualified"] == true);
     let receipts: Vec<Value> = child_rows(response, false)
         .iter()
         .filter(|row| row.get("profile").and_then(Value::as_str) == Some("long"))

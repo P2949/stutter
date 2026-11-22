@@ -100,7 +100,7 @@ fn a_justified_no_op_resolves_g5_only_beside_a_passing_owned_pressure_control() 
         reason: "ActionNotIndicated".into(),
         ..study(action, Some(StudyResult::Unqualified))
     };
-    assert!(not_indicated(&noop) && !resolved(&noop));
+    assert!(not_indicated(&noop) && resolved(&noop));
     let mut studies = full(Some(StudyResult::Qualified));
     studies.retain(|s| !matches!(s.stage, Stage::Action(_)));
     studies.push(noop.clone());

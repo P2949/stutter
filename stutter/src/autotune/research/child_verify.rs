@@ -91,12 +91,23 @@ impl ChildrenVerification {
             .collect();
         !actions.is_empty()
             && actions.iter().all(|study| {
-                study.result == Some(StudyResult::Qualified)
-                    && self.children.iter().any(|child| {
-                        study.study_sha256.starts_with(&child.study)
+                let child = self
+                    .children
+                    .iter()
+                    .find(|child| study.study_sha256.starts_with(&child.study));
+                match (study.result, child) {
+                    (Some(StudyResult::Qualified), Some(child)) => {
+                        child.reconstruction && child.action_receipts.is_some()
+                    }
+                    // A justified abstention applied nothing, so nothing was left to restore: its own
+                    // record replayed and no receipts exist. The control that gives it meaning is G5's.
+                    (Some(StudyResult::Unqualified), Some(child)) => {
+                        super::gate_verdict::not_indicated(study)
                             && child.reconstruction
-                            && child.action_receipts.is_some()
-                    })
+                            && child.action_receipts.is_none()
+                    }
+                    _ => false,
+                }
             })
     }
 

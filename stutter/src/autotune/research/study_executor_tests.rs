@@ -122,6 +122,7 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         raw_verified: true,
         runtime_matched: true,
         stage_evidence: None,
+        action_not_indicated: false,
         activation: None,
         functional: None,
         tail_metric: false,

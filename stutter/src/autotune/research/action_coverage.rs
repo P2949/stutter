@@ -9,6 +9,9 @@
 
 use super::{Treatment, child_verify::AttemptProcess};
 
+/// The record an action study leaves when it ran and the controller never applied the action.
+pub const ABSTENTION_RECORD: &str = "action-abstention.json";
+
 /// What the receipts say of the On attempts that completed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Coverage {

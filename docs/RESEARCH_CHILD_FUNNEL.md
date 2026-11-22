@@ -574,3 +574,10 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - `child_verify_rules::processes_of` now also attributes a long-session attempt's process (before, a long action study had no attributable attempts at all).
 - Test: per-attempt processes; passes with a valid receipt on every treated attempt; fails for a missing, extra-on-untreated, differently-restored or absent receipt file. Not yet done: a full campaign test with an action study through `verify_children`, the no-op disposition producer, the CP-LONG latency metric.
 - Hygiene: `url` updated to 2.5.9 (cargo-deny advisory); `arm_gate_for` moved to the persistence module for the file-size cap.
+
+## Fifteenth audit P1: justified abstention and the long-session metric
+
+- `ActionNotIndicated` now has a producer: when an action study's gate was armed, nothing was applied or left outstanding and no receipt exists, the driver writes `action-abstention.json` ({completed, applied: 0}) and the judgement returns `Unqualified / ActionNotIndicated`. `child_judgement` replays it (record names exactly the completed attempts, applied is 0, and `action-receipts.json` is truly absent, not merely unreadable).
+- It is a terminal study result everywhere the verdict looks: `gate_verdict::resolved` accepts it, `actions_restored` accepts it only with a reconstructed child and no receipts, and G5 additionally requires the owned-pressure control (blocker = the control's own reason). Verdict-level test covers with and without control.
+- Limit: the abstention proves the action was never applied, not why; the "why" (no eligible pressure) rests on the control plus the controller's own planner events, which this repository cannot produce without the game.
+- A long session's sealed placeholder FPS (1.0) is never analysed: `treatment_result` returns `ActionMetricUnavailable` with no numeric verdict. `benefit_demonstrated` additionally requires the action study to be qualified and its child reconstructed without a problem.

@@ -437,10 +437,16 @@ impl DriverStudyAttempts {
         // The game's enum cannot establish the exact backend or functional fork-specific activation.
         // Keep feature studies unqualified until independently replayable identity and operation
         // evidence is connected, even when the environment and game-reported selection agree.
+        let mut action_not_indicated = false;
         let stage_evidence = match study.stage {
             Stage::Feature(_) => Some(false),
             Stage::Init => self.init_receipt(&study_dir)?,
-            _ => self.stage_evidence(study),
+            _ => {
+                let (evidence, abstained) =
+                    self.stage_evidence(study, u32::try_from(report.attempts_completed)?);
+                action_not_indicated = abstained;
+                evidence
+            }
         };
         Ok(AttemptsOutcome {
             planned_attempts: driver.intent().max_attempts,
@@ -469,6 +475,7 @@ impl DriverStudyAttempts {
             // No runtime proof of a factor's activation, and no worker restoration evidence for an
             // action, is collected here yet: stage evidence is unproven.
             stage_evidence,
+            action_not_indicated,
             activation,
             functional,
             tail_metric,
