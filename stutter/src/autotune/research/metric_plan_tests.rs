@@ -140,3 +140,26 @@ fn run_values_are_tail_fps_for_every_run_or_the_average_for_every_run() {
     assert!(values.iter().all(|(_, v)| *v == 60.0));
     assert_eq!(run_values([]), (false, Vec::new()));
 }
+
+/// The practical-effect threshold is stated on the frame-time (ms) scale that confirmation analyses. The
+/// pilot works on 1000/p99 only to estimate variability; for the spreads a pilot can accept, the
+/// coefficient of variation is the same on both scales to within a small fraction, so the frozen rule does
+/// not move a borderline decision.
+#[test]
+fn the_pilots_reciprocal_scale_and_the_confirmations_millisecond_scale_agree_on_variability() {
+    let cv = |values: &[f64]| {
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        let var =
+            values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
+        var.sqrt() / mean
+    };
+    for spread in [0.01, 0.03, 0.05, 0.08] {
+        let ms: Vec<f64> = [-1.0, -0.5, 0.0, 0.5, 1.0]
+            .iter()
+            .map(|k| 20.0 * (1.0 + spread * k))
+            .collect();
+        let fps: Vec<f64> = ms.iter().map(|m| 1000.0 / m).collect();
+        let (a, b) = (cv(&ms), cv(&fps));
+        assert!((a - b).abs() / a < 0.08, "spread {spread}: {a} vs {b}");
+    }
+}

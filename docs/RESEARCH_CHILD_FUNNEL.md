@@ -539,3 +539,9 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - `RouteDriver` fails a session with `LongSessionInputGap` when the controller goes more than `MAX_POLL_GAP_SECONDS` (5) between looks at a running route, instead of crediting the phases the silence covered. The sealed `LongSessionRecord` carries `max_poll_gap_seconds`, and `long_receipt::verify` rejects a record without it (`LongSessionDeliveryUnproven`) or over the bound.
 - A key whose release write was refused stays recorded as held (`ScriptedInput::released()` is false); the next phase will not begin on top of it and the driver ends or aborts with `LongInputReleaseUnverified` instead of completing clean.
 - Still no physical input backend: production keeps `UnavailableInput`, so a real long attempt fails with `BlockedNoLongSessionDriver`. Delivery is bounded by polling, not observed at the device.
+
+## Fourteenth audit: scale and thermal notes
+
+- Practical-effect scale: the threshold is stated on the frame-time (ms) scale that confirmation analyses; the pilot uses 1000/p99 only to estimate variability, and a test shows the coefficient of variation agrees between the two scales within 8 % for any spread a pilot accepts.
+- Thermal: the production host always seals a thermal context (readings may be unknown), so a new study without sensors is `Unproven`, never `NotRecorded`; only results sealed before the field existed read as not recorded, and sealed evidence cannot have the field removed without breaking its digest.
+- Open (typed, not done offline): G5 still has no justified no-pressure no-op disposition (needs an owned-pressure control record); a feature cannot qualify without an independent effective DLL/backend proof; the mandatory resident game-scoped CPU/GPU/PSI/ownership observation is not produced offline; historical verification still reads some current-host facts at finalization.
