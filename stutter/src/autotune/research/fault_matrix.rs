@@ -163,6 +163,13 @@ const MAX_EVIDENCE_BYTES: u64 = 256 * 1024;
 /// not shared with another case. Missing, modified, duplicated or misclassified evidence is refused.
 pub fn artifacts_verified(receipt: &FaultMatrixReceipt, study: &Path) -> Result<(), &'static str> {
     let dir = study.join(EVIDENCE_DIR);
+    let folder = match crate::syscall::open_dir_no_symlinks(&dir) {
+        Ok(fd) => std::fs::File::from(fd),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err("FaultEvidenceMissing");
+        }
+        Err(_) => return Err("FaultEvidenceUnusable"),
+    };
     let mut seen = std::collections::BTreeSet::new();
     for class in REQUIRED_CLASSES {
         let Some(case) = receipt.cases.iter().find(|case| case.class == class) else {
@@ -171,12 +178,24 @@ pub fn artifacts_verified(receipt: &FaultMatrixReceipt, study: &Path) -> Result<
         if !seen.insert(case.evidence_sha256.as_str()) {
             return Err("FaultEvidenceShared");
         }
-        let path = dir.join(format!("{}.json", case.evidence_sha256));
-        let meta = std::fs::symlink_metadata(&path).map_err(|_| "FaultEvidenceMissing")?;
+        let name = format!("{}.json", case.evidence_sha256);
+        let file = match crate::syscall::openat_nofollow(std::os::fd::AsFd::as_fd(&folder), &name) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err("FaultEvidenceMissing");
+            }
+            Err(_) => return Err("FaultEvidenceUnusable"),
+        };
+        let meta = file.metadata().map_err(|_| "FaultEvidenceUnusable")?;
         if !meta.is_file() || meta.len() > MAX_EVIDENCE_BYTES {
             return Err("FaultEvidenceUnusable");
         }
-        let bytes = std::fs::read(&path).map_err(|_| "FaultEvidenceMissing")?;
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(file, MAX_EVIDENCE_BYTES + 1),
+            &mut bytes,
+        )
+        .map_err(|_| "FaultEvidenceUnusable")?;
         if stutter_core::hash::sha256_hex(&bytes) != case.evidence_sha256 {
             return Err("FaultEvidenceModified");
         }

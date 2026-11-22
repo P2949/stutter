@@ -302,16 +302,16 @@ fn composed(
     (root, results, driver, parent, campaign)
 }
 
-struct Finished {
-    _root: tempfile::TempDir,
-    results: tempfile::TempDir,
-    driver: FunnelDriver,
-    parent: ResearchIntentV1,
-    campaign: File,
+pub(super) struct Finished {
+    pub(super) _root: tempfile::TempDir,
+    pub(super) results: tempfile::TempDir,
+    pub(super) driver: FunnelDriver,
+    pub(super) parent: ResearchIntentV1,
+    pub(super) campaign: File,
 }
 
 /// Run the composed funnel until every study has a recorded decision.
-fn run_campaign() -> Finished {
+pub(super) fn run_campaign() -> Finished {
     run_campaign_with(Vec::new(), true)
 }
 
@@ -353,7 +353,9 @@ fn run_campaign_full(
     panic!("the campaign never finished");
 }
 
-fn verify(run: &Finished) -> crate::autotune::research::child_verify::ChildrenVerification {
+pub(super) fn verify(
+    run: &Finished,
+) -> crate::autotune::research::child_verify::ChildrenVerification {
     let results_root = run.results.path().to_path_buf();
     crate::autotune::research::child_verify::verify_children(
         &run.campaign,

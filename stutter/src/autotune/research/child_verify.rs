@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use super::{
     ProtonSource, ResearchIntentV1, ResearchJournal,
     child_verify_rules::{
-        action_receipts, attempt_count_matches, completed_attempts, missing_children,
-        receipts_valid, rule_matches_pilot, study_file,
+        FileState, action_receipts, attempt_count_matches, completed_attempts, missing_children,
+        receipts_valid, rule_matches_pilot, study_file, study_file_state,
     },
     driver::build_schedule,
     report_store::{load_and_verify, read_private},
@@ -265,6 +265,13 @@ pub(crate) fn verify_child(
         .long_work_unit
         .as_ref()
         .map(|unit| (unit, child.max_attempt_seconds));
+    // A study that measured natively always archived its raw files. A missing archive is an integrity failure,
+    // never permission to replay from a results directory the campaign does not control.
+    let has_native = items.values().any(|item| item.native_completion.is_some());
+    anyhow::ensure!(
+        !has_native || super::raw_archive::exists(dir),
+        "RawArchiveMissing: a study with native results has no archive of them"
+    );
     let raw = if super::raw_archive::exists(dir) {
         super::raw_verify::verify_raw_evidence_for(
             &evidence,
@@ -367,7 +374,13 @@ pub fn verify_children(
         };
         let receipts = action_receipts(&studies, &name, uid);
         let cohort = study_file(&studies, &name, uid, "prefix-cohort.json");
-        let telemetry = study_file(&studies, &name, uid, "telemetry-receipts.json");
+        // Absent is "the optional probe did not run"; present but unreadable or not a list is corrupt evidence,
+        // carried as a non-list so the summary counts it against the study instead of reading it as absent.
+        let telemetry = match study_file_state(&studies, &name, uid, "telemetry-receipts.json") {
+            FileState::Absent => None,
+            FileState::Present(value) if value.is_array() => Some(value),
+            _ => Some(serde_json::Value::String("InvalidTelemetryReceipts".into())),
+        };
         let completed = completed_attempts(&studies, &name, uid);
         let processes = completed_processes(&studies, &name, uid);
         // A holdout is judged against its confirmation: a sound repetition that reaches another

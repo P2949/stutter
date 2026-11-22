@@ -58,14 +58,9 @@ pub(super) fn verify_qualification(
     let applied = read_private(dir, super::init_receipt::SETTINGS_RECEIPT, uid)
         .ok()
         .and_then(|bytes| super::init_receipt::read_settings_receipt(&bytes));
-    // A study with a campaign raw archive was run by a build that records what its profile left.
-    let conformance = super::settings_binding::conformances(
-        &evidence,
-        applied.as_deref(),
-        &intent,
-        &study,
-        super::raw_archive::exists(dir),
-    );
+    // Every study this build verifies records what its profile left (an older one is not replayed).
+    let conformance =
+        super::settings_binding::conformances(&evidence, applied.as_deref(), &intent, &study, true);
     let (tail_metric, run_fps) = super::metric_plan::run_values(
         evidence
             .values()

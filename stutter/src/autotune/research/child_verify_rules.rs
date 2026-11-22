@@ -213,6 +213,29 @@ pub(super) fn completed_attempts(studies: &File, name: &str, uid: u32) -> Vec<u3
         .unwrap_or_default()
 }
 
+/// What a study's optional JSON file is: not there, there but unreadable or not JSON, or a document.
+pub(super) enum FileState {
+    Absent,
+    Invalid,
+    Present(serde_json::Value),
+}
+
+/// As `study_file`, but telling a file that is absent from one that is present and corrupt.
+pub(super) fn study_file_state(studies: &File, name: &str, uid: u32, file: &str) -> FileState {
+    let Ok(dir) = crate::syscall::openat_dir_nofollow(studies.as_fd(), name) else {
+        return FileState::Invalid;
+    };
+    let dir = File::from(dir);
+    match crate::syscall::openat_nofollow(dir.as_fd(), file) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => FileState::Absent,
+        Err(_) => FileState::Invalid,
+        Ok(_) => read_private(&dir, file, uid)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .map_or(FileState::Invalid, FileState::Present),
+    }
+}
+
 /// A JSON file a study recorded in its own directory, if present and private.
 pub(super) fn study_file(
     studies: &File,
@@ -229,6 +252,16 @@ pub(super) fn telemetry_summary(children: &[ChildVerification]) -> Option<(u32, 
     let (mut eligible, mut collected) = (0u32, 0u32);
     for child in children {
         if child.completed_attempts.is_empty() {
+            continue;
+        }
+        // Corrupt receipts are collected evidence that cannot qualify: every completed attempt counts against it.
+        if child
+            .telemetry_receipts
+            .as_ref()
+            .is_some_and(|value| !value.is_array())
+        {
+            collected = collected
+                .saturating_add(u32::try_from(child.completed_attempts.len()).unwrap_or(u32::MAX));
             continue;
         }
         let receipts: Vec<&serde_json::Value> = child

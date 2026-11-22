@@ -72,12 +72,24 @@ pub fn attested(
 
 /// The control's status for a campaign directory: `NoPressureControl` when no receipt is there.
 pub fn status(dir: &Path, own_binary_sha256: &str, now: u64) -> Result<(), &'static str> {
-    let path = dir.join(FILE);
-    let meta = std::fs::symlink_metadata(&path).map_err(|_| "NoPressureControl")?;
+    // Opened through the directory without following a link, and measured on the open descriptor.
+    let folder = std::fs::File::from(
+        crate::syscall::open_dir_no_symlinks(dir).map_err(|_| "PressureControlUnusable")?,
+    );
+    let file = match crate::syscall::openat_nofollow(std::os::fd::AsFd::as_fd(&folder), FILE) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err("NoPressureControl");
+        }
+        Err(_) => return Err("PressureControlUnusable"),
+    };
+    let meta = file.metadata().map_err(|_| "PressureControlUnusable")?;
     if !meta.is_file() || meta.len() > 64 * 1024 {
         return Err("PressureControlUnusable");
     }
-    let bytes = std::fs::read(&path).map_err(|_| "NoPressureControl")?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut std::io::Read::take(file, 64 * 1024 + 1), &mut bytes)
+        .map_err(|_| "PressureControlUnusable")?;
     let receipt: PressureControlReceipt =
         serde_json::from_slice(&bytes).map_err(|_| "PressureControlUnusable")?;
     attested(&receipt, own_binary_sha256, now)

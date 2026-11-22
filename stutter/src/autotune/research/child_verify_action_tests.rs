@@ -338,6 +338,11 @@ fn independent_screen_replay_accepts_compatibility_failures_but_not_integrity_fa
                 .record_run(&study, StudyResult::Qualified, "", study.min_attempts + 1)
                 .unwrap();
             drop(ledger);
+            // The fixture archives nothing; an (empty) archive is what a study with native results must have, so the
+            // count check below is what is under test, not the missing-archive refusal.
+            std::fs::create_dir(path.join("raw")).unwrap();
+            std::fs::set_permissions(path.join("raw"), std::fs::Permissions::from_mode(0o700))
+                .unwrap();
             let verification =
                 verify_children(&campaign, child.uid, &parent, &|_| "/nonexistent".into()).unwrap();
             assert!(

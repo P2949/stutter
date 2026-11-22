@@ -75,6 +75,12 @@ pub fn spent(studies: &File, uid: u32, max_active_seconds: u64) -> anyhow::Resul
                 active_seconds: max_active_seconds,
                 evidence_bytes: 0,
             });
+        // The raw archive and receipts beside the records occupy the same cap; admission counts what is on disk now,
+        // the same way the final replay does, so a child is never admitted into a cap the archive already used.
+        let one = Spent {
+            evidence_bytes: one.evidence_bytes.saturating_add(sidecar_bytes(&dir, 0)?),
+            ..one
+        };
         total = total.plus(one);
     }
     Ok(total)

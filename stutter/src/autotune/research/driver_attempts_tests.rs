@@ -149,6 +149,7 @@ fn parent() -> ResearchIntentV1 {
         identity_sha256: "b".repeat(64),
     });
     intent.max_attempts = 40;
+    intent.max_evidence_bytes = 4 * 1024 * 1024;
     intent.max_attempt_seconds = 100;
     intent
 }
@@ -655,6 +656,9 @@ mod feature;
 
 #[path = "driver_attempts_budget_tests.rs"]
 mod budget;
+
+#[path = "baseline_campaign_integrity_tests.rs"]
+mod baseline_integrity;
 
 #[path = "baseline_campaign_tests.rs"]
 mod baseline_campaign;

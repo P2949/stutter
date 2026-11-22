@@ -581,3 +581,10 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - It is a terminal study result everywhere the verdict looks: `gate_verdict::resolved` accepts it, `actions_restored` accepts it only with a reconstructed child and no receipts, and G5 additionally requires the owned-pressure control (blocker = the control's own reason). Verdict-level test covers with and without control.
 - Limit: the abstention proves the action was never applied, not why; the "why" (no eligible pressure) rests on the control plus the controller's own planner events, which this repository cannot produce without the game.
 - A long session's sealed placeholder FPS (1.0) is never analysed: `treatment_result` returns `ActionMetricUnavailable` with no numeric verdict. `benefit_demonstrated` additionally requires the action study to be qualified and its child reconstructed without a problem.
+
+## Fifteenth audit P2: no silent downgrades
+
+- A child study with native results must have its raw archive: `verify_child` fails with `RawArchiveMissing` instead of replaying from the game's results directory, and the settings binding is strict for every verified study (no "legacy" fallback; no child study from an earlier build exists in any campaign, the preserved real campaign is flat).
+- Telemetry receipts: absent is the optional probe not run; present but unreadable, not JSON or not a list is carried as `InvalidTelemetryReceipts` and counts every completed attempt of that child as collected but not eligible (`FrameSourceNotEligible`). Tested over the production-composed campaign.
+- Admission (`campaign_budget::spent`) now counts the archive and receipts on disk, the same measurement the final replay uses.
+- `pressure_control::status` and `fault_matrix::artifacts_verified` read through directory descriptors without following links and measure on the open descriptor.
