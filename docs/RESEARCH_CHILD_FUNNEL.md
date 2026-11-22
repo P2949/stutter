@@ -557,3 +557,7 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 
 - The final bundle's `capability-matrix.json` now carries `crosswalk_34`, the 34 Observed/Tested/Excluded/Blocked closure rows built by `crosswalk::build_rows` from the same embedded ledger (an invalid ledger is reported as `CrosswalkInvalid`, never a shorter table).
 - It also carries `gate_scope`: G2–G5, G7, G9 as historical (sealed evidence) and G0, G1, G6, G8 as current-host at verification time, with a note that a later host change never rewrites the historical result. The per-gate verdict itself is unchanged.
+
+## Fourteenth audit: historical result apart from host gates
+
+`Verdict.historical_evidence_qualified` is the campaign's sealed-evidence result (study-backed facts plus G2–G5, G7, G9). `final_gate_qualified` still also needs G0, G1, G6 and G8, which describe the host today; a later host change can move the second but never the first.

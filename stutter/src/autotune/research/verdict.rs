@@ -28,6 +28,10 @@ pub struct Verdict {
     /// caller's observation, never inferred from the other statuses).
     pub restoration_verified: bool,
     pub final_gate_qualified: bool,
+    /// The campaign's own sealed evidence qualifies (every study-backed fact and gates G2-G5, G7, G9),
+    /// whatever the host looks like now. A later reboot or package change can move `final_gate_qualified`
+    /// through G0, G1, G6 and G8; it cannot move this.
+    pub historical_evidence_qualified: bool,
     /// `AbortedHealth`, `Qualified`, `PartiallyQualified` or `Unverified`.
     pub disposition: &'static str,
     /// One verdict per PLAN gate, each from its own evidence (`gate_verdict`).
@@ -139,6 +143,17 @@ fn judge_inner(inputs: &VerdictInputs<'_>, preparing: bool) -> Verdict {
         && inputs.restoration_verified
         && !inputs.health_blocked
         && gates.iter().all(|gate| gate.accepted);
+    let historical_evidence_qualified = inputs.reconstruction_passed
+        && raw_files_verified
+        && loaded_runtime_qualified
+        && child_studies_qualified
+        && inputs.child_reports_verified
+        && inputs.restoration_verified
+        && !inputs.health_blocked
+        && gates
+            .iter()
+            .filter(|gate| ["G2", "G3", "G4", "G5", "G7", "G9"].contains(&gate.gate))
+            .all(|gate| gate.accepted);
     let disposition = if inputs.health_blocked {
         "AbortedHealth"
     } else if final_gate_qualified {
@@ -156,6 +171,7 @@ fn judge_inner(inputs: &VerdictInputs<'_>, preparing: bool) -> Verdict {
         child_reports_verified: inputs.child_reports_verified,
         restoration_verified: inputs.restoration_verified,
         final_gate_qualified,
+        historical_evidence_qualified,
         disposition,
         gates,
     }

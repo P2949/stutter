@@ -160,3 +160,20 @@ fn a_funnel_campaign_is_judged_from_its_children_not_its_empty_flat_schedule() {
     assert!(!unmatched.loaded_runtime_qualified && !unmatched.final_gate_qualified);
     assert_eq!(unmatched.disposition, "PartiallyQualified");
 }
+
+#[test]
+fn the_historical_result_does_not_move_with_the_host_gates() {
+    let raw = raw(2, 2, 0);
+    let studies = [study(Some(StudyResult::Qualified))];
+    let verdict = judge(&all_true(&raw, &studies, &[]));
+    // G0/G1/G6/G8 cannot be attested here, so the overall gate is not met; the historical flag depends
+    // only on the sealed-evidence gates and is never true when one of those is unmet.
+    assert!(!verdict.final_gate_qualified);
+    let sealed = ["G2", "G3", "G4", "G5", "G7", "G9"];
+    let expected = verdict
+        .gates
+        .iter()
+        .filter(|g| sealed.contains(&g.gate))
+        .all(|g| g.accepted);
+    assert_eq!(verdict.historical_evidence_qualified, expected);
+}
