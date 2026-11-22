@@ -18,7 +18,7 @@ pub const MIN_PAIRS: usize = 3;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IdentityRef {
-    pub pid: u32,
+    pub pid: stutter_core::ids::Pid,
     pub start_ticks: u64,
     pub uid: u32,
 }
@@ -80,7 +80,7 @@ pub fn verify(
     let process_of = |slot: u32| processes.iter().find(|process| process.slot == slot);
     let same = |slot: u32, identity: &IdentityRef| {
         process_of(slot).is_some_and(|process| {
-            process.pid.as_u32() == identity.pid
+            process.pid == identity.pid
                 && process.start_ticks == identity.start_ticks
                 && process.uid == identity.uid
         })

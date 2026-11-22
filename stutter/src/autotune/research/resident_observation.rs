@@ -20,7 +20,7 @@ pub const MIN_RUNNABLE_EVENTS: u64 = 1000;
 #[serde(deny_unknown_fields)]
 pub struct Observation {
     pub slot: u32,
-    pub pid: u32,
+    pub pid: stutter_core::ids::Pid,
     pub start_ticks: u64,
     pub uid: u32,
     pub renderer_bound: bool,
@@ -51,7 +51,7 @@ pub fn verify(bytes: &[u8], processes: &[AttemptProcess]) -> Result<(), &'static
         let (Some(one), None) = (mine.next(), mine.next()) else {
             return Err("ResidentObservationMissingForAnAttempt");
         };
-        if one.pid != process.pid.as_u32()
+        if one.pid != process.pid
             || one.start_ticks != process.start_ticks
             || one.uid != process.uid
         {

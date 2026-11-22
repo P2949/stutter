@@ -184,3 +184,23 @@ fn g3_needs_the_mandatory_resident_observation_whether_or_not_any_direct_frame_r
         2
     );
 }
+
+#[test]
+fn preparation_requires_a_live_nonterminal_lease_and_terminal_verification_requires_release() {
+    let mut lease = LeaseFacts {
+        chain_valid: true,
+        transitions_valid: true,
+        header_matches_intent: true,
+        terminal: false,
+        for_this_campaign: true,
+        owner_live: Some(true),
+        admission: ADMITTED,
+    };
+    assert!(lease_blockers(Some(lease), true).is_empty());
+    assert!(lease_blockers(Some(lease), false).contains(&"LeaseNotSettled"));
+    lease.owner_live = Some(false);
+    assert!(lease_blockers(Some(lease), true).contains(&"LeaseOwnerNotHeld"));
+    lease.terminal = true;
+    assert!(lease_blockers(Some(lease), false).is_empty());
+    assert!(lease_blockers(Some(lease), true).contains(&"LeaseAlreadyTerminal"));
+}
