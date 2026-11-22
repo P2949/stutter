@@ -28,7 +28,15 @@ fn unit() -> LongWorkUnit {
     LongWorkUnit {
         id: "save-a-route-1".into(),
         duration_seconds: 1200,
-        definition_sha256: "a".repeat(64),
+        definition_sha256: crate::autotune::research::route_driver::definition_sha256_of(
+            &[("loading", 120), ("travel", 600), ("combat", 480)].map(|(phase, seconds)| {
+                crate::autotune::research::route_driver::RouteStep {
+                    phase: phase.into(),
+                    seconds,
+                }
+            }),
+            "",
+        ),
     }
 }
 
@@ -129,14 +137,17 @@ fn build_with<D: LongSessionDriver + Send + 'static>(
     inner.process = Some(game());
     inner.treatment = Some(crate::autotune::research::Treatment::On);
     let host = LongAttemptHost::new(inner, driver);
-    let mut now = parent.issued_unix_seconds + 1;
+    let base = parent.issued_unix_seconds + 1;
+    let mut calls = 0u64;
     let attempts = DriverStudyAttempts::new(
         File::open(root.path()).unwrap(),
         parent.clone(),
         Box::new(host),
+        // A real route is polled every two seconds for twenty minutes, so the controller's own clock is read
+        // far more often than once per second of the study; it advances one second per 64 reads here.
         Box::new(move || {
-            now += 1;
-            now
+            calls += 1;
+            base + calls / 64
         }),
         Box::new(|| Ok(())),
         Box::new(|_| std::path::PathBuf::from("/nonexistent")),
@@ -168,7 +179,7 @@ fn act(gate: &Shared, parent: &ResearchIntentV1) {
 
 #[test]
 fn a_long_action_study_qualifies_on_its_session_record_and_the_gates_proven_restoration() {
-    let (root, mut runner, study, gate, parent) = build(&"a".repeat(64));
+    let (root, mut runner, study, gate, parent) = build(&unit().definition_sha256);
     assert_eq!(runner.poll(&study, 100).unwrap(), None);
     act(&gate, &parent);
     let outcome = run_to_end(&mut runner, &study);
@@ -230,7 +241,7 @@ impl crate::autotune::research::route_driver::RouteInput for CountingInput {
 fn the_real_route_driver_plays_the_unit_through_the_host_and_the_study_qualifies() {
     use crate::autotune::research::route_driver::{RouteDriver, RouteStep};
     let phases = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-    // Time moves 5 s per look at the clock, the most the driver allows between polls.
+    // Time moves 2 s per look at the clock, the most the driver allows between polls.
     let mut now = 50_000u64;
     let route = [("loading", 120), ("travel", 600), ("combat", 480)]
         .into_iter()
@@ -243,7 +254,7 @@ fn the_real_route_driver_plays_the_unit_through_the_host_and_the_study_qualifies
         CountingInput(phases.clone()),
         route,
         Box::new(move || {
-            now += 5;
+            now += 2;
             now
         }),
     );
@@ -284,7 +295,7 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
     use crate::autotune::research::{
         child_judgement::action_replay, report::AttemptEvidenceV1, treatment::treatments_of,
     };
-    let (root, mut runner, study, gate, parent) = build(&"a".repeat(64));
+    let (root, mut runner, study, gate, parent) = build(&unit().definition_sha256);
     assert_eq!(runner.poll(&study, 100).unwrap(), None);
     act(&gate, &parent);
     let outcome = run_to_end(&mut runner, &study);
@@ -298,7 +309,7 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
     // One distinct game process per attempt, as a real campaign has.
     let evidence: BTreeMap<u32, AttemptEvidenceV1> = (0..schedule.len() as u32)
         .map(|slot| {
-            let mut record = session(&"a".repeat(64));
+            let mut record = session(&unit().definition_sha256);
             record.process = SessionProcess {
                 pid: stutter_core::ids::Pid::new(5000 + slot),
                 start_ticks: 100 + u64::from(slot),
@@ -384,7 +395,7 @@ fn a_study_in_which_the_action_was_never_applied_is_a_replayable_justified_abste
     use crate::autotune::research::{
         child_judgement::verify_qualification, child_ledger::Disposition,
     };
-    let (root, mut runner, study, _gate, parent) = build(&"a".repeat(64));
+    let (root, mut runner, study, _gate, parent) = build(&unit().definition_sha256);
     assert_eq!(runner.poll(&study, 100).unwrap(), None);
     // No `act`: the controller saw nothing to do for the whole study.
     let outcome = run_to_end(&mut runner, &study);
@@ -419,7 +430,7 @@ fn a_study_in_which_the_action_was_never_applied_is_a_replayable_justified_abste
 /// A long session's sealed placeholder FPS is never analysed as a measurement.
 #[test]
 fn a_long_action_study_reports_no_numeric_result_from_its_placeholder_fps() {
-    let (root, mut runner, study, gate, parent) = build(&"a".repeat(64));
+    let (root, mut runner, study, gate, parent) = build(&unit().definition_sha256);
     assert_eq!(runner.poll(&study, 100).unwrap(), None);
     act(&gate, &parent);
     run_to_end(&mut runner, &study);

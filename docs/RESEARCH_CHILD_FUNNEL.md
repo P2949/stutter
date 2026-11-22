@@ -595,3 +595,8 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - `Verdict.qualification_scope`: `QualifiedEndToEnd`, `QualifiedWithUnobservedFeatures` (FeatureNotObservable), `QualifiedWithExcludedOptionalFeatures` (no eligible source) or `QualifiedWithJustifiedAbstention`.
 - Crosswalk rows now carry `planned_closure` (the role, not a result), `observed_disposition` (`NotObservedInThisCampaign` unless the campaign supplies a digest of its own evidence via `build_rows_observed`) and `observed_source_sha256`. The bundle supplies none yet, so no row claims an observation.
 - Tests that sealed native results under tiny evidence caps now use realistic caps, because admission counts the archive.
+
+## Fifteenth audit P4: CP-LONG definition and delivery timing
+
+- `RouteDriver::definition_sha256` hashes the route (phase names and lengths in order) and the input's own key script (`RouteInput::script_sha256`, a digest of every step's time, key and direction for `ScriptedInput`). `start` refuses a unit whose `definition_sha256` is another one (`BlockedRouteDoesNotMatchTheUnit`), so the unit's frozen definition is derived from what is actually played, not copied.
+- `MAX_POLL_GAP_SECONDS` is now 2 and `ScriptedInput` fails a step delivered more than `MAX_STEP_LATENESS_MS` (2000) after its time with `LongInputLate`, releasing every held key first. Sub-second timing is still bounded by polling, not observed at a device; there is still no physical backend and none is built while the only desktop is the live Hyprland session.

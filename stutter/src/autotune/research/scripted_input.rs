@@ -82,6 +82,10 @@ const EV_KEY: u16 = 1;
 const SYN_REPORT: u16 = 0;
 /// `struct input_event` on 64-bit little-endian Linux: timeval (two i64), type, code, value.
 pub const EVENT_BYTES: usize = 24;
+/// A key step more than this late was not delivered when the route said, so the session fails rather than
+/// credit a phase whose inputs arrived out of time.
+pub const MAX_STEP_LATENESS_MS: u64 = 2_000;
+
 const _: () = assert!(std::mem::size_of::<usize>() == 8 && cfg!(target_endian = "little"));
 
 /// A key transition followed by the synchronization report that makes it take effect.
@@ -168,6 +172,10 @@ impl<S: EventSink> RouteInput for ScriptedInput<S> {
             if step.at_ms > elapsed_ms {
                 break;
             }
+            if elapsed_ms - step.at_ms > MAX_STEP_LATENESS_MS {
+                self.release_all();
+                return Err("LongInputLate");
+            }
             if let Err(code) = self.send(step.key, step.down) {
                 self.release_all();
                 return Err(code);
@@ -185,6 +193,22 @@ impl<S: EventSink> RouteInput for ScriptedInput<S> {
 
     fn released(&self) -> bool {
         self.held.is_empty()
+    }
+
+    fn script_sha256(&self) -> String {
+        let mut text = String::new();
+        for script in &self.scripts {
+            text.push_str(&format!("phase:{}\n", script.phase));
+            for step in &script.steps {
+                text.push_str(&format!(
+                    "{}:{}:{}\n",
+                    step.at_ms,
+                    step.key.code(),
+                    step.down
+                ));
+            }
+        }
+        stutter_core::hash::sha256_hex(text.as_bytes())
     }
 }
 

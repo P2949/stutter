@@ -32,6 +32,11 @@ pub trait RouteInput: Send {
     }
     /// The route is over or abandoned: stop sending anything.
     fn stop(&mut self);
+    /// SHA-256 (hex) of the key script this input plays, so the route and the inputs it sends are one frozen
+    /// definition; empty for an input with no script of its own.
+    fn script_sha256(&self) -> String {
+        String::new()
+    }
     /// Whether, after `stop`, every input this backend sent is known to have been released. A backend whose
     /// release writes can fail must say so; a session then fails rather than passing as clean.
     fn released(&self) -> bool {
@@ -54,7 +59,18 @@ impl RouteInput for UnavailableInput {
 
 /// The longest the controller may go between two polls while the route is playing. A longer silence means
 /// inputs scheduled in it were not delivered when planned, so the session fails instead of crediting phases.
-pub(super) const MAX_POLL_GAP_SECONDS: u64 = 5;
+pub(super) const MAX_POLL_GAP_SECONDS: u64 = 2;
+
+/// The definition digest of a route and its script.
+pub fn definition_sha256_of(route: &[RouteStep], script_sha256: &str) -> String {
+    let mut text = String::from("stutter-long-route-v1\n");
+    for step in route {
+        text.push_str(&format!("{}:{}\n", step.phase, step.seconds));
+    }
+    text.push_str("script:");
+    text.push_str(script_sha256);
+    stutter_core::hash::sha256_hex(text.as_bytes())
+}
 
 struct Running {
     unit_id: String,
@@ -77,6 +93,12 @@ pub struct RouteDriver<I: RouteInput> {
 }
 
 impl<I: RouteInput> RouteDriver<I> {
+    /// The digest the work unit must carry for this route and these inputs: phase names and lengths in order,
+    /// then the input's own script. A unit that names another definition is not this route.
+    pub fn definition_sha256(&self) -> String {
+        definition_sha256_of(&self.route, &self.input.script_sha256())
+    }
+
     pub fn new(input: I, route: Vec<RouteStep>, clock: Box<dyn FnMut() -> u64 + Send>) -> Self {
         Self {
             input,
@@ -110,6 +132,10 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
     fn start(&mut self, unit: &LongWorkUnit) -> Result<(), &'static str> {
         if !self.input.available() {
             return Err("BlockedNoLongSessionDriver");
+        }
+        // The unit names a definition; this is only that session if route and inputs hash to it.
+        if unit.definition_sha256 != self.definition_sha256() {
+            return Err("BlockedRouteDoesNotMatchTheUnit");
         }
         // The route must be exactly the unit's authorized length, never a shorter one passed off as it.
         if self.route.is_empty() || self.total() != u64::from(unit.duration_seconds) {

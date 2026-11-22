@@ -38,8 +38,13 @@ fn unit() -> LongWorkUnit {
     LongWorkUnit {
         id: "save-a-route-1".into(),
         duration_seconds: 1200,
-        definition_sha256: "a".repeat(64),
+        definition_sha256: definition(),
     }
+}
+
+/// The definition of `route()` played by a scriptless input.
+fn definition() -> String {
+    definition_sha256_of(&route(), "")
 }
 
 fn route() -> Vec<RouteStep> {
@@ -92,14 +97,14 @@ fn the_route_is_played_phase_by_phase_on_the_clock_and_the_record_is_what_happen
     // Mid-route: the travel phase has begun, nothing is complete.
     let mut at = 10_000;
     while at < 10_130 {
-        at += 5;
+        at += 2;
         clock.store(at, Ordering::SeqCst);
         assert_eq!(driver.poll(), LongProgress::Running);
     }
     assert_eq!(sent.lock().unwrap().phases, ["loading", "travel"]);
     // Polled within the bound the whole way, the route completes at its true boundaries.
     let record = loop {
-        at += 5;
+        at += 2;
         clock.store(at, Ordering::SeqCst);
         match driver.poll() {
             LongProgress::Running => {}
@@ -199,7 +204,7 @@ fn an_input_the_backend_refuses_and_an_abort_both_stop_sending_inputs() {
     refusing.poll();
     let mut at = 0;
     let refused = loop {
-        at += 5;
+        at += 2;
         clock.store(at, Ordering::SeqCst);
         match refusing.poll() {
             LongProgress::Running => {}
@@ -269,7 +274,7 @@ fn a_session_whose_inputs_cannot_be_shown_released_never_completes_clean() {
     driver.poll();
     let mut at = 0;
     let result = loop {
-        at += 5;
+        at += 2;
         clock.store(at, Ordering::SeqCst);
         match driver.poll() {
             LongProgress::Running => {}
@@ -280,4 +285,14 @@ fn a_session_whose_inputs_cannot_be_shown_released_never_completes_clean() {
     let mut abandoned = RouteDriver::new(StuckKey, route(), Box::new(|| 0));
     abandoned.start(&unit()).unwrap();
     assert!(abandoned.abort().is_err());
+}
+
+#[test]
+fn a_unit_naming_another_definition_than_the_route_and_its_script_never_starts() {
+    let (mut driver, _, _) = driver(true);
+    let mut other = unit();
+    other.definition_sha256 = "f".repeat(64);
+    assert_eq!(driver.start(&other), Err("BlockedRouteDoesNotMatchTheUnit"));
+    assert_eq!(driver.definition_sha256(), definition());
+    driver.start(&unit()).unwrap();
 }

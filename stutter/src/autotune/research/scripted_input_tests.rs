@@ -101,7 +101,7 @@ fn steps_are_sent_when_their_time_comes_and_never_twice() {
     input.tick(2_500).unwrap();
     input.tick(2_600).unwrap();
     assert_eq!(decoded(&wire.0.lock().unwrap()), [(17, true), (42, true)]);
-    input.tick(9_000).unwrap();
+    input.tick(6_000).unwrap();
     assert_eq!(
         decoded(&wire.0.lock().unwrap()),
         [(17, true), (42, true), (42, false)]
@@ -185,7 +185,7 @@ fn the_route_driver_feeds_the_scripted_input_its_time_and_everything_is_released
     let unit = LongWorkUnit {
         id: "u".into(),
         duration_seconds: 1200,
-        definition_sha256: "a".repeat(64),
+        definition_sha256: driver.definition_sha256(),
     };
     driver.start(&unit).unwrap();
     driver.observe_process(Some(SessionProcess {
@@ -195,12 +195,12 @@ fn the_route_driver_feeds_the_scripted_input_its_time_and_everything_is_released
     }));
     driver.poll(); // sighted: the travel phase begins and W goes down
     assert_eq!(decoded(&wire.0.lock().unwrap()), [(17, true)]);
-    clock.store(1_000 + 3, Ordering::SeqCst); // three seconds in: Shift is due (2 s)
+    clock.store(1_000 + 2, Ordering::SeqCst); // two seconds in: Shift is due (2 s)
     driver.poll();
     assert_eq!(decoded(&wire.0.lock().unwrap()).last(), Some(&(42, true)));
-    let mut at = 1_003;
+    let mut at = 1_002;
     let finished = loop {
-        at += 5; // polled within the bound the whole way
+        at += 2; // polled within the bound the whole way
         clock.store(at, Ordering::SeqCst);
         match driver.poll() {
             LongProgress::Running => {}
@@ -246,4 +246,45 @@ fn a_key_whose_release_was_not_acknowledged_stays_held_and_is_reported() {
     clean.tick(1_000).unwrap();
     clean.stop();
     assert!(clean.released());
+}
+
+#[test]
+fn a_step_delivered_later_than_the_bound_fails_the_input_and_releases_everything() {
+    let wire = Wire::default();
+    let mut input = ScriptedInput::new(wire.clone(), script());
+    input.begin_phase("travel").unwrap();
+    // Shift was due at 2 s; looking again only at 9 s delivers it far too late.
+    assert_eq!(input.tick(9_000), Err("LongInputLate"));
+    assert!(input.released());
+    let all = decoded(&wire.0.lock().unwrap());
+    assert_eq!(
+        all.iter().filter(|(_, down)| *down).count(),
+        all.iter().filter(|(_, down)| !*down).count()
+    );
+}
+
+#[test]
+fn the_definition_digest_follows_the_phases_their_lengths_and_the_key_script() {
+    use crate::autotune::research::route_driver::{RouteStep, definition_sha256_of};
+    let step = |phase: &str, seconds| RouteStep {
+        phase: phase.into(),
+        seconds,
+    };
+    let route = vec![step("travel", 600), step("combat", 600)];
+    let script_a = ScriptedInput::new(Wire::default(), script()).script_sha256();
+    let mut changed = script();
+    changed[0].steps[1].at_ms += 1;
+    let script_b = ScriptedInput::new(Wire::default(), changed).script_sha256();
+    assert_ne!(script_a, script_b);
+    let base = definition_sha256_of(&route, &script_a);
+    assert_eq!(base, definition_sha256_of(&route, &script_a));
+    assert_ne!(base, definition_sha256_of(&route, &script_b));
+    assert_ne!(
+        base,
+        definition_sha256_of(&[step("travel", 601), step("combat", 599)], &script_a)
+    );
+    assert_ne!(
+        base,
+        definition_sha256_of(&[step("combat", 600), step("travel", 600)], &script_a)
+    );
 }
