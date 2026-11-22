@@ -412,3 +412,42 @@ fn the_diagnosis_oracle_file_carries_the_scored_cases_or_the_reason_there_are_no
     let oracle: Value = serde_json::from_slice(&files["diagnosis-oracle.json"]).unwrap();
     assert_eq!(oracle["scored"]["reason"], "NoOracleCases");
 }
+
+#[test]
+fn the_bundle_carries_the_complete_thirty_four_row_crosswalk_with_no_validated_benefit() {
+    let files = build(&json!({}), &json!({}));
+    let (_, bytes) = files
+        .iter()
+        .find(|(name, _)| *name == "capability-matrix.json")
+        .expect("capability matrix");
+    let matrix: Value = serde_json::from_slice(bytes).unwrap();
+    let crosswalk = &matrix["crosswalk_34"];
+    assert_eq!(crosswalk["count"], 34, "{crosswalk}");
+    assert_eq!(crosswalk["rows"].as_array().unwrap().len(), 34);
+    assert!(
+        !crosswalk.to_string().contains("GameBenefitValidated\"")
+            || crosswalk["note"]
+                .as_str()
+                .unwrap()
+                .contains("not GameBenefitValidated")
+    );
+}
+
+#[test]
+fn host_dependent_gates_are_reported_apart_from_the_historical_ones() {
+    let verdict = json!({ "gates": [
+        { "gate": "G0", "accepted": false }, { "gate": "G2", "accepted": true },
+        { "gate": "G8", "accepted": false }, { "gate": "G9", "accepted": true },
+    ]});
+    let scope = gate_scope(&verdict);
+    let names = |key: &str| -> Vec<String> {
+        scope[key]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| g["gate"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(names("historical_sealed_evidence"), ["G2", "G9"]);
+    assert_eq!(names("current_host_at_verification"), ["G0", "G8"]);
+}

@@ -552,3 +552,8 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 - G5 accepts an action study that ended `Unqualified` with reason `ActionNotIndicated` only beside a passing control (note `ActionAbstainedNoPressure`); without the control the blocker is the control's own reason. Any other refusal is never a justified no-op.
 - Not done: nothing produces `ActionNotIndicated` or the receipt yet; both belong to a physical run, so G5 cannot pass offline.
 - Verified this pass: `cargo test -p xtask` (620+1 passed), `release-check` PASS, NixosConf research remote is e2f5ff37 pinning Stutter 9ceaef38 / binary 8d0f57ce.
+
+## Fourteenth audit: bundle crosswalk and gate scope
+
+- The final bundle's `capability-matrix.json` now carries `crosswalk_34`, the 34 Observed/Tested/Excluded/Blocked closure rows built by `crosswalk::build_rows` from the same embedded ledger (an invalid ledger is reported as `CrosswalkInvalid`, never a shorter table).
+- It also carries `gate_scope`: G2–G5, G7, G9 as historical (sealed evidence) and G0, G1, G6, G8 as current-host at verification time, with a note that a later host change never rewrites the historical result. The per-gate verdict itself is unchanged.

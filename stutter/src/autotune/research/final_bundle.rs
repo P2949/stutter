@@ -110,6 +110,56 @@ fn integration_matrix() -> Value {
     })
 }
 
+/// The 34-row Observed/Tested/Excluded/Blocked closure of every integration dossier, derived from the same
+/// embedded ledger. A ledger that does not yield exactly 34 known rows is reported as such, never as a
+/// shorter table; no row is a game-benefit validation.
+fn crosswalk() -> Value {
+    match super::crosswalk::build_rows(COVERAGE) {
+        Ok(rows) => {
+            let mut counts = std::collections::BTreeMap::<String, u32>::new();
+            for row in &rows {
+                *counts.entry(format!("{:?}", row.closure)).or_default() += 1;
+            }
+            json!({
+                "count": rows.len(),
+                "closure_counts": counts,
+                "rows": rows,
+                "note": "a closed row is not GameBenefitValidated; only a qualified study below can say a benefit was measured",
+            })
+        }
+        Err(error) => json!({ "status": "CrosswalkInvalid", "error": format!("{error:?}") }),
+    }
+}
+
+/// Which gates rest on the campaign's own sealed evidence and which on the host as it is when this bundle is
+/// made. A later reboot, package update or Steam change can move the second group without changing what the
+/// campaign measured, so they are reported apart and never folded into one verdict.
+fn gate_scope(verdict: &Value) -> Value {
+    const CURRENT_HOST: [&str; 4] = ["G0", "G1", "G6", "G8"];
+    let state = |current: bool| -> Vec<Value> {
+        verdict
+            .get("gates")
+            .and_then(Value::as_array)
+            .map(|gates| {
+                gates
+                    .iter()
+                    .filter(|gate| {
+                        gate["gate"]
+                            .as_str()
+                            .is_some_and(|name| CURRENT_HOST.contains(&name) == current)
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    json!({
+        "historical_sealed_evidence": state(false),
+        "current_host_at_verification": state(true),
+        "note": "current-host gates describe deployability today and never rewrite the historical result",
+    })
+}
+
 /// A qualified action study without its receipts is not a qualified action.
 fn action_status(status: &'static str, receipts: &[Value]) -> &'static str {
     if status == "Qualified" && receipts.is_empty() {
@@ -338,6 +388,8 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
             "capability-matrix.json",
             pretty(&json!({
                 "integration_coverage": integration_matrix(),
+                "crosswalk_34": crosswalk(),
+                "gate_scope": gate_scope(&verdict),
                 "feature_dispositions": feature_dispositions(),
                 "child_studies": response.get("child_studies"),
             })),
