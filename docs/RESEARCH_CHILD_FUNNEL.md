@@ -516,3 +516,8 @@ a game that is GPU bound: only the GPU-bound game puts it outside the autonomous
 (`NotInSupportRegistry`), so the planner never proposes it where moving CPU threads cannot help. What this
 cannot show is the measured control on the real game: the action applied to a GPU-bound run producing no
 benefit. That needs a launched game and a controlled GPU load, which the GPU incident halt forbids.
+
+## Fourteenth audit: G3 and G7 acceptance paths
+
+- G3: `telemetry_summary` now counts only attempts that have a direct-frame receipt. A campaign with no receipts at all is the optional probe not collected (accepted with the note `DirectFrameEvidenceNotCollected`); a receipt that exists but is duplicated, conflicting, unbound or too thin still rejects with `FrameSourceNotEligible`. The mandatory game-scoped CPU/GPU/runnable/PSI/ownership observation is not produced offline and stays a physical item.
+- G7: a feature study whose treatment reached the game but whose result carries no report for the factor (`FeatureNotObservable`) is an exclusion by name, never a qualification. Reported-off, unproven activation and missing function proof remain unresolved.

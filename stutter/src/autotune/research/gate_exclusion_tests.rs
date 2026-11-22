@@ -61,3 +61,34 @@ fn nothing_else_blocked_is_acceptable() {
     }));
     assert!(!resolved(&study(feature, None)));
 }
+
+#[test]
+fn a_feature_that_reached_the_game_but_has_no_function_report_is_excluded_by_name_only() {
+    let feature = Stage::Feature(ResearchFactor::Fsr4);
+    let unobservable = Disposition {
+        reason: "FeatureNotObservable".into(),
+        ..study(feature, Some(StudyResult::Unqualified))
+    };
+    assert!(legitimately_excluded(&unobservable) && resolved(&unobservable));
+    // Reported off, unproven activation or missing function proof are never exclusions.
+    for reason in [
+        "FeatureActivatedButNotFunctional",
+        "FeatureFunctionalUnproven",
+        "FeatureActivationUnproven",
+    ] {
+        let study = Disposition {
+            reason: reason.into(),
+            ..study(feature, Some(StudyResult::Unqualified))
+        };
+        assert!(!resolved(&study), "{reason}");
+    }
+    // Never for an action or comparison study.
+    let action = Disposition {
+        reason: "FeatureNotObservable".into(),
+        ..study(
+            Stage::Action(ResearchAction::CpuAffinityProfile),
+            Some(StudyResult::Unqualified),
+        )
+    };
+    assert!(!resolved(&action));
+}

@@ -459,8 +459,8 @@ mod telemetry {
     fn each_completed_attempt_needs_exactly_one_eligible_game_bound_receipt_that_names_it() {
         // Nothing completed: no claim either way.
         assert_eq!(summary(vec![child(&[], None)]), None);
-        // Completed attempts with no receipts are not eligible, never vacuously fine.
-        assert_eq!(summary(vec![child(&[0, 1], None)]), Some((0, 2)));
+        // Completed attempts with no receipts: the optional probe was not collected, which is not a pass.
+        assert_eq!(summary(vec![child(&[0, 1], None)]), None);
         // One receipt per attempt, each naming its own attempt.
         let both = json!([eligible(0), eligible(1)]);
         assert_eq!(summary(vec![child(&[0, 1], Some(both))]), Some((2, 2)));
@@ -472,7 +472,7 @@ mod telemetry {
         let duplicated = json!([eligible(0), eligible(0)]);
         assert_eq!(
             summary(vec![child(&[0, 1], Some(duplicated))]),
-            Some((0, 2))
+            Some((0, 1))
         );
         // Two receipts for one attempt conflict: neither counts.
         let conflicting = json!([
@@ -483,7 +483,7 @@ mod telemetry {
         // A receipt for an attempt that did not complete, or one naming no attempt, counts for nothing.
         let stray =
             json!([eligible(7), { "frame_verdict": "Eligible", "source_bound_to_game": true }]);
-        assert_eq!(summary(vec![child(&[0], Some(stray))]), Some((0, 1)));
+        assert_eq!(summary(vec![child(&[0], Some(stray))]), None);
         // An ineligible or unbound receipt does not count.
         let weak = json!([
             { "attempt": 0, "frame_verdict": "Lossy", "source_bound_to_game": true },
@@ -496,7 +496,7 @@ mod telemetry {
                 child(&[0], Some(json!([eligible(0)]))),
                 child(&[0, 1], None)
             ]),
-            Some((1, 3))
+            Some((1, 1))
         );
     }
 

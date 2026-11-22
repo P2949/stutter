@@ -127,11 +127,11 @@ impl ChildrenVerification {
         !self.children.is_empty() && self.children.iter().all(|child| child.runtime_matched)
     }
 
-    /// (attempts whose receipt shows an eligible frame source bound to the game, completed attempts)
-    /// over every verified child that completed any attempt; `None` when no child did. A child with
-    /// completed attempts but no receipts counts its attempts as not eligible.
+    /// (attempts whose receipt shows an eligible frame source bound to the game, attempts that have
+    /// any receipt) over every verified child; `None` when no attempt has one, which means the
+    /// optional direct-frame probe was not collected (not a failure, and not a pass either).
     pub fn telemetry_summary(&self) -> Option<(u32, u32)> {
-        let (mut eligible, mut completed) = (0u32, 0u32);
+        let (mut eligible, mut collected) = (0u32, 0u32);
         for child in &self.children {
             if child.completed_attempts.is_empty() {
                 continue;
@@ -143,7 +143,6 @@ impl ChildrenVerification {
                 .map(|items| items.iter().collect())
                 .unwrap_or_default();
             for index in &child.completed_attempts {
-                completed = completed.saturating_add(1);
                 // One-to-one: exactly one receipt names this attempt, and it is eligible and bound
                 // to the game. Missing, duplicated or conflicting receipts do not count.
                 let mine: Vec<_> = receipts
@@ -152,6 +151,12 @@ impl ChildrenVerification {
                     .collect();
                 // The receipt must be about the very process the sealed native completion names:
                 // matching only the attempt number would let another process's receipt stand in.
+                // An attempt with no receipt at all had no direct-frame probe (optional) and counts
+                // neither way; one with a receipt must be sound, so a duplicate or bad one is
+                // collected but not eligible.
+                if !mine.is_empty() {
+                    collected = collected.saturating_add(1);
+                }
                 let process = child
                     .completed_processes
                     .iter()
@@ -170,7 +175,7 @@ impl ChildrenVerification {
                 }
             }
         }
-        (completed > 0).then_some((eligible, completed))
+        (collected > 0).then_some((eligible, collected))
     }
 
     /// Whether every holdout child reproduced its confirmation: `Some(true)` when there is at least

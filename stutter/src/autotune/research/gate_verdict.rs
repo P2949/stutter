@@ -65,8 +65,8 @@ pub struct GateInputs<'a> {
     pub child_reports_verified: bool,
     pub restoration_verified: bool,
     pub health_blocked: bool,
-    /// (attempts with an eligible, game-bound frame-source receipt, completed attempts); `None` when
-    /// no attempt completed.
+    /// (attempts with an eligible, game-bound frame-source receipt, attempts that have any receipt);
+    /// `None` when no attempt has one: the optional probe was not collected.
     pub telemetry: Option<(u32, u32)>,
     /// Whether every holdout reproduced its confirmation (`None`: no holdout was judged).
     pub replication: Option<bool>,
@@ -92,8 +92,13 @@ pub struct GateInputs<'a> {
 /// kind of exclusion PLAN allows to stand in for a qualified study; a comparison or action study never is.
 pub(super) fn legitimately_excluded(study: &Disposition) -> bool {
     matches!(study.stage, Stage::Feature(_))
-        && study.result == Some(StudyResult::Blocked)
-        && study.reason == "BlockedNoEligibleSource"
+        && (study.result == Some(StudyResult::Blocked) && study.reason == "BlockedNoEligibleSource"
+            // The treatment demonstrably reached the game, but the game's own result carries no
+            // report for this factor, so its function cannot be observed. That is an exclusion with
+            // its reason named (never a qualification); a feature that reached the game and was
+            // reported off, or whose activation is unproven, stays unresolved.
+            || study.result == Some(StudyResult::Unqualified)
+                && study.reason == "FeatureNotObservable")
 }
 
 /// Whether a study reached an acceptable terminal disposition: qualified, or a legitimate exclusion.
