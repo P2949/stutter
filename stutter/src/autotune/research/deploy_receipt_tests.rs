@@ -378,3 +378,11 @@ fn the_deployed_binary_must_be_the_build_that_froze_the_campaign() {
         );
     }
 }
+
+#[test]
+fn a_present_malformed_deploy_receipt_attests_nothing_instead_of_falling_back_to_an_older_one() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(read_latest(dir.path()).is_none());
+    std::fs::write(dir.path().join("deploy-receipt-9.json"), b"{ no").unwrap();
+    assert!(read_latest(dir.path()).is_none());
+}

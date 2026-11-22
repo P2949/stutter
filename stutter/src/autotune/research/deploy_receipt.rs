@@ -253,25 +253,14 @@ pub fn show(systemctl: &Path, unit: &str) -> anyhow::Result<String> {
 
 /// The newest deploy receipt in a study directory, if one is there and readable.
 pub fn read_latest(study: &Path) -> Option<DeployReceipt> {
-    let mut best: Option<DeployReceipt> = None;
-    for entry in std::fs::read_dir(study).ok()?.flatten() {
-        let name = entry.file_name();
-        let name = name.to_str()?;
-        if !(name.starts_with("deploy-receipt-") && name.ends_with(".json")) {
-            continue;
-        }
-        let Ok(bytes) = std::fs::read(entry.path()) else {
-            continue;
-        };
-        if let Ok(candidate) = serde_json::from_slice::<DeployReceipt>(&bytes)
-            && best
-                .as_ref()
-                .is_none_or(|current| candidate.captured_unix > current.captured_unix)
-        {
-            best = Some(candidate);
-        }
+    // Read anchored and strict: a present receipt that is a link, oversized or malformed leaves nothing attested
+    // rather than falling back to an older one.
+    match super::newest_record::newest(study, "deploy-receipt-", |receipt: &DeployReceipt| {
+        receipt.captured_unix
+    }) {
+        super::newest_record::Newest::Found(receipt) => Some(receipt),
+        _ => None,
     }
-    best
 }
 
 /// The units a deployed Stutter must have, each exactly once (by name before the user instance).
