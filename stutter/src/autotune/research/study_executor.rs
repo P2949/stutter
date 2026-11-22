@@ -122,6 +122,13 @@ pub struct AttemptsOutcome {
     /// An action study only: the controller never applied the action during it, nothing was left outstanding, and
     /// that was recorded durably. Not a qualified action; a justified abstention needs the owned-pressure control.
     pub action_not_indicated: bool,
+    /// A comparison study only (confirmation, holdout, matched CachyOS): every arm's paired analysis produced a
+    /// numeric verdict. A structurally complete study whose analysis was refused (too few valid pairs, drifted
+    /// context) compared nothing, so it is not a qualified comparison. `None` for any other study.
+    pub comparison_valid: Option<bool>,
+    /// An action study only: a valid paired GameRunnableLatency record (`action_latency`) accompanies the safety
+    /// evidence. Applying and restoring an action is not a measurement of its effect.
+    pub action_metric_valid: bool,
     /// A feature study only: every completed attempt's own treatment (factor on or off) was observed in
     /// the game process's environment. This is activation of the control, not proof that the feature
     /// works; `None` for any other study.
@@ -363,6 +370,8 @@ pub(super) fn judge(study: &ChildStudy, outcome: &AttemptsOutcome) -> StudyRun {
         || outcome.conformance.contains(&ProfileConformance::Unproven)
     {
         run(StudyResult::Unqualified, used, "UnprovenContext", false)
+    } else if outcome.comparison_valid == Some(false) {
+        run(StudyResult::Unqualified, used, "ComparisonRefused", false)
     } else if matches!(study.stage, Stage::Pilot) {
         match pilot_rule(outcome) {
             Ok(rule) => StudyRun {
@@ -385,7 +394,8 @@ fn pilot_rule(outcome: &AttemptsOutcome) -> Result<FrozenConfirmationRule, &'sta
 /// A feature or action study is not qualified by benchmark attempts alone.
 fn stage_gap(study: &ChildStudy, outcome: &AttemptsOutcome) -> Option<&'static str> {
     if outcome.stage_evidence == Some(true) {
-        return None;
+        return (matches!(study.stage, Stage::Action(_)) && !outcome.action_metric_valid)
+            .then_some("ActionMetricUnavailable");
     }
     match study.stage {
         // Activation (the treatment reached the game) and function (the feature works) are
@@ -594,3 +604,12 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
 #[cfg(test)]
 #[path = "study_executor_tests.rs"]
 mod tests;
+
+/// Whether a comparison study's every arm produced a numeric analysis; `None` for a study that compares nothing.
+pub(super) fn comparison_valid(stage: Stage, arms: &[super::report::ArmResult]) -> Option<bool> {
+    matches!(
+        stage,
+        Stage::Confirm | Stage::Holdout | Stage::MatchedCachyOs
+    )
+    .then(|| !arms.is_empty() && arms.iter().all(|arm| arm.numeric_verdict.is_some()))
+}

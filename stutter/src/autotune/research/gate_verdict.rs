@@ -75,6 +75,8 @@ pub struct GateInputs<'a> {
     /// G5: the owned-pressure control receipt status (`pressure_control::status`); only consulted when an
     /// action study ended as a justified no-op.
     pub pressure_control: Result<(), &'static str>,
+    /// G3: the mandatory resident game-scoped observation of every measuring child (`resident_observation`).
+    pub resident_observation: Result<(), &'static str>,
     /// G2: the player's saves and cloud copy are unchanged since before the campaign (`protected_state`).
     pub protected_state: Result<(), &'static str>,
     /// G0: the kernel, CPU topology and GPU are the ones recorded before the campaign (`host_hardware`).
@@ -326,11 +328,16 @@ fn gates_inner(inputs: &GateInputs<'_>, preparing: bool) -> Vec<GateVerdict> {
     } else {
         Vec::new()
     };
-    let g3 = match inputs.telemetry {
+    let mut g3 = match inputs.telemetry {
         None => Vec::new(),
         Some((eligible, completed)) if eligible < completed => vec!["FrameSourceNotEligible"],
         Some(_) => Vec::new(),
     };
+    // Independently of the optional direct frames, the resident runtime must have observed the real game: the
+    // mandatory sealed observation of every measuring attempt. Without it G3 has nothing to stand on.
+    if let Err(reason) = inputs.resident_observation {
+        g3.push(reason);
+    }
 
     // G7: effective feature activation per factor (a qualified feature study carries that proof).
     let g7 = study_blockers(studies, feature, "NoFeatureStudy", "FeatureNotQualified");

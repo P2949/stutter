@@ -247,6 +247,40 @@ pub(super) fn study_file(
     serde_json::from_slice(&read_private(&dir, file, uid).ok()?).ok()
 }
 
+/// One child's mandatory resident observation against its completed attempts' processes.
+pub(super) fn resident_status(
+    studies: &File,
+    name: &str,
+    uid: u32,
+    processes: &[AttemptProcess],
+) -> Result<(), &'static str> {
+    match study_file_state(studies, name, uid, super::resident_observation::FILE) {
+        FileState::Absent => Err("ResidentObservationNotCollected"),
+        FileState::Invalid => Err("ResidentObservationInvalid"),
+        FileState::Present(value) => super::resident_observation::verify(
+            &serde_json::to_vec(&value).map_err(|_| "ResidentObservationInvalid")?,
+            processes,
+        ),
+    }
+}
+
+/// G3's mandatory input over every child: the first reason any measuring child lacks it, or `Ok`. With no
+/// measuring child there is nothing observed, which is not a pass.
+pub(super) fn resident_summary(children: &[ChildVerification]) -> Result<(), &'static str> {
+    let mut any = false;
+    for child in children {
+        if let Some(status) = child.resident {
+            any = true;
+            status?;
+        }
+    }
+    if any {
+        Ok(())
+    } else {
+        Err("ResidentObservationNotCollected")
+    }
+}
+
 /// The telemetry summary of `ChildrenVerification::telemetry_summary`.
 pub(super) fn telemetry_summary(children: &[ChildVerification]) -> Option<(u32, u32)> {
     let (mut eligible, mut collected) = (0u32, 0u32);

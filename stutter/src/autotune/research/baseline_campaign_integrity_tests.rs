@@ -87,3 +87,120 @@ fn admission_counts_the_archive_and_receipts_the_way_the_final_replay_does() {
         admitted.evidence_bytes
     );
 }
+
+#[test]
+fn a_spend_record_that_claims_less_active_time_than_its_attempts_witnessed_is_found() {
+    let run = run_campaign();
+    assert_eq!(verify(&run).budget_problem, None);
+    let (path, witnessed) = std::fs::read_dir(studies_dir(&run))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter_map(|path| {
+            let evidence = std::fs::File::open(path.join("evidence")).ok()?;
+            let items = crate::autotune::research::report_store::read_evidence(
+                &evidence,
+                crate::syscall::geteuid(),
+            )
+            .ok()?;
+            let seconds: u64 = crate::autotune::research::child_verify_rules::processes_of(&items)
+                .iter()
+                .map(|p| p.completed_unix.saturating_sub(p.started_unix))
+                .sum();
+            (seconds > 0).then_some((path, seconds))
+        })
+        .next()
+        .expect("a study whose attempts witnessed time");
+    let record = path.join("budget.json");
+    let mut spent: crate::autotune::research::campaign_budget::Spent =
+        serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    spent.active_seconds = witnessed - 1;
+    std::fs::set_permissions(&record, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(&record, serde_json::to_vec(&spent).unwrap()).unwrap();
+    let problem = verify(&run).budget_problem.unwrap();
+    assert!(
+        problem.starts_with("BudgetActiveSecondsUnderstated"),
+        "{problem}"
+    );
+}
+
+#[test]
+fn a_comparison_whose_analysis_was_refused_is_not_a_qualified_comparison() {
+    use crate::autotune::research::{
+        child_study::{Stage, StudyResult},
+        report::ArmResult,
+        study_executor::comparison_valid,
+    };
+    let arm = |verdict: Option<&str>| ArmResult {
+        source: crate::autotune::research::ProtonSource::Ge,
+        status: "x".into(),
+        numeric_verdict: verdict.map(str::to_owned),
+        pairs: 4,
+        mean_effect_percent: None,
+        ci_low_percent: None,
+        ci_high_percent: None,
+        rule_sha256: None,
+    };
+    assert_eq!(
+        comparison_valid(Stage::Confirm, &[arm(Some("improved"))]),
+        Some(true)
+    );
+    assert_eq!(
+        comparison_valid(Stage::Holdout, &[arm(Some("equivalent")), arm(None)]),
+        Some(false)
+    );
+    assert_eq!(comparison_valid(Stage::Confirm, &[]), Some(false));
+    assert_eq!(comparison_valid(Stage::Screen, &[arm(None)]), None);
+    // The production-composed campaign's confirmations all produced numeric verdicts, so they still qualify.
+    let run = run_campaign();
+    assert!(
+        run.driver
+            .dispositions()
+            .iter()
+            .all(|d| d.result == Some(StudyResult::Qualified))
+    );
+}
+
+#[test]
+fn the_resident_observation_is_read_from_each_measuring_childs_own_sealed_record() {
+    let run = run_campaign();
+    assert_eq!(
+        verify(&run).resident_summary(),
+        Err("ResidentObservationNotCollected")
+    );
+    // Give every measuring study the observation its attempts would have produced.
+    let uid = crate::syscall::geteuid();
+    for entry in std::fs::read_dir(studies_dir(&run)).unwrap().flatten() {
+        let path = entry.path();
+        let evidence = std::fs::File::open(path.join("evidence")).unwrap();
+        let items = crate::autotune::research::report_store::read_evidence(&evidence, uid).unwrap();
+        let attempts: Vec<_> = crate::autotune::research::child_verify_rules::processes_of(&items)
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "slot": p.slot, "pid": p.pid.as_u32(), "start_ticks": p.start_ticks, "uid": p.uid,
+                    "renderer_bound": true, "cgroup": "0::/app.slice", "cpu_samples": 60,
+                    "gpu_samples": 60, "psi_samples": 60, "runnable_events": 5000,
+                    "owners_identified": true, "quality": "Eligible",
+                })
+            })
+            .collect();
+        let file = path.join("resident-observation.json");
+        std::fs::write(
+            &file,
+            serde_json::to_vec(&serde_json::json!({ "schema": 1, "attempts": attempts })).unwrap(),
+        )
+        .unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    assert_eq!(verify(&run).resident_summary(), Ok(()));
+    // One corrupt record is named, never read as absent.
+    let first = std::fs::read_dir(studies_dir(&run))
+        .unwrap()
+        .flatten()
+        .next()
+        .unwrap()
+        .path();
+    std::fs::write(first.join("resident-observation.json"), b"{ no").unwrap();
+    assert!(verify(&run).resident_summary().is_err());
+}

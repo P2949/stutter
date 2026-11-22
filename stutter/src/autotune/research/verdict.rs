@@ -64,6 +64,8 @@ pub struct VerdictInputs<'a> {
     /// G5: the owned-pressure control receipt status (`pressure_control::status`); only consulted when an
     /// action study ended as a justified no-op.
     pub pressure_control: Result<(), &'static str>,
+    /// G3: the mandatory resident observation status over the children (`ChildrenVerification::resident_summary`).
+    pub child_resident: Result<(), &'static str>,
     /// G2: the player's saves and cloud copy are unchanged since before the campaign (`protected_state`).
     pub protected_state: Result<(), &'static str>,
     /// G0: the kernel, CPU topology and GPU are the ones recorded before the campaign (`host_hardware`).
@@ -143,6 +145,7 @@ fn judge_inner(inputs: &VerdictInputs<'_>, preparing: bool) -> Verdict {
         replication: inputs.child_replication,
         fault_matrix: inputs.fault_matrix,
         pressure_control: inputs.pressure_control,
+        resident_observation: inputs.child_resident,
         protected_state: inputs.protected_state,
         hardware: inputs.hardware,
         control_socket: inputs.control_socket,

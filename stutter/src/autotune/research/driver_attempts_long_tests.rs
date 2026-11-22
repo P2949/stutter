@@ -194,7 +194,10 @@ fn a_long_action_study_qualifies_on_its_session_record_and_the_gates_proven_rest
         ]
     );
     let run = judge(&study, &outcome);
-    assert_eq!((run.result, run.reason), (StudyResult::Qualified, ""));
+    assert_eq!(
+        (run.result, run.reason),
+        (StudyResult::Unqualified, "ActionMetricUnavailable")
+    );
 
     // Independent verification replays the sealed record against the intent's own authorized unit.
     let dir =
@@ -265,7 +268,10 @@ fn the_real_route_driver_plays_the_unit_through_the_host_and_the_study_qualifies
     assert!(outcome.raw_verified && outcome.runtime_matched);
     assert_eq!(outcome.stage_evidence, Some(true));
     let run = judge(&study, &outcome);
-    assert_eq!((run.result, run.reason), (StudyResult::Qualified, ""));
+    assert_eq!(
+        (run.result, run.reason),
+        (StudyResult::Unqualified, "ActionMetricUnavailable")
+    );
     // Every attempt played all three phases of the route.
     assert_eq!(
         phases.load(std::sync::atomic::Ordering::SeqCst),
@@ -299,7 +305,7 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
     assert_eq!(runner.poll(&study, 100).unwrap(), None);
     act(&gate, &parent);
     let outcome = run_to_end(&mut runner, &study);
-    assert_eq!(judge(&study, &outcome).result, StudyResult::Qualified);
+    assert_eq!(judge(&study, &outcome).result, StudyResult::Unqualified);
     let path = root.path().join("studies").join(&study.study_sha256[..16]);
     let dir = std::fs::File::open(&path).unwrap();
     let uid = crate::syscall::geteuid();

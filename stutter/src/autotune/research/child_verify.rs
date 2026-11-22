@@ -14,7 +14,7 @@ use super::{
     ProtonSource, ResearchIntentV1, ResearchJournal,
     child_verify_rules::{
         FileState, action_receipts, attempt_count_matches, completed_attempts, missing_children,
-        receipts_valid, rule_matches_pilot, study_file, study_file_state,
+        receipts_valid, resident_status, rule_matches_pilot, study_file, study_file_state,
     },
     driver::build_schedule,
     report_store::{load_and_verify, read_private},
@@ -55,6 +55,10 @@ pub struct ChildVerification {
     /// receipt must be about. An attempt with no recorded process has nothing to be matched to.
     #[serde(default)]
     pub completed_processes: Vec<AttemptProcess>,
+    /// The mandatory resident observation (`resident_observation`) of this child's completed attempts; `None` for a
+    /// child that measured nothing (initialization).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resident: Option<Result<(), &'static str>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +124,11 @@ impl ChildrenVerification {
     /// (attempts whose receipt shows an eligible frame source bound to the game, attempts that have
     /// any receipt) over every verified child; `None` when no attempt has one, which means the
     /// optional direct-frame probe was not collected (not a failure, and not a pass either).
+    /// G3's mandatory resident-observation status over every measuring child.
+    pub fn resident_summary(&self) -> Result<(), &'static str> {
+        super::child_verify_rules::resident_summary(&self.children)
+    }
+
     pub fn telemetry_summary(&self) -> Option<(u32, u32)> {
         super::child_verify_rules::telemetry_summary(&self.children)
     }
@@ -389,6 +398,8 @@ pub fn verify_children(
             study_file(&studies, child, uid, "report.json")
         })
         .map(|outcome| outcome.name().to_owned());
+        let resident =
+            (!processes.is_empty()).then(|| resident_status(&studies, &name, uid, &processes));
         children.push(match result {
             Ok((raw, report, runtime)) => ChildVerification {
                 study: name,
@@ -401,6 +412,7 @@ pub fn verify_children(
                 prefix_cohort: cohort,
                 replication,
                 telemetry_receipts: telemetry,
+                resident,
                 completed_attempts: completed,
                 completed_processes: processes,
             },
@@ -417,6 +429,7 @@ pub fn verify_children(
                 telemetry_receipts: None,
                 completed_attempts: Vec::new(),
                 completed_processes: Vec::new(),
+                resident: None,
             },
         });
     }

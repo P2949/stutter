@@ -116,6 +116,7 @@ fn a_justified_no_op_resolves_g5_only_beside_a_passing_owned_pressure_control() 
             replication: Some(true),
             fault_matrix: Err("NoFaultMatrixReceipt"),
             pressure_control: control,
+            resident_observation: Ok(()),
             protected_state: Ok(()),
             hardware: Ok(()),
             control_socket: None,
@@ -135,4 +136,51 @@ fn a_justified_no_op_resolves_g5_only_beside_a_passing_owned_pressure_control() 
         ..noop
     };
     assert!(!not_indicated(&refused));
+}
+
+#[test]
+fn g3_needs_the_mandatory_resident_observation_whether_or_not_any_direct_frame_receipt_exists() {
+    let studies = full(Some(StudyResult::Qualified));
+    let g3 = |telemetry: Option<(u32, u32)>, resident: Result<(), &'static str>| {
+        let verdicts = gates(&GateInputs {
+            raw_files_verified: true,
+            loaded_runtime_qualified: true,
+            child_studies: &studies,
+            child_reports_verified: true,
+            restoration_verified: true,
+            health_blocked: false,
+            telemetry,
+            replication: Some(true),
+            fault_matrix: Err("NoFaultMatrixReceipt"),
+            pressure_control: Err("NoPressureControl"),
+            resident_observation: resident,
+            protected_state: Ok(()),
+            hardware: Ok(()),
+            control_socket: None,
+            deployment_attested: false,
+            lease: None,
+            host: None,
+        });
+        of(&verdicts, "G3").clone()
+    };
+    // Native-only: no direct frames, but the resident runtime did observe the game: accepted, with the note.
+    let native_only = g3(None, Ok(()));
+    assert!(native_only.accepted && native_only.notes == ["DirectFrameEvidenceNotCollected"]);
+    // No direct frames and no resident observation: nothing stands under G3.
+    assert_eq!(
+        g3(None, Err("ResidentObservationNotCollected")).blockers,
+        ["ResidentObservationNotCollected"]
+    );
+    // Healthy direct frames never stand in for the mandatory observation.
+    assert_eq!(
+        g3(Some((4, 4)), Err("ResidentObservationTooSparse")).blockers,
+        ["ResidentObservationTooSparse"]
+    );
+    // Both a bad frame source and a missing observation are named.
+    assert_eq!(
+        g3(Some((1, 4)), Err("ResidentObservationNotCollected"))
+            .blockers
+            .len(),
+        2
+    );
 }

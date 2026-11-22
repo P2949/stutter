@@ -476,6 +476,14 @@ impl DriverStudyAttempts {
             // action, is collected here yet: stage evidence is unproven.
             stage_evidence,
             action_not_indicated,
+            comparison_valid: super::study_executor::comparison_valid(study.stage, &report.arms),
+            action_metric_valid: matches!(study.stage, Stage::Action(_))
+                && super::child_judgement::action_metric_valid(
+                    &study_dir,
+                    self.parent.uid,
+                    driver.intent(),
+                    &evidence,
+                ),
             activation,
             functional,
             tail_metric,

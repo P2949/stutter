@@ -123,6 +123,8 @@ fn good(study: &ChildStudy) -> AttemptsOutcome {
         runtime_matched: true,
         stage_evidence: None,
         action_not_indicated: false,
+        comparison_valid: None,
+        action_metric_valid: false,
         activation: None,
         functional: None,
         tail_metric: false,
@@ -674,7 +676,8 @@ fn a_feature_or_action_study_is_not_qualified_by_benchmark_attempts_alone() {
     assert_eq!(denied.result, StudyResult::Unqualified);
     // With the stage's own evidence they qualify; a plain comparison never needed it.
     assert_eq!(run_with(feature, Some(true)).result, StudyResult::Qualified);
-    assert_eq!(run_with(action, Some(true)).result, StudyResult::Qualified);
+    let unmeasured = run_with(action, Some(true)); // applied and restored, but never measured
+    assert_eq!(unmeasured.reason, "ActionMetricUnavailable");
     assert_eq!(run_with(confirm, None).result, StudyResult::Qualified);
 }
 

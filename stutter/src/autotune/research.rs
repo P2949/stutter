@@ -11,6 +11,7 @@ pub(crate) mod action_bridge;
 pub(crate) mod action_child;
 pub(crate) mod action_coverage;
 pub(crate) mod action_gate;
+pub mod action_latency;
 #[cfg_attr(
     not(test),
     expect(
@@ -182,6 +183,7 @@ pub(crate) mod profile_mappings;
 pub(crate) mod protected_state;
 pub(crate) mod raw_archive;
 pub(crate) mod replication;
+pub mod resident_observation;
 pub(crate) mod route_driver;
 #[cfg_attr(
     not(test),

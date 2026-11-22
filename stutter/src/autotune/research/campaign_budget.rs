@@ -121,6 +121,17 @@ pub fn replay(
             if actual != recorded.evidence_bytes {
                 return Ok(Some(format!("BudgetEvidenceBytesMismatch:{name}")));
             }
+            // Active time cannot be rebuilt from sealed bytes, but each completed attempt witnessed its own start and
+            // end (the native completion's clock or the long session's record): a record that claims less than
+            // that was understated.
+            let witnessed: u64 =
+                super::child_verify_rules::processes_of(&read_evidence(&evidence, uid)?)
+                    .iter()
+                    .map(|p| p.completed_unix.saturating_sub(p.started_unix))
+                    .fold(0u64, u64::saturating_add);
+            if recorded.active_seconds < witnessed {
+                return Ok(Some(format!("BudgetActiveSecondsUnderstated:{name}")));
+            }
             // What is on disk beside the sealed records (the raw archive, receipts) counts toward the
             // same cap, measured now rather than read from a record.
             sidecars = sidecars.saturating_add(sidecar_bytes(&dir, 0)?);

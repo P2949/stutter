@@ -139,8 +139,8 @@ impl NativeHost {
                 build_id: self.intent.build_id,
                 executable_sha256: self.intent.game_executable_sha256.clone(),
             },
-            started_unix_nanos: 1,
-            completed_unix_nanos: 2,
+            started_unix_nanos: 1_000_000_000,
+            completed_unix_nanos: 2_000_000_000,
             result_directory: name.clone(),
             metrics: NativeBenchmarkMetrics {
                 average_fps: fps,

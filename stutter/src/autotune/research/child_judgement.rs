@@ -86,6 +86,9 @@ pub(super) fn verify_qualification(
         run_fps,
         // The current historical receipts do not independently prove feature activation or an
         // action's objective and guardrails. Never promote those claims from a live boolean.
+        comparison_valid: super::study_executor::comparison_valid(study.stage, &report.arms),
+        action_metric_valid: matches!(study.stage, Stage::Action(_))
+            && action_metric_valid(dir, uid, &intent, &evidence),
         action_not_indicated: matches!(study.stage, Stage::Action(_))
             && abstention_replay(dir, uid, u32::try_from(report.attempts_completed)?),
         stage_evidence: if study.stage == Stage::Init {
@@ -213,4 +216,21 @@ fn abstention_replay(dir: &File, uid: u32, completed: u32) -> bool {
         crate::syscall::openat_nofollow(dir.as_fd(), "action-receipts.json"),
         Err(ref error) if error.kind() == std::io::ErrorKind::NotFound
     )
+}
+
+/// Whether the action study's sealed paired-latency record is a valid measurement for this schedule and these
+/// attempts. Live outcome and replay both use this one function; absent or unreadable is simply not valid.
+pub(super) fn action_metric_valid(
+    dir: &File,
+    uid: u32,
+    intent: &ResearchIntentV1,
+    evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+) -> bool {
+    (|| {
+        let bytes = read_private(dir, super::action_latency::FILE, uid).ok()?;
+        let treatments = super::treatment::treatments_of(intent).ok()??;
+        let processes = super::child_verify_rules::processes_of(evidence);
+        super::action_latency::verify(&bytes, &treatments, &processes).ok()
+    })()
+    .is_some()
 }
