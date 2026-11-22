@@ -391,11 +391,16 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
         ),
         ("report.json", pretty(report)),
         (
+            "crosswalk-34.json",
+            pretty(&json!({
+                "crosswalk_34": crosswalk(),
+                "gate_scope": gate_scope(&verdict),
+            })),
+        ),
+        (
             "capability-matrix.json",
             pretty(&json!({
                 "integration_coverage": integration_matrix(),
-                "crosswalk_34": crosswalk(),
-                "gate_scope": gate_scope(&verdict),
                 "feature_dispositions": feature_dispositions(),
                 "child_studies": response.get("child_studies"),
             })),

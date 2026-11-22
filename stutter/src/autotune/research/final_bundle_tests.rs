@@ -2,9 +2,10 @@ use serde_json::json;
 
 use super::*;
 
-const NAMES: [&str; 11] = [
+const NAMES: [&str; 12] = [
     "campaign-summary.md",
     "report.json",
+    "crosswalk-34.json",
     "capability-matrix.json",
     "proton-comparison.json",
     "diagnosis-oracle.json",
@@ -418,8 +419,8 @@ fn the_bundle_carries_the_complete_thirty_four_row_crosswalk_with_no_validated_b
     let files = build(&json!({}), &json!({}));
     let (_, bytes) = files
         .iter()
-        .find(|(name, _)| *name == "capability-matrix.json")
-        .expect("capability matrix");
+        .find(|(name, _)| *name == "crosswalk-34.json")
+        .expect("crosswalk file");
     let matrix: Value = serde_json::from_slice(bytes).unwrap();
     let crosswalk = &matrix["crosswalk_34"];
     assert_eq!(crosswalk["count"], 34, "{crosswalk}");
@@ -480,4 +481,12 @@ fn a_numeric_improvement_of_an_unqualified_action_study_is_not_a_demonstrated_be
         benefit(&response("qualified", json!("a problem"))),
         json!(false)
     );
+}
+
+#[test]
+fn every_bundle_file_fits_the_private_store_record_limit_with_the_real_ledger() {
+    // The store refuses a record over 64 KiB, and a refused bundle ends a campaign as unverifiable.
+    for (name, bytes) in build(&json!({}), &json!({})) {
+        assert!(bytes.len() < 60 * 1024, "{name} is {} bytes", bytes.len());
+    }
 }
