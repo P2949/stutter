@@ -427,8 +427,7 @@ impl DriverStudyAttempts {
         let evidence_dir = open_dir(&study_dir, "evidence")?;
         let evidence: BTreeMap<_, _> = read_evidence(&evidence_dir, self.parent.uid)?;
         let applied = self.settings_receipt(&study_dir)?;
-        // A study this build runs always archives its raw files, so it must also have recorded what its
-        // profile left.
+        // A study this build runs always archives, so it must have recorded what its profile left.
         let conformance = super::settings_binding::conformances(
             &evidence,
             Some(&applied),
