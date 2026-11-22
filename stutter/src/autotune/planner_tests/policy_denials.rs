@@ -654,4 +654,40 @@ mod tests {
                 .contains(&CandidateDenyReason::CgroupTargetNotAllowlisted)
         );
     }
+
+    /// The GPU negative control, offline: the same CPU-affinity action, judged by the same objective in the
+    /// same mode, is inside the autonomous support registry for a game under scheduler pressure and outside
+    /// it for a game that is GPU bound, where moving CPU threads cannot help. (The fixture observation lacks
+    /// the objective's own signal, so both also carry `ObjectiveSignalMissing`; that is the fixture, not the
+    /// workload.)
+    #[test]
+    fn a_cpu_affinity_action_is_outside_the_support_registry_for_a_gpu_bound_game_only() {
+        use crate::autotune::objective::ObjectiveKind::GameRunnableLatency;
+        let evaluate = |situation| {
+            evaluate_static_candidate_with_confidence(
+                DaemonMode::ApplyLowRisk,
+                situation,
+                FocusGroupKind::Game,
+                cpu_affinity_candidate_for("gpu-negative", GameRunnableLatency),
+                1.0,
+            )
+        };
+        let pressure = evaluate(SituationKind::GameCpuSchedulerPressure);
+        let gpu_bound = evaluate(SituationKind::GameGpuBound);
+        assert!(
+            !pressure
+                .deny_reasons
+                .contains(&CandidateDenyReason::NotInSupportRegistry),
+            "{:?}",
+            pressure.deny_reasons
+        );
+        assert!(
+            gpu_bound
+                .deny_reasons
+                .contains(&CandidateDenyReason::NotInSupportRegistry),
+            "{:?}",
+            gpu_bound.deny_reasons
+        );
+        assert!(!gpu_bound.eligible);
+    }
 }

@@ -507,3 +507,12 @@ stopping, a failing sink or the end of the route releases every key. Everything 
 No device sink is in the repository on purpose: a virtual keyboard registered on the user's machine is picked
 up by the running compositor and types into the focused window, so a `/dev/uinput` sink can only be exercised
 in a session of its own. The build keeps `UnavailableInput`.
+
+## GPU negative control, offline portion
+
+`planner_tests::policy_denials::a_cpu_affinity_action_is_outside_the_support_registry_for_a_gpu_bound_game_only`
+evaluates the same CPU-affinity action (same objective, same mode) for a game under scheduler pressure and for
+a game that is GPU bound: only the GPU-bound game puts it outside the autonomous support registry
+(`NotInSupportRegistry`), so the planner never proposes it where moving CPU threads cannot help. What this
+cannot show is the measured control on the real game: the action applied to a GPU-bound run producing no
+benefit. That needs a launched game and a controlled GPU load, which the GPU incident halt forbids.
