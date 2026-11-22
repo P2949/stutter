@@ -225,10 +225,12 @@ impl ResearchCoordinator {
                             .as_ref()
                             .map_or(Err("ResidentObservationNotCollected"), |c| c.resident_summary())
                             .and_then(|()| {
-                                match self.study_dir.as_deref().map_or(
-                                    Err("NoOracleCases"),
-                                    crate::autotune::research::oracle_cases::evaluate_study,
-                                ) {
+                                match self.study_dir.as_deref().map_or(Err("NoOracleCases"), |study| {
+                                    crate::autotune::research::oracle_cases::evaluate_study(
+                                        study,
+                                        &report.intent_sha256,
+                                    )
+                                }) {
                                     Ok(evaluation) if evaluation.gate_passed => Ok(()),
                                     Ok(_) => Err("OracleGateNotPassed"),
                                     Err(reason) => Err(reason),
@@ -348,10 +350,12 @@ impl ResearchCoordinator {
                     "intent_sha256": report.intent_sha256,
                     // The diagnosis oracle's own scored cases (frozen truth, captured output), or
                     // exactly why there are none.
-                    "diagnosis_oracle": match self.study_dir.as_deref().map_or(
-                        Err("NoOracleCases"),
-                        crate::autotune::research::oracle_cases::evaluate_study,
-                    ) {
+                    "diagnosis_oracle": match self.study_dir.as_deref().map_or(Err("NoOracleCases"), |study| {
+                        crate::autotune::research::oracle_cases::evaluate_study(
+                            study,
+                            &report.intent_sha256,
+                        )
+                    }) {
                         Ok(evaluation) => serde_json::json!({
                             "status": "scored", "evaluation": evaluation }),
                         Err(reason) => serde_json::json!({

@@ -179,16 +179,18 @@ fn the_resident_observation_is_read_from_each_measuring_childs_own_sealed_record
             .map(|p| {
                 serde_json::json!({
                     "slot": p.slot, "pid": p.pid.as_u32(), "start_ticks": p.start_ticks, "uid": p.uid,
+                    "window_start_unix": p.started_unix, "window_end_unix": p.completed_unix,
                     "renderer_bound": true, "cgroup": "0::/app.slice", "cpu_samples": 60,
-                    "gpu_samples": 60, "psi_samples": 60, "runnable_events": 5000,
-                    "owners_identified": true, "quality": "Eligible",
+                    "gpu_samples": 60, "psi_samples": 60, "lost_samples": 0,
+                    "owners_identified": true, "runnable_events": 5, "runnable_lost": 0,
+                    "runnable_claim": false,
                 })
             })
             .collect();
         let file = path.join("resident-observation.json");
         std::fs::write(
             &file,
-            serde_json::to_vec(&serde_json::json!({ "schema": 1, "attempts": attempts })).unwrap(),
+            serde_json::to_vec(&serde_json::json!({ "schema": 2, "attempts": attempts })).unwrap(),
         )
         .unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();

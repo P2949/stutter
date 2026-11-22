@@ -1,19 +1,30 @@
 //! The measured objective an action study must carry beside its safety evidence (PLAN G5): the game's
-//! runnable latency with the action off and on, over paired attempts. Applying and restoring an action is
-//! a safety claim; whether it helped is a measurement, and a study without a valid one is not a qualified
-//! action. This module is the sealed record and its independent reader. The record is produced from the
-//! resident runtime's own source-qualified samples during a physical run; nothing here fabricates one.
+//! runnable latency, as the 99th percentile, with the action off and on over paired attempts. Applying and
+//! restoring an action is a safety claim; whether it helped is a measurement, and a study without a valid one
+//! is not a qualified action. The record carries sealed per-window populations (histograms), never a stated
+//! percentile or a declared quality: this reader recomputes the 99th percentile itself, judges each window's
+//! source with the same runnable-source rule the controller uses, applies the frozen keep and revert thresholds
+//! and the foreground guardrail, and requires every planned pair. The record is produced from the resident
+//! runtime's own samples during a physical run; nothing here fabricates one.
 
 use serde::Deserialize;
 
-use super::{Treatment, child_verify::AttemptProcess};
+use super::{
+    Treatment,
+    child_verify::AttemptProcess,
+    quality::{RunnableVerdict, judge_runnable},
+};
 
 /// The file, beside the study, holding the paired runnable-latency record.
 pub const FILE: &str = "action-latency.json";
-/// A window with fewer scoped events than this cannot show a latency difference.
-pub const MIN_EVENTS: u64 = 1000;
 /// Paired off/on attempts needed before a comparison means anything.
 pub const MIN_PAIRS: usize = 3;
+/// The frozen practical-effect threshold on the relative change of the 99th percentile: the median pair must move
+/// by at least this much for a keep (down) or a revert (up); anything inside is a null result.
+pub const KEEP_RELATIVE: f64 = 0.05;
+/// The foreground frame-time guardrail: the action may not make the foreground's 99th percentile worse by more.
+pub const FOREGROUND_REGRESSION: f64 = 0.05;
+const PERCENTILE: f64 = 0.99;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +34,29 @@ pub struct IdentityRef {
     pub uid: u32,
 }
 
+/// One histogram bucket: events whose runnable delay was at most `le_ms` (and above the previous bucket).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Bucket {
+    pub le_ms: f64,
+    pub count: u64,
+}
+
+/// One attempt's scoped window.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Window {
+    pub start_unix: u64,
+    pub end_unix: u64,
+    /// Events the source dropped inside the window.
+    pub lost: u64,
+    /// The scoped target (pid, start time, uid) was the same process for the whole window.
+    pub same_target: bool,
+    pub histogram: Vec<Bucket>,
+    /// The foreground's own 99th-percentile frame time over the same window, for the guardrail.
+    pub foreground_p99_ms: f64,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LatencyPair {
@@ -30,10 +64,8 @@ pub struct LatencyPair {
     pub on_slot: u32,
     pub off_process: IdentityRef,
     pub on_process: IdentityRef,
-    pub off_events: u64,
-    pub on_events: u64,
-    pub off_p95_ms: f64,
-    pub on_p95_ms: f64,
+    pub off: Window,
+    pub on: Window,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -41,23 +73,56 @@ pub struct LatencyPair {
 pub struct LatencyRecord {
     pub schema: u32,
     pub metric: String,
-    /// The frame-independent source quality the resident runtime judged for the run ("Eligible").
-    pub source_quality: String,
-    /// The protected objectives held: no foreground frame-time regression, other processes intact.
-    pub guardrails_held: bool,
     pub pairs: Vec<LatencyPair>,
 }
 
-/// What a valid record says: the pairs it covers and how many showed lower latency with the action on.
-#[derive(Debug, PartialEq, Eq)]
+/// What the objective's frozen rule says of the measurement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decision {
+    /// The median pair's 99th percentile fell by at least `KEEP_RELATIVE` and most pairs improved.
+    Keep,
+    /// The median pair's 99th percentile rose by at least `KEEP_RELATIVE`.
+    Revert,
+    /// Inside the threshold: a valid result that finds no effect.
+    Null,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct LatencyResult {
     pub pairs: usize,
     pub improved: usize,
+    pub decision: Decision,
 }
 
-/// Why the record cannot stand as the study's measurement, or its result. Each pair must name the schedule's own
-/// Off and On attempts of one block, the very game processes those attempts recorded, enough scoped events on
-/// both sides, and finite positive latencies; the source must have been qualified and the guardrails held.
+/// The nearest-rank 99th percentile of a histogram, `None` when its buckets are not a valid population.
+fn p99(histogram: &[Bucket]) -> Option<(f64, u64)> {
+    let mut last = 0.0f64;
+    let mut total = 0u64;
+    for bucket in histogram {
+        if !(bucket.le_ms.is_finite() && bucket.le_ms > last) {
+            return None;
+        }
+        last = bucket.le_ms;
+        total = total.checked_add(bucket.count)?;
+    }
+    if total == 0 {
+        return None;
+    }
+    let rank = (PERCENTILE * total as f64).ceil() as u64;
+    let mut cumulative = 0u64;
+    for bucket in histogram {
+        cumulative += bucket.count;
+        if cumulative >= rank {
+            return Some((bucket.le_ms, total));
+        }
+    }
+    None
+}
+
+/// Why the record cannot stand as the study's measurement, or its result. Every planned pair (a block whose Off and
+/// On attempts both completed) must be present and no other; each names the schedule's own attempts and the very
+/// processes they recorded; each window lies inside its attempt, comes from one unchanged target with no lost events
+/// and at least the runnable sample floor, and has a valid histogram the 99th percentile is recomputed from.
 pub fn verify(
     bytes: &[u8],
     treatments: &[Treatment],
@@ -65,52 +130,101 @@ pub fn verify(
 ) -> Result<LatencyResult, &'static str> {
     let record: LatencyRecord =
         serde_json::from_slice(bytes).map_err(|_| "ActionLatencyUnreadable")?;
-    if record.schema != 1 || record.metric != "GameRunnableLatency" {
+    if record.schema != 2 || record.metric != "GameRunnableLatency" {
         return Err("ActionLatencyWrongMetric");
     }
-    if record.source_quality != "Eligible" {
-        return Err("ActionLatencySourceNotQualified");
+    let completed = |slot: u32| processes.iter().find(|p| p.slot == slot);
+    // The pairs the schedule planned and both of whose attempts completed: none may be left out.
+    let mut planned: Vec<(u32, u32)> = Vec::new();
+    for block in 0..treatments.len() / 2 {
+        let (a, b) = (block as u32 * 2, block as u32 * 2 + 1);
+        let (off, on) = if treatments[a as usize] == Treatment::Off {
+            (a, b)
+        } else {
+            (b, a)
+        };
+        if treatments[off as usize] == Treatment::Off
+            && treatments[on as usize] == Treatment::On
+            && completed(off).is_some()
+            && completed(on).is_some()
+        {
+            planned.push((off, on));
+        }
     }
-    if !record.guardrails_held {
-        return Err("ActionLatencyGuardrailBroken");
-    }
-    if record.pairs.len() < MIN_PAIRS {
+    if planned.len() < MIN_PAIRS {
         return Err("ActionLatencyTooFewPairs");
     }
-    let process_of = |slot: u32| processes.iter().find(|process| process.slot == slot);
-    let same = |slot: u32, identity: &IdentityRef| {
-        process_of(slot).is_some_and(|process| {
-            process.pid == identity.pid
-                && process.start_ticks == identity.start_ticks
-                && process.uid == identity.uid
-        })
-    };
-    let mut used = std::collections::BTreeSet::new();
-    let mut improved = 0;
-    for pair in &record.pairs {
-        let scheduled = treatments.get(pair.off_slot as usize) == Some(&Treatment::Off)
-            && treatments.get(pair.on_slot as usize) == Some(&Treatment::On)
-            && pair.off_slot / 2 == pair.on_slot / 2;
-        if !scheduled || !used.insert(pair.off_slot) || !used.insert(pair.on_slot) {
-            return Err("ActionLatencyPairNotInTheSchedule");
-        }
-        if !same(pair.off_slot, &pair.off_process) || !same(pair.on_slot, &pair.on_process) {
-            return Err("ActionLatencyForAnotherProcess");
-        }
-        if pair.off_events < MIN_EVENTS || pair.on_events < MIN_EVENTS {
-            return Err("ActionLatencyTooFewEvents");
-        }
-        let valid = |value: f64| value.is_finite() && value > 0.0;
-        if !valid(pair.off_p95_ms) || !valid(pair.on_p95_ms) {
-            return Err("ActionLatencyNotFinite");
-        }
-        if pair.on_p95_ms < pair.off_p95_ms {
-            improved += 1;
-        }
+    let mut named: Vec<(u32, u32)> = record
+        .pairs
+        .iter()
+        .map(|p| (p.off_slot, p.on_slot))
+        .collect();
+    named.sort_unstable();
+    planned.sort_unstable();
+    if named != planned {
+        return Err("ActionLatencyPairNotInTheSchedule");
     }
+    let mut changes = Vec::new();
+    for pair in &record.pairs {
+        for (slot, identity, window) in [
+            (pair.off_slot, &pair.off_process, &pair.off),
+            (pair.on_slot, &pair.on_process, &pair.on),
+        ] {
+            let Some(process) = completed(slot) else {
+                return Err("ActionLatencyPairNotInTheSchedule");
+            };
+            if process.pid != identity.pid
+                || process.start_ticks != identity.start_ticks
+                || process.uid != identity.uid
+            {
+                return Err("ActionLatencyForAnotherProcess");
+            }
+            if window.start_unix < process.started_unix
+                || window.end_unix > process.completed_unix
+                || window.start_unix >= window.end_unix
+            {
+                return Err("ActionLatencyWindowOutsideTheAttempt");
+            }
+            let Some((_, events)) = p99(&window.histogram) else {
+                return Err("ActionLatencyNotFinite");
+            };
+            match judge_runnable(Some(events), Some(window.lost), window.same_target) {
+                RunnableVerdict::Eligible => {}
+                RunnableVerdict::BelowSampleFloor => return Err("ActionLatencyTooFewEvents"),
+                _ => return Err("ActionLatencySourceNotQualified"),
+            }
+            if !(window.foreground_p99_ms.is_finite() && window.foreground_p99_ms > 0.0) {
+                return Err("ActionLatencyNotFinite");
+            }
+        }
+        // The guardrail: the action may not have made the foreground's tail worse.
+        if pair.on.foreground_p99_ms > pair.off.foreground_p99_ms * (1.0 + FOREGROUND_REGRESSION) {
+            return Err("ActionLatencyGuardrailBroken");
+        }
+        let (Some((off, _)), Some((on, _))) = (p99(&pair.off.histogram), p99(&pair.on.histogram))
+        else {
+            return Err("ActionLatencyNotFinite");
+        };
+        changes.push(on / off - 1.0);
+    }
+    changes.sort_by(f64::total_cmp);
+    let median = if changes.len() % 2 == 1 {
+        changes[changes.len() / 2]
+    } else {
+        (changes[changes.len() / 2 - 1] + changes[changes.len() / 2]) / 2.0
+    };
+    let improved = changes.iter().filter(|change| **change < 0.0).count();
+    let decision = if median <= -KEEP_RELATIVE && improved * 2 > changes.len() {
+        Decision::Keep
+    } else if median >= KEEP_RELATIVE {
+        Decision::Revert
+    } else {
+        Decision::Null
+    };
     Ok(LatencyResult {
-        pairs: record.pairs.len(),
+        pairs: changes.len(),
         improved,
+        decision,
     })
 }
 

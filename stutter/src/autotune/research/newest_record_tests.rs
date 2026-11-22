@@ -44,3 +44,23 @@ fn a_present_record_that_is_corrupt_oversized_or_a_link_is_invalid_not_absent() 
     );
     assert_eq!(newest::<Rec>(dir.path(), "rec-", |r| r.at), Newest::Invalid);
 }
+
+#[test]
+fn two_different_records_at_the_newest_instant_fail_closed_and_a_byte_identical_copy_does_not() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "rec-a.json", r#"{"at":7}"#);
+    write(dir.path(), "rec-b.json", r#"{"at":7}"#);
+    // The same bytes twice are one record.
+    assert_eq!(
+        newest::<Rec>(dir.path(), "rec-", |r| r.at),
+        Newest::Found(Rec { at: 7 })
+    );
+    write(dir.path(), "rec-b.json", r#"{"at":7,"x":1}"#);
+    assert_eq!(newest::<Rec>(dir.path(), "rec-", |r| r.at), Newest::Invalid);
+    // A strictly newer record settles it.
+    write(dir.path(), "rec-c.json", r#"{"at":8}"#);
+    assert_eq!(
+        newest::<Rec>(dir.path(), "rec-", |r| r.at),
+        Newest::Found(Rec { at: 8 })
+    );
+}

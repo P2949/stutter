@@ -23,6 +23,19 @@ pub fn newest<T: serde::de::DeserializeOwned>(
     prefix: &str,
     stamp: impl Fn(&T) -> u64,
 ) -> Newest<T> {
+    match newest_with_bytes(dir, prefix, stamp) {
+        Newest::None => Newest::None,
+        Newest::Invalid => Newest::Invalid,
+        Newest::Found((record, _)) => Newest::Found(record),
+    }
+}
+
+/// As `newest`, also returning the exact bytes of the chosen record, for a record another one commits to by digest.
+pub fn newest_with_bytes<T: serde::de::DeserializeOwned>(
+    dir: &Path,
+    prefix: &str,
+    stamp: impl Fn(&T) -> u64,
+) -> Newest<(T, Vec<u8>)> {
     let folder = match crate::syscall::open_dir_no_symlinks(dir) {
         Ok(fd) => File::from(fd),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Newest::None,
@@ -34,7 +47,9 @@ pub fn newest<T: serde::de::DeserializeOwned>(
     )) else {
         return Newest::Invalid;
     };
-    let mut best: Option<T> = None;
+    let mut best: Option<(T, Vec<u8>)> = None;
+    // Two different records share the newest instant seen so far; a strictly newer one still settles it.
+    let mut ambiguous = false;
     for entry in entries {
         let Ok(entry) = entry else {
             return Newest::Invalid;
@@ -62,12 +77,23 @@ pub fn newest<T: serde::de::DeserializeOwned>(
         let Ok(candidate) = serde_json::from_slice::<T>(&bytes) else {
             return Newest::Invalid;
         };
-        if best
-            .as_ref()
-            .is_none_or(|current| stamp(&candidate) > stamp(current))
-        {
-            best = Some(candidate);
+        match best.as_ref() {
+            // Two different records at the newest instant cannot be ordered: which one stands would depend on
+            // directory order, so the scan fails closed instead of choosing.
+            Some((current, kept)) if stamp(&candidate) == stamp(current) => {
+                if *kept != bytes {
+                    ambiguous = true;
+                }
+            }
+            Some((current, _)) if stamp(&candidate) < stamp(current) => {}
+            _ => {
+                best = Some((candidate, bytes));
+                ambiguous = false;
+            }
         }
+    }
+    if ambiguous {
+        return Newest::Invalid;
     }
     best.map_or(Newest::None, Newest::Found)
 }

@@ -200,14 +200,15 @@ fn g3_needs_an_eligible_game_bound_receipt_for_every_completed_attempt() {
     let absent = with(None, false);
     assert!(absent.accepted && absent.notes == ["DirectFrameEvidenceNotCollected"]);
     assert_eq!(with(None, true).blockers, ["GpuHealthIncident"]);
-    assert_eq!(
-        with(Some((7, 8)), false).blockers,
-        ["FrameSourceNotEligible"]
-    );
-    assert_eq!(
-        with(Some((0, 8)), false).blockers,
-        ["FrameSourceNotEligible"]
-    );
+    // An ineligible or corrupt frame source rejects the frame-primary claim only: G3 still stands on the mandatory
+    // resident observation, with the rejection named.
+    for receipts in [(7, 8), (0, 8)] {
+        let g3 = with(Some(receipts), false);
+        assert!(
+            g3.accepted && g3.notes == ["FramePrimaryClaimRejected"],
+            "{g3:?}"
+        );
+    }
     assert!(with(Some((8, 8)), false).accepted);
     assert_eq!(with(Some((8, 8)), true).blockers, ["GpuHealthIncident"]);
 }

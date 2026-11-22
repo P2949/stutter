@@ -213,23 +213,108 @@ fn an_unsafe_action_or_a_false_positive_is_counted_and_fails_the_gate() {
     assert_eq!(evaluate(&g).unwrap().false_positive_cases, 1);
 }
 
-#[test]
-fn a_study_with_no_case_file_says_so_and_the_newest_file_decides() {
+fn commitment_of(f: &CaseFile, intent: &str) -> TruthCommitment {
+    TruthCommitment {
+        schema: 2,
+        intent_sha256: intent.into(),
+        committed_unix: f.committed_unix,
+        truths_sha256: f.truths_sha256.clone(),
+        truths: f.truths.clone(),
+    }
+}
+
+/// Write a record privately and return its bytes' digest.
+fn put(dir: &std::path::Path, name: &str, value: &impl serde::Serialize) -> String {
     use std::os::unix::fs::PermissionsExt;
+    let bytes = serde_json::to_vec(value).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, &bytes).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    stutter_core::hash::sha256_hex(&bytes)
+}
+
+#[test]
+fn the_truth_commitment_and_the_controllers_capture_are_separate_records_bound_by_digest() {
+    let intent = "ab".repeat(32);
     let study = tempfile::tempdir().unwrap();
-    assert_eq!(evaluate_study(study.path()).unwrap_err(), "NoOracleCases");
-    let write = |name: &str, f: &CaseFile| {
-        let path = study.path().join(name);
-        std::fs::write(&path, serde_json::to_vec(f).unwrap()).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-    };
-    write("oracle-cases-1.json", &file());
-    assert!(evaluate_study(study.path()).unwrap().gate_passed);
-    let mut newer = file();
-    newer.committed_unix = 250;
-    write("oracle-cases-2.json", &newer);
     assert_eq!(
-        evaluate_study(study.path()).unwrap_err(),
+        evaluate_study(study.path(), &intent).unwrap_err(),
+        "NoOracleCases"
+    );
+    let f = file();
+    let digest = put(
+        study.path(),
+        "oracle-truth-1.json",
+        &commitment_of(&f, &intent),
+    );
+    assert_eq!(
+        evaluate_study(study.path(), &intent).unwrap_err(),
+        "NoOracleCapture"
+    );
+    let capture = Capture {
+        schema: 2,
+        intent_sha256: intent.clone(),
+        captured_unix: 300,
+        truth_commitment_sha256: digest.clone(),
+        diagnoses: f.diagnoses.clone(),
+    };
+    put(study.path(), "oracle-capture-1.json", &capture);
+    assert!(evaluate_study(study.path(), &intent).unwrap().gate_passed);
+    // Another campaign's records are refused.
+    assert_eq!(
+        evaluate_study(study.path(), &"cd".repeat(32)).unwrap_err(),
+        "OracleForAnotherCampaign"
+    );
+    // The truths edited after the capture was taken: the capture no longer names these bytes.
+    let mut edited = commitment_of(&f, &intent);
+    edited.truths[0].injected = Some("owner_conflict".into());
+    edited.truths_sha256 = truths_digest(&edited.truths);
+    put(study.path(), "oracle-truth-1.json", &edited);
+    assert_eq!(
+        evaluate_study(study.path(), &intent).unwrap_err(),
+        "OracleCaptureNotBoundToTheCommittedTruths"
+    );
+    // A capture dated before the commitment cannot be genuine.
+    put(
+        study.path(),
+        "oracle-truth-1.json",
+        &commitment_of(&f, &intent),
+    );
+    let early = Capture {
+        captured_unix: 50,
+        ..capture.clone()
+    };
+    put(study.path(), "oracle-capture-1.json", &early);
+    assert_eq!(
+        evaluate_study(study.path(), &intent).unwrap_err(),
         "OracleDiagnosisCapturedBeforeTheTruthWasFrozen"
     );
+    // A corrupt present file is invalid, never an oracle that did not run.
+    std::fs::write(study.path().join("oracle-capture-2.json"), b"{").unwrap();
+    assert_eq!(
+        evaluate_study(study.path(), &intent).unwrap_err(),
+        "OracleCasesInvalid"
+    );
+}
+
+#[test]
+fn the_live_controller_can_never_report_a_cause_it_has_no_mapping_for() {
+    // The oracle scores ColdShaderCache and OwnerConflict, but the controller's diagnoses map only to the other
+    // three: a positive case injecting one of those can be committed and scored, yet no live capture can include it.
+    for cause in [
+        StutterCause::CompositorSchedulerDelay,
+        StutterCause::GameThreadSchedulerDelay,
+        StutterCause::CpuPressureCandidate,
+        StutterCause::CpuMonopolizationCandidate,
+        StutterCause::GpuBoundCandidate,
+        StutterCause::BlockIoCandidate,
+        StutterCause::IrqDelayCandidate,
+        StutterCause::RuntimeWaitCandidate,
+        StutterCause::Unknown,
+    ] {
+        assert!(!matches!(
+            oracle_cause(cause),
+            Some(Cause::ColdShaderCache | Cause::OwnerConflict)
+        ));
+    }
 }

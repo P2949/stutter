@@ -180,16 +180,64 @@ pub fn evaluate(file: &CaseFile) -> Result<Evaluation, &'static str> {
     })
 }
 
-/// The newest `oracle-cases-*.json` in a study directory, scored: `Err` carries why not, and
-/// `NoOracleCases` means none was ever produced.
-pub fn evaluate_study(study: &Path) -> Result<Evaluation, &'static str> {
-    use super::newest_record::{Newest, newest};
-    match newest::<CaseFile>(study, "oracle-cases-", |case| case.committed_unix) {
-        Newest::None => Err("NoOracleCases"),
-        // A present case file that cannot be read is corrupt evidence, not an oracle that never ran.
-        Newest::Invalid => Err("OracleCasesInvalid"),
-        Newest::Found(cases) => evaluate(&cases),
+/// The ground truth, frozen and written BEFORE any case is run: a file of its own that nothing later edits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TruthCommitment {
+    pub schema: u32,
+    pub intent_sha256: String,
+    pub committed_unix: u64,
+    pub truths_sha256: String,
+    pub truths: Vec<TruthRow>,
+}
+
+/// What the controller reported, captured AFTER the commitment in a second file. It names the exact bytes of the
+/// commitment it was captured against, so changing the truths afterwards cannot go unnoticed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Capture {
+    pub schema: u32,
+    pub intent_sha256: String,
+    pub captured_unix: u64,
+    /// SHA-256 of the commitment file's bytes as the controller saw them.
+    pub truth_commitment_sha256: String,
+    pub diagnoses: Vec<DiagnosisRow>,
+}
+
+/// Score the newest commitment against the newest capture, read-only and independently: both files are
+/// discovered strictly, the capture must be bound to this very commitment and campaign, every diagnosis dated
+/// after the commitment, and the cases must match one for one. `Err` carries why not.
+pub fn evaluate_study(study: &Path, intent_sha256: &str) -> Result<Evaluation, &'static str> {
+    use super::newest_record::{Newest, newest_with_bytes};
+    let (commitment, commitment_bytes) =
+        match newest_with_bytes::<TruthCommitment>(study, "oracle-truth-", |c| c.committed_unix) {
+            Newest::None => return Err("NoOracleCases"),
+            Newest::Invalid => return Err("OracleCasesInvalid"),
+            Newest::Found(found) => found,
+        };
+    let capture = match newest_with_bytes::<Capture>(study, "oracle-capture-", |c| c.captured_unix)
+    {
+        Newest::None => return Err("NoOracleCapture"),
+        Newest::Invalid => return Err("OracleCasesInvalid"),
+        Newest::Found((capture, _)) => capture,
+    };
+    if commitment.schema != 2 || capture.schema != 2 {
+        return Err("OracleSchemaUnsupported");
     }
+    if commitment.intent_sha256 != intent_sha256 || capture.intent_sha256 != intent_sha256 {
+        return Err("OracleForAnotherCampaign");
+    }
+    if capture.truth_commitment_sha256 != stutter_core::hash::sha256_hex(&commitment_bytes) {
+        return Err("OracleCaptureNotBoundToTheCommittedTruths");
+    }
+    if capture.captured_unix < commitment.committed_unix {
+        return Err("OracleDiagnosisCapturedBeforeTheTruthWasFrozen");
+    }
+    evaluate(&CaseFile {
+        schema: 1,
+        committed_unix: commitment.committed_unix,
+        truths_sha256: commitment.truths_sha256,
+        truths: commitment.truths,
+        diagnoses: capture.diagnoses,
+    })
 }
 
 #[cfg(test)]

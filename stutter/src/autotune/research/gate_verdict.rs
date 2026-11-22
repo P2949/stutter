@@ -321,16 +321,14 @@ fn gates_inner(inputs: &GateInputs<'_>, preparing: bool) -> Vec<GateVerdict> {
     // named as a note rather than read as a pass or a zero. Receipts that exist must be sound: each
     // completed attempt needs a healthy, lossless frame source bound to the attested game with enough
     // frames and a bounded clock, or the source quality is blocked.
-    let g3_note: Vec<&'static str> = if inputs.telemetry.is_none() {
-        vec!["DirectFrameEvidenceNotCollected"]
-    } else {
-        Vec::new()
-    };
-    let mut g3 = match inputs.telemetry {
-        None => Vec::new(),
-        Some((eligible, completed)) if eligible < completed => vec!["FrameSourceNotEligible"],
+    // A present but ineligible frame source rejects only the frame-primary claim, which is named; it never
+    // suppresses independently qualified native, runnable or resident evidence.
+    let g3_note: Vec<&'static str> = match inputs.telemetry {
+        None => vec!["DirectFrameEvidenceNotCollected"],
+        Some((eligible, collected)) if eligible < collected => vec!["FramePrimaryClaimRejected"],
         Some(_) => Vec::new(),
     };
+    let mut g3: Vec<&'static str> = Vec::new();
     // Independently of the optional direct frames, the resident runtime must have observed the real game: the
     // mandatory sealed observation of every measuring attempt. Without it G3 has nothing to stand on.
     if let Err(reason) = inputs.resident_observation {

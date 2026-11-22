@@ -177,13 +177,10 @@ fn g3_needs_the_mandatory_resident_observation_whether_or_not_any_direct_frame_r
         g3(Some((4, 4)), Err("ResidentObservationTooSparse")).blockers,
         ["ResidentObservationTooSparse"]
     );
-    // Both a bad frame source and a missing observation are named.
-    assert_eq!(
-        g3(Some((1, 4)), Err("ResidentObservationNotCollected"))
-            .blockers
-            .len(),
-        2
-    );
+    // A bad frame source is only a rejected frame-primary claim; the missing observation is what blocks.
+    let both = g3(Some((1, 4)), Err("ResidentObservationNotCollected"));
+    assert_eq!(both.blockers, ["ResidentObservationNotCollected"]);
+    assert_eq!(both.notes, ["FramePrimaryClaimRejected"]);
 }
 
 #[test]
