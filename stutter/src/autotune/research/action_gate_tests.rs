@@ -596,3 +596,37 @@ fn a_thread_that_exited_while_being_read_is_gone_not_unreadable() {
     .unwrap();
     assert_eq!(listed.len(), 1);
 }
+
+#[test]
+fn a_receipt_carries_the_worker_transaction_timeline_the_gate_saw() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let clock = std::sync::Arc::new(AtomicU64::new(0));
+    let reader = clock.clone();
+    let mut g = ActionGate::new(
+        ActionChildScope::new([CPU], target(), NOW + 600),
+        Box::new(|| Some(0)),
+    )
+    .with_state_probe(Box::new(|_| {
+        Some(KernelState {
+            cpus_allowed: "0-15".into(),
+            cgroup: "0::/a".into(),
+            tasks: [(4242, "0-15".to_owned())].into(),
+            identity: Some((99, 1000)),
+        })
+    }))
+    .with_clock(Box::new(move || reader.load(Ordering::SeqCst)));
+    assert!(g.permit(Some(CPU), target(), NOW + 5));
+    clock.store(NOW + 10, Ordering::SeqCst);
+    g.observe(view(true, 0, Some(2))); // applied: the worker holds two tokens
+    clock.store(NOW + 40, Ordering::SeqCst);
+    g.observe(view(true, 0, Some(1)));
+    clock.store(NOW + 70, Ordering::SeqCst);
+    g.observe(view(false, 0, Some(0))); // the controller rolled it back; the worker released everything
+    let json = g.evidence().receipts_json();
+    let receipt = &json[0];
+    assert_eq!(receipt["permitted_unix"], NOW + 5);
+    assert_eq!(receipt["applied_unix"], NOW + 10);
+    assert_eq!(receipt["settled_unix"], NOW + 70);
+    assert_eq!(receipt["peak_tokens"], 2);
+    assert!(receipt["exited"].as_array().unwrap().is_empty());
+}

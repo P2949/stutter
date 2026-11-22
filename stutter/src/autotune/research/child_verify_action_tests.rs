@@ -58,6 +58,7 @@ fn receipt(slot: u32) -> serde_json::Value {
                         "identity": [start, uid] });
     json!({ "action": "CpuAffinityProfile", "transaction": format!("tx-{slot}"),
             "pid": pid, "start_ticks": start, "uid": uid,
+            "permitted_unix": 10, "applied_unix": 11, "settled_unix": 12, "peak_tokens": 1,
             "original": state, "restored": state })
 }
 

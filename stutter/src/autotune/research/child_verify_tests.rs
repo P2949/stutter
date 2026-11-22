@@ -309,6 +309,7 @@ mod receipts_and_rules {
         json!([{
             "transaction": "exp-1", "action": "CpuAffinityProfile",
             "pid": 4242, "start_ticks": 99, "uid": 1000,
+            "permitted_unix": 10, "applied_unix": 11, "settled_unix": 12, "peak_tokens": 1,
             "original": {"cpus_allowed": "0-15", "cgroup": "0::/a",
                          "tasks": {"4242": "0-15", "4243": "0-15"}, "identity": [99, 1000]},
             "restored": {"cpus_allowed": "0-15", "cgroup": "0::/a",

@@ -105,6 +105,26 @@ pub(super) fn receipts_valid(
                 .is_some_and(|id| !id.is_empty()),
             "a receipt names no experiment"
         );
+        // The worker transaction's timeline: permitted, then shown applied, then restored, in order; and the root
+        // worker held at least one token while the action was applied. A receipt without them is only a summary.
+        let time = |key: &str| item[key].as_u64().filter(|value| *value > 0);
+        let (Some(permitted), Some(applied), Some(settled)) = (
+            time("permitted_unix"),
+            time("applied_unix"),
+            time("settled_unix"),
+        ) else {
+            anyhow::bail!("a receipt has no worker-transaction timeline");
+        };
+        anyhow::ensure!(
+            permitted <= applied && applied <= settled,
+            "a receipt's timeline is out of order"
+        );
+        anyhow::ensure!(
+            item["peak_tokens"]
+                .as_u64()
+                .is_some_and(|tokens| tokens >= 1),
+            "the root worker held no token while the action was applied"
+        );
         let before: super::action_gate::KernelState =
             serde_json::from_value(item["original"].clone())?;
         let after: super::action_gate::KernelState =

@@ -197,6 +197,20 @@ pub(super) fn action_replay(
         super::child_verify_rules::receipts_valid(&receipts, action, owner).ok()?;
         let treatments = super::treatment::treatments_of(intent).ok()??;
         let processes = super::child_verify_rules::processes_of(evidence);
+        // Every receipt's whole timeline lies inside the very attempt it is attributed to.
+        for item in receipts.as_array()? {
+            let process = processes.iter().find(|p| {
+                item["pid"].as_u64() == Some(u64::from(p.pid.as_u32()))
+                    && item["start_ticks"].as_u64() == Some(p.start_ticks)
+            })?;
+            let (permitted, settled) = (
+                item["permitted_unix"].as_u64()?,
+                item["settled_unix"].as_u64()?,
+            );
+            if permitted < process.started_unix || settled > process.completed_unix {
+                return Some(false);
+            }
+        }
         let coverage =
             super::action_coverage::attribute(&receipts, &processes, &treatments).ok()?;
         Some(coverage.applied_on_every_treated_attempt())

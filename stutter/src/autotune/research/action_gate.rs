@@ -190,6 +190,14 @@ pub struct ActionReceipt {
     pub target: ChildTarget,
     pub original: KernelState,
     pub restored: KernelState,
+    /// When the action was permitted, when it was first shown held by the manager, and when its restoration was
+    /// accepted (unix seconds), in that order.
+    pub permitted_unix: u64,
+    pub applied_unix: u64,
+    pub settled_unix: u64,
+    /// The most worker tokens outstanding while the action was applied: at least one, or the root worker never
+    /// committed anything for it.
+    pub peak_tokens: u32,
 }
 
 pub struct ActionGate {
@@ -216,6 +224,19 @@ pub struct ActionGate {
     /// What earlier attempts' scopes settled in this child (each On attempt is its own process and its
     /// own scope; their outcomes accumulate here).
     carried: Vec<(ResearchAction, Decision)>,
+    /// The timeline of the action in flight: when it was permitted, when the manager first showed it held, and the
+    /// most worker tokens seen outstanding while it was. They become the receipt's worker-transaction evidence.
+    permitted_at: Option<u64>,
+    applied_at: Option<u64>,
+    peak_tokens: u32,
+    /// The wall clock the timeline is read from (replaceable for tests).
+    clock: Box<dyn Fn() -> u64 + Send>,
+}
+
+fn wall_clock() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
 }
 
 impl std::fmt::Debug for ActionGate {
@@ -269,6 +290,10 @@ impl GateEvidence {
                         "uid": receipt.target.uid,
                         "original": state(&receipt.original),
                         "restored": state(&receipt.restored),
+                        "permitted_unix": receipt.permitted_unix,
+                        "applied_unix": receipt.applied_unix,
+                        "settled_unix": receipt.settled_unix,
+                        "peak_tokens": receipt.peak_tokens,
                         // Threads the original listing had and the complete post-restore listing no longer has: the
                         // witnessed exits that make the live rule and the verifier agree.
                         "exited": receipt
@@ -298,7 +323,17 @@ impl ActionGate {
             foreign: false,
             attempt_on: true,
             carried: Vec::new(),
+            permitted_at: None,
+            applied_at: None,
+            peak_tokens: 0,
+            clock: Box::new(wall_clock),
         }
+    }
+
+    /// Read the timeline from this clock instead of the wall clock.
+    pub fn with_clock(mut self, clock: Box<dyn Fn() -> u64 + Send>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Prove restorations against the target's own kernel state, read independently of the worker.
@@ -321,6 +356,10 @@ impl ActionGate {
             foreign: false,
             attempt_on: true,
             carried: Vec::new(),
+            permitted_at: None,
+            applied_at: None,
+            peak_tokens: 0,
+            clock: Box::new(wall_clock),
         }
     }
 
@@ -442,6 +481,9 @@ impl ActionGate {
                 self.baseline = baseline;
                 self.target = Some(target);
                 self.transaction = None;
+                self.permitted_at = Some(now_unix);
+                self.applied_at = None;
+                self.peak_tokens = 0;
                 self.state = State::Requested(grant, action);
                 true
             }
@@ -455,11 +497,15 @@ impl ActionGate {
             self.foreign = true;
             return;
         }
+        if !matches!(self.state, State::Idle) {
+            self.peak_tokens = self.peak_tokens.max(view.outstanding_tokens.unwrap_or(0));
+        }
         let state = std::mem::replace(&mut self.state, State::Idle);
         self.state = match state {
             State::Idle => State::Idle,
             State::Requested(grant, action) => {
                 if view.experiment_active || view.kept_actions > 0 {
+                    self.applied_at = Some((self.clock)());
                     self.transaction = view.holdings.first().map(|held| held.experiment_id.clone());
                     // The normal path verified its own apply before starting the experiment.
                     self.with_scope(|scope| scope.applied(grant, true));
@@ -555,6 +601,10 @@ impl ActionGate {
                     target,
                     original,
                     restored,
+                    permitted_unix: self.permitted_at.take().unwrap_or(0),
+                    applied_unix: self.applied_at.take().unwrap_or(0),
+                    settled_unix: (self.clock)(),
+                    peak_tokens: self.peak_tokens,
                 });
             }
             State::Idle

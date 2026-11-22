@@ -343,6 +343,7 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
         serde_json::json!({
             "transaction": format!("exp-{slot}"), "action": "CpuAffinityProfile",
             "pid": pid, "start_ticks": ticks, "uid": uid,
+            "permitted_unix": 5_100, "applied_unix": 5_101, "settled_unix": 5_102, "peak_tokens": 1,
             "original": state(pid, ticks), "restored": state(pid, ticks),
         })
     };
@@ -373,6 +374,36 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
 
     write(treated.iter().map(|slot| receipt(*slot)).collect());
     assert!(replay(), "every treated attempt has its own valid receipt");
+    // The worker-transaction timeline: missing, out of order, no worker token, or outside the attempt each fail.
+    let with = |edit: &dyn Fn(&mut serde_json::Value)| {
+        let mut items: Vec<_> = treated.iter().map(|slot| receipt(*slot)).collect();
+        edit(&mut items[0]);
+        write(items);
+        replay()
+    };
+    assert!(
+        !with(&|r| {
+            r.as_object_mut().unwrap().remove("settled_unix");
+        }),
+        "no timeline"
+    );
+    assert!(
+        !with(&|r| r["applied_unix"] = 5_200.into()),
+        "applied after it settled"
+    );
+    assert!(
+        !with(&|r| r["peak_tokens"] = 0.into()),
+        "the root worker never held a token"
+    );
+    assert!(
+        !with(&|r| r["permitted_unix"] = 4_000.into()),
+        "permitted before the attempt began"
+    );
+    assert!(
+        !with(&|r| r["settled_unix"] = 7_000.into()),
+        "settled after the attempt ended"
+    );
+    write(treated.iter().map(|slot| receipt(*slot)).collect());
     // A worker thread that exited while the action ran: valid only when the receipt names it, the post-restore
     // listing no longer has it, and it is not the leader.
     let with_exit = |named: Option<serde_json::Value>, still_listed: bool| {
