@@ -511,6 +511,10 @@ impl DriverStudyAttempts {
 }
 
 impl StudyAttempts for DriverStudyAttempts {
+    fn selected_arms(&mut self, study: &ChildStudy) -> anyhow::Result<Option<Vec<ProtonSource>>> {
+        Ok(Some((self.select_arms)(study)?.arms))
+    }
+
     fn record_applied_settings(&mut self, _study: &ChildStudy, digests: Vec<String>) {
         self.applied_settings = digests;
     }

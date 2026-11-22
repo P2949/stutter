@@ -39,6 +39,15 @@ pub trait ProfileHook {
     fn apply_study(&mut self, study: &ChildStudy) -> Result<bool, ProfileFailure> {
         self.apply(study.profile)
     }
+    /// As `apply_study`, told which arms the study runs (resolved and frozen before this call), so only those
+    /// arms' settings are edited and recorded.
+    fn apply_arms(
+        &mut self,
+        study: &ChildStudy,
+        _arms: Option<&[ProtonSource]>,
+    ) -> Result<bool, ProfileFailure> {
+        self.apply_study(study)
+    }
     /// After a crash or restart: put back the settings of any application that was never proven
     /// restored. Run before any study; an `Err` means a profile may still be applied.
     fn recover(&mut self) -> Result<(), &'static str>;
@@ -60,6 +69,13 @@ impl ProfileHook for Box<dyn ProfileHook + Send> {
     }
     fn apply_study(&mut self, study: &ChildStudy) -> Result<bool, ProfileFailure> {
         (**self).apply_study(study)
+    }
+    fn apply_arms(
+        &mut self,
+        study: &ChildStudy,
+        arms: Option<&[ProtonSource]>,
+    ) -> Result<bool, ProfileFailure> {
+        (**self).apply_arms(study, arms)
     }
     fn recover(&mut self) -> Result<(), &'static str> {
         (**self).recover()
@@ -114,6 +130,11 @@ pub struct AttemptsOutcome {
 /// Runs a study's attempts (the real one drives the journalled `Driver` over the Steam host, one
 /// tick per poll).
 pub trait StudyAttempts {
+    /// The arms the study will run across, from the funnel's recorded results; `None` when the attempts do not
+    /// know. Resolved before any profile is applied so the profile and the launches use the same arms.
+    fn selected_arms(&mut self, _study: &ChildStudy) -> anyhow::Result<Option<Vec<ProtonSource>>> {
+        Ok(None)
+    }
     /// Exact attempt cost of the selected frozen inputs, before applying a profile or launching.
     fn required_attempts(&mut self, study: &ChildStudy) -> anyhow::Result<u32> {
         Ok(study.min_attempts)
@@ -455,7 +476,8 @@ impl<P: ProfileHook, A: StudyAttempts> StudyExecutor for HostStudyExecutor<P, A>
             let applied = match if study.stage == Stage::Init {
                 Ok(false)
             } else {
-                self.profiles.apply_study(study)
+                let arms = self.attempts.selected_arms(study)?;
+                self.profiles.apply_arms(study, arms.as_deref())
             } {
                 Ok(applied) => applied,
                 Err(ProfileFailure::Blocked(reason)) => {

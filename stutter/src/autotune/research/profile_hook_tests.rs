@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::autotune::research::profile_applier::ray_tracing_off;
+use crate::autotune::research::{ProtonSource, profile_applier::ray_tracing_off};
 
 const SETTINGS: &str = r#"{"version":1,"data":[{"group_name":"/graphics/raytracing","options":[
 {"name":"RayTracing","type":"bool","value":true},
@@ -480,4 +480,78 @@ fn a_pending_snapshot_discovered_during_apply_is_an_unresolved_owner() {
     );
     assert!(snapshot.exists());
     assert_eq!(bytes(&a_paths(&a.paths)), original);
+}
+
+const SIX: [ProtonSource; 6] = [
+    ProtonSource::ValveStable,
+    ProtonSource::ValveExperimental,
+    ProtonSource::CachyOs,
+    ProtonSource::CachyOsV3,
+    ProtonSource::Ge,
+    ProtonSource::Em,
+];
+
+fn child_study(profile: Profile) -> crate::autotune::research::child_study::ChildStudy {
+    crate::autotune::research::child_study::ChildStudy {
+        profile,
+        stage: crate::autotune::research::child_study::Stage::Pilot,
+        min_attempts: 6,
+        depends_on: Vec::new(),
+        study_sha256: "a".repeat(64),
+    }
+}
+
+#[test]
+fn a_study_over_two_of_six_arms_edits_and_records_only_those_two_in_the_campaigns_order() {
+    let a = arms(6, &[]);
+    let original = bytes(&a);
+    let paths = a.paths.clone();
+    let study = child_study(Profile::Cpu);
+    let mut hook =
+        FileProfileHook::new(a.files, index_free, idle).with_arm_map(SIX.to_vec(), Vec::new());
+    // The selector may name the pair in any order; the record follows the campaign's own order.
+    let pair = [ProtonSource::Ge, ProtonSource::CachyOs];
+    assert_eq!(hook.apply_arms(&study, Some(&pair)), Ok(true));
+    assert_eq!(hook.applied_digests().len(), 2);
+    let after = bytes(&a_paths(&paths));
+    for (index, arm) in SIX.iter().enumerate() {
+        assert_eq!(
+            after[index] != original[index],
+            pair.contains(arm),
+            "{arm:?}"
+        );
+    }
+    let expected: Vec<String> = [2usize, 4]
+        .iter()
+        .map(|i| stutter_core::hash::sha256_hex(&after[*i]))
+        .collect();
+    assert_eq!(hook.applied_digests(), expected);
+    hook.restore().unwrap();
+    assert_eq!(bytes(&a_paths(&paths)), original);
+}
+
+#[test]
+fn an_unusable_unselected_arm_does_not_block_a_selected_pair_but_a_selected_one_does() {
+    let a = arms(5, &[]);
+    let study = child_study(Profile::Cpu);
+    // The sixth arm (Em) has no settings file yet: a cold prefix.
+    let cold = cold_path(&a);
+    let files_arms = SIX[..5].to_vec();
+    let mut hook = FileProfileHook::new(a.files, index_free, idle)
+        .with_unavailable(vec![cold])
+        .with_arm_map(files_arms, vec![ProtonSource::Em]);
+    assert_eq!(
+        hook.apply_arms(&study, Some(&[ProtonSource::Ge, ProtonSource::CachyOs])),
+        Ok(true)
+    );
+    hook.restore().unwrap();
+    assert_eq!(
+        hook.apply_arms(&study, Some(&[ProtonSource::Ge, ProtonSource::Em])),
+        Err(ProfileFailure::Blocked("BlockedPrefixNotInitialized"))
+    );
+    // A study that does not say which arms it runs is still all-or-nothing.
+    assert_eq!(
+        hook.apply(Profile::Cpu),
+        Err(ProfileFailure::Blocked("BlockedPrefixNotInitialized"))
+    );
 }

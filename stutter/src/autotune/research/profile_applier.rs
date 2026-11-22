@@ -223,6 +223,7 @@ fn readback_matches(original: &[u8], now: &[u8], planned: &[Planned]) -> bool {
 
 /// The only file the applier ever opens: a regular, user-owned, single-link `UserSettings.json`
 /// inside the study's own directory, reached without following a symlink.
+#[derive(Clone)]
 pub struct StudySettingsFile {
     path: PathBuf,
     owner_uid: u32,

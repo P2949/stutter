@@ -561,3 +561,9 @@ benefit. That needs a launched game and a controlled GPU load, which the GPU inc
 ## Fourteenth audit: historical result apart from host gates
 
 `Verdict.historical_evidence_qualified` is the campaign's sealed-evidence result (study-backed facts plus G2–G5, G7, G9). `final_gate_qualified` still also needs G0, G1, G6 and G8, which describe the host today; a later host change can move the second but never the first.
+
+## Fifteenth audit P0: profiles over the child's own arms
+
+- The production `FileProfileHook` was built over every parent arm and recorded one digest per parent arm, while the verifier expects one per child arm; a six-arm campaign's two-arm confirmation would have read `ProfileViolated`, and an unusable unselected arm blocked a valid pair.
+- `StudyAttempts::selected_arms` resolves the child's arms from the recorded results before any profile is applied; `ProfileHook::apply_arms` carries them. `FileProfileHook::with_arm_map` names each file's and each unavailable path's arm (set by `runtime::research_funnel::profiles`); an arm-aware apply edits, loads mappings from and records only the selected arms, in the campaign's order, and only selected unavailable arms block. Recovery and restore still cover every file.
+- Tests (real hook): two of six arms edited and recorded in campaign order and restored byte for byte; an unusable unselected arm does not block, a selected one does, and an apply without arms stays all-or-nothing.

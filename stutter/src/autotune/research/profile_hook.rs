@@ -32,6 +32,9 @@ pub struct FileProfileHook {
     /// Settings paths that could not be opened safely (no file yet, or an unsafe one). They cannot
     /// take a profile, but a durable snapshot beside one is still an unrestored edit.
     unavailable: Vec<std::path::PathBuf>,
+    /// The arm each entry of `files` and of `unavailable` belongs to (parallel vectors, set together).
+    file_arms: Vec<super::ProtonSource>,
+    unavailable_arms: Vec<super::ProtonSource>,
     spec_for: fn(Profile) -> Result<Option<ProfileSpec>, ProfileFailure>,
     game_running: fn() -> bool,
     applied: Vec<(usize, AppliedProfile)>,
@@ -51,6 +54,8 @@ impl FileProfileHook {
         Self {
             files,
             unavailable: Vec::new(),
+            file_arms: Vec::new(),
+            unavailable_arms: Vec::new(),
             spec_for,
             game_running,
             applied: Vec::new(),
@@ -76,38 +81,59 @@ impl FileProfileHook {
     /// Record the arms whose settings file cannot be opened. Applying a profile is then refused (it
     /// is all-or-nothing), but recovery still inspects and restores every arm that can be opened and
     /// reports any pending snapshot it cannot inspect as unproven.
+    /// Name the arm of each settings file and of each unavailable path, so a study that runs only some arms
+    /// can apply a profile to just those.
+    pub fn with_arm_map(
+        mut self,
+        file_arms: Vec<super::ProtonSource>,
+        unavailable_arms: Vec<super::ProtonSource>,
+    ) -> Self {
+        self.file_arms = file_arms;
+        self.unavailable_arms = unavailable_arms;
+        self
+    }
+
     pub fn with_unavailable(mut self, unavailable: Vec<std::path::PathBuf>) -> Self {
         self.unavailable = unavailable;
         self
     }
 }
 
-fn failure(refusal: &Refusal) -> ProfileFailure {
-    match refusal {
-        Refusal::BlockedProfileMapping(_) => ProfileFailure::Blocked("BlockedProfileMapping"),
-        Refusal::GameRunning => ProfileFailure::Failed("GameRunning"),
-        Refusal::UnknownSetting(_) | Refusal::TypeMismatch(_) => {
-            ProfileFailure::Failed("ProfileSettingMismatch")
-        }
-        Refusal::ReadbackMismatch => ProfileFailure::Failed("ReadbackMismatch"),
-        // The settings may still be edited: an integrity stop, never an ordinary failure.
-        Refusal::RestoreUnproven => ProfileFailure::Unrestored("RestoreUnproven"),
-        Refusal::RecoveryPending => ProfileFailure::Unrestored("RecoveryPending"),
-        _ => ProfileFailure::Failed("ProfileApplyFailed"),
-    }
-}
-
-impl ProfileHook for FileProfileHook {
-    fn apply(&mut self, profile: Profile) -> Result<bool, ProfileFailure> {
+impl FileProfileHook {
+    /// Apply `profile` to the settings of `selected` arms only (all of them when `None`). The unselected arms
+    /// are neither edited nor required to be openable, and the digests recorded are in the campaign's own
+    /// tool order over exactly the selected arms, which is the order the child's intent lists them in.
+    fn apply_selected(
+        &mut self,
+        profile: Profile,
+        selected: Option<&[super::ProtonSource]>,
+    ) -> Result<bool, ProfileFailure> {
         let Some(spec) = (self.spec_for)(profile)? else {
             return Ok(false);
         };
-        if !self.unavailable.is_empty() {
+        // Only the arms this study runs matter: an unusable unselected arm neither blocks nor is edited.
+        let mapped = self.file_arms.len() == self.files.len()
+            && self.unavailable_arms.len() == self.unavailable.len();
+        let wanted = |arm: &super::ProtonSource| match (selected, mapped) {
+            (Some(selected), true) => selected.contains(arm),
+            _ => true,
+        };
+        let unavailable: Vec<&std::path::PathBuf> = if mapped {
+            self.unavailable
+                .iter()
+                .zip(&self.unavailable_arms)
+                .filter(|(_, arm)| wanted(arm))
+                .map(|(path, _)| path)
+                .collect()
+        } else {
+            self.unavailable.iter().collect()
+        };
+        if !unavailable.is_empty() {
             // A settings file that simply does not exist yet belongs to a prefix no game run has
             // initialized (cold). That is not a failure of the study: it cannot take a profile until
             // the prefix has been initialized, which needs its own supervised launch, and the study is
             // blocked with that reason. A file that exists but cannot be opened safely is a failure.
-            let cold = self.unavailable.iter().all(|path| {
+            let cold = unavailable.iter().all(|path| {
                 matches!(
                     std::fs::symlink_metadata(path),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound
@@ -124,10 +150,20 @@ impl ProfileHook for FileProfileHook {
             return Err(ProfileFailure::Failed("GameRunning"));
         }
         if let Some(loader) = &self.mapping_loader {
-            self.mappings = loader(&self.files)?;
+            let chosen: Vec<StudySettingsFile> = self
+                .files
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| !mapped || wanted(&self.file_arms[*index]))
+                .map(|(_, file)| file.clone())
+                .collect();
+            self.mappings = loader(&chosen)?;
         }
         let spec = self.mappings.resolve(spec);
         for (index, file) in self.files.iter().enumerate() {
+            if mapped && !wanted(&self.file_arms[index]) {
+                continue;
+            }
             // Mapping discovery may take time. Recheck immediately before each edit, and never
             // roll back already-edited settings while a game is now running.
             if (self.game_running)() {
@@ -178,6 +214,35 @@ impl ProfileHook for FileProfileHook {
         };
         self.applied_digests = digests;
         Ok(true)
+    }
+}
+
+fn failure(refusal: &Refusal) -> ProfileFailure {
+    match refusal {
+        Refusal::BlockedProfileMapping(_) => ProfileFailure::Blocked("BlockedProfileMapping"),
+        Refusal::GameRunning => ProfileFailure::Failed("GameRunning"),
+        Refusal::UnknownSetting(_) | Refusal::TypeMismatch(_) => {
+            ProfileFailure::Failed("ProfileSettingMismatch")
+        }
+        Refusal::ReadbackMismatch => ProfileFailure::Failed("ReadbackMismatch"),
+        // The settings may still be edited: an integrity stop, never an ordinary failure.
+        Refusal::RestoreUnproven => ProfileFailure::Unrestored("RestoreUnproven"),
+        Refusal::RecoveryPending => ProfileFailure::Unrestored("RecoveryPending"),
+        _ => ProfileFailure::Failed("ProfileApplyFailed"),
+    }
+}
+
+impl ProfileHook for FileProfileHook {
+    fn apply(&mut self, profile: Profile) -> Result<bool, ProfileFailure> {
+        self.apply_selected(profile, None)
+    }
+
+    fn apply_arms(
+        &mut self,
+        study: &super::child_study::ChildStudy,
+        arms: Option<&[super::ProtonSource]>,
+    ) -> Result<bool, ProfileFailure> {
+        self.apply_selected(study.profile, arms)
     }
 
     fn applied_digests(&self) -> Vec<String> {

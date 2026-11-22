@@ -67,11 +67,18 @@ fn profiles(study_dir: &std::path::Path, intent: &ResearchIntentV1) -> Box<dyn P
     // the others are, and the ones that cannot (no file in a cold prefix, an unsafe one) only refuse
     // a profile, never hide a snapshot beside them.
     let (mut files, mut unavailable) = (Vec::new(), Vec::new());
+    let (mut file_arms, mut unavailable_arms) = (Vec::new(), Vec::new());
     for tool in &intent.tools {
         let settings = arm_prefix_paths(study_dir, tool.source).2;
         match StudySettingsFile::new(study_dir, settings.clone(), intent.uid) {
-            Ok(file) => files.push(file),
-            Err(_) => unavailable.push(settings),
+            Ok(file) => {
+                files.push(file);
+                file_arms.push(tool.source);
+            }
+            Err(_) => {
+                unavailable.push(settings);
+                unavailable_arms.push(tool.source);
+            }
         }
     }
     // The list mappings observed so far (remembered beside the study) and any the arms' current
@@ -81,6 +88,7 @@ fn profiles(study_dir: &std::path::Path, intent: &ResearchIntentV1) -> Box<dyn P
     Box::new(
         FileProfileHook::new(files, production_spec, cyberpunk_running)
             .with_unavailable(unavailable)
+            .with_arm_map(file_arms, unavailable_arms)
             .with_mapping_loader(Box::new(move |files| {
                 observed_mappings(&mapping_dir, uid, files)
             })),
@@ -108,6 +116,20 @@ impl RefreshingProfiles {
         }
     }
 
+    /// Rediscover and recover the settings, then apply through `f` on the fresh hook.
+    fn apply_with(
+        &mut self,
+        f: impl FnOnce(&mut Box<dyn ProfileHook + Send>) -> Result<bool, ProfileFailure>,
+    ) -> Result<bool, ProfileFailure> {
+        self.recover_current().map_err(ProfileFailure::Unrestored)?;
+        self.current = (self.make)();
+        self.recover_current().map_err(ProfileFailure::Unrestored)?;
+        let result = f(&mut self.current);
+        self.active = matches!(result, Ok(true));
+        self.unresolved = matches!(result, Err(ProfileFailure::Unrestored(_)));
+        result
+    }
+
     fn recover_current(&mut self) -> Result<(), &'static str> {
         if self.active || self.unresolved {
             return Err("ProfileOwnershipUnresolved");
@@ -125,13 +147,15 @@ impl ProfileHook for RefreshingProfiles {
         &mut self,
         profile: crate::autotune::research::child_study::Profile,
     ) -> Result<bool, ProfileFailure> {
-        self.recover_current().map_err(ProfileFailure::Unrestored)?;
-        self.current = (self.make)();
-        self.recover_current().map_err(ProfileFailure::Unrestored)?;
-        let result = self.current.apply(profile);
-        self.active = matches!(result, Ok(true));
-        self.unresolved = matches!(result, Err(ProfileFailure::Unrestored(_)));
-        result
+        self.apply_with(|hook| hook.apply(profile))
+    }
+
+    fn apply_arms(
+        &mut self,
+        study: &crate::autotune::research::child_study::ChildStudy,
+        arms: Option<&[ProtonSource]>,
+    ) -> Result<bool, ProfileFailure> {
+        self.apply_with(|hook| hook.apply_arms(study, arms))
     }
 
     fn recover(&mut self) -> Result<(), &'static str> {
