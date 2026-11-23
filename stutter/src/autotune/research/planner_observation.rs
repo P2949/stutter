@@ -25,6 +25,9 @@ struct Entry {
     evaluations: u64,
     /// Passes that produced a candidate for the authorized action.
     candidates: u64,
+    /// Passes that ran but denied every authorized action: a refusal, not an indication that none was needed.
+    #[serde(default)]
+    denied: u64,
     lost: u64,
     source_quality: String,
 }
@@ -79,6 +82,9 @@ pub fn verify(
         }
         if entry.candidates != 0 {
             return Err("PlannerHadACandidate");
+        }
+        if entry.denied != 0 {
+            return Err("PlannerDeniedTheAction");
         }
     }
     Ok(())

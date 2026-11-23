@@ -53,9 +53,15 @@ pub struct AttemptResident {
     /// CPU frequency events the runtime saw while the attempt ran.
     pub cpu_freq_samples: u64,
     pub psi_samples: u64,
+    /// Interval records of the window that carried no process identity: while any exists, the resource owners are not
+    /// all identified (a scheduler interval alone does not say who owns the load).
+    pub unattributed_intervals: u64,
     /// Planning passes that considered this process, and those that offered an authorized action: the planner's own
     /// account, from the decision stream the runtime already emits.
     pub evaluations: u64,
+    /// Planning passes that ran but denied every authorized action (policy, capability, workload or manual-only),
+    /// which is not evidence that no action was indicated.
+    pub denied_evaluations: u64,
     pub affinity_candidates: u64,
     pub cgroup_candidates: u64,
     /// `None` when any of the signals the guards need was not observed over the window.
@@ -88,7 +94,9 @@ struct Running {
     gpu: u64,
     cpu_freq: u64,
     psi: u64,
+    unattributed: u64,
     evaluations: u64,
+    denied_evaluations: u64,
     affinity_candidates: u64,
     cgroup_candidates: u64,
 }
@@ -126,7 +134,9 @@ impl ResidentObserver {
             gpu: 0,
             cpu_freq: 0,
             psi: 0,
+            unattributed: 0,
             evaluations: 0,
+            denied_evaluations: 0,
             affinity_candidates: 0,
             cgroup_candidates: 0,
         });
@@ -139,6 +149,8 @@ impl ResidentObserver {
         };
         running.lost = running.lost.saturating_add(lost_events);
         running.window.push_intervals(records.iter().cloned());
+        let unattributed = records.iter().filter(|r| r.process_pid.is_none()).count();
+        running.unattributed = running.unattributed.saturating_add(unattributed as u64);
         let mut seen = false;
         for record in records.iter().filter(|r| is_primary_game_class(r.class)) {
             match record.process_pid {
@@ -191,10 +203,34 @@ impl ResidentObserver {
         if target_root_pid != Some(running.target.pid.as_u32()) {
             return;
         }
-        running.evaluations = running.evaluations.saturating_add(1);
+        // A decision without the planner's own summary is not an evaluation of the process, and neither is a pass the
+        // planner skipped (observe mode, focus idle or unknown): none of them says whether an action was indicated.
         let Some(planner) = planner else {
             return;
         };
+        let skipped = planner.no_action.as_ref().is_some_and(|none| {
+            matches!(
+                none.reason.as_str(),
+                "observe mode does not suggest or apply" | "focus is idle or unknown"
+            )
+        });
+        if skipped {
+            return;
+        }
+        // A pass that offered nothing because every proposal was denied says the action was refused, not that it was
+        // not indicated: it is kept apart and the abstention record refuses it.
+        let denied = planner.selected.is_none()
+            && planner.eligible_candidates.is_empty()
+            && (!planner.grouped_denials.is_empty()
+                || !planner.top_denied_candidates.is_empty()
+                || !planner.missing_capabilities.is_empty()
+                || !planner.workload_blocked.is_empty()
+                || !planner.manual_only_suggestions.is_empty());
+        if denied {
+            running.denied_evaluations = running.denied_evaluations.saturating_add(1);
+            return;
+        }
+        running.evaluations = running.evaluations.saturating_add(1);
         let offered = |kind: &str| {
             planner
                 .eligible_candidates
@@ -277,7 +313,9 @@ impl ResidentObserver {
                 gpu_samples: running.gpu,
                 cpu_freq_samples: running.cpu_freq,
                 psi_samples: running.psi,
+                unattributed_intervals: running.unattributed,
                 evaluations: running.evaluations,
+                denied_evaluations: running.denied_evaluations,
                 affinity_candidates: running.affinity_candidates,
                 cgroup_candidates: running.cgroup_candidates,
                 guards,
@@ -333,7 +371,8 @@ pub fn window_record(window: &AttemptResident) -> serde_json::Value {
         "lost_events": window.lost_events, "invalid_intervals": window.invalid_intervals,
         "target_changed": window.target_changed,
         "cpu_samples": window.cpu_samples, "gpu_samples": window.gpu_samples, "cpu_freq_samples": window.cpu_freq_samples,
-        "psi_samples": window.psi_samples, "evaluations": window.evaluations,
+        "psi_samples": window.psi_samples, "unattributed_intervals": window.unattributed_intervals, "evaluations": window.evaluations,
+        "denied_evaluations": window.denied_evaluations,
         "affinity_candidates": window.affinity_candidates, "cgroup_candidates": window.cgroup_candidates,
         "guards": window.guards.map(|g| serde_json::json!({
             "frame_p99_ms": g.frame_p99_ms, "frame_samples": g.frame_samples,

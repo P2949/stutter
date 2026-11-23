@@ -232,6 +232,7 @@ fn the_planners_decisions_about_the_attested_process_are_counted_with_the_author
     observer.observe_decision(Some(4242), None);
     observer.arm(target(), Some(0), 1_000);
     observer.observe_decision(Some(9), Some(&offering("cpu_affinity_profile")));
+    // A decision without the planner's own summary is not an evaluation of the process.
     observer.observe_decision(Some(4242), None);
     observer.observe_decision(Some(4242), Some(&Default::default()));
     observer.observe_decision(Some(4242), Some(&offering("cpu_affinity_profile")));
@@ -244,6 +245,63 @@ fn the_planners_decisions_about_the_attested_process_are_counted_with_the_author
             window.affinity_candidates,
             window.cgroup_candidates
         ),
-        (5, 1, 1)
+        (4, 1, 1)
     );
+}
+
+/// Only a pass the planner really ran and that was not simply refused counts toward `ActionNotIndicated`: a skipped
+/// pass (observe mode, focus idle) is no evaluation, and a pass that denied every proposal is kept apart.
+#[test]
+fn skipped_and_denied_planner_passes_are_not_evaluations_that_found_no_action_indicated() {
+    use crate::autotune::planner::{PlannerNoActionSummary, PlannerSummary};
+    let no_action = |reason: &str| PlannerSummary {
+        no_action: Some(PlannerNoActionSummary {
+            reason: reason.into(),
+            total_proposals: 0,
+            eligible_proposals: 0,
+            grouped_denials: Vec::new(),
+            top_denied_candidates: Vec::new(),
+            missing_capabilities: Vec::new(),
+            workload_blocked: Vec::new(),
+            manual_only_suggestions: Vec::new(),
+        }),
+        ..Default::default()
+    };
+    let mut observer = ResidentObserver::default();
+    observer.arm(target(), Some(0), 1_000);
+    // Skipped passes: nothing is counted.
+    observer.observe_decision(
+        Some(4242),
+        Some(&no_action("observe mode does not suggest or apply")),
+    );
+    observer.observe_decision(Some(4242), Some(&no_action("focus is idle or unknown")));
+    // The planner ran and proposed nothing for the process: an evaluation that found no action indicated.
+    observer.observe_decision(Some(4242), Some(&no_action("no candidate was eligible")));
+    // The planner ran and a capability the action needs was missing: a refusal, kept apart.
+    observer.observe_decision(
+        Some(4242),
+        Some(&PlannerSummary {
+            missing_capabilities: vec!["cpu_affinity".into()],
+            ..no_action("no candidate was eligible")
+        }),
+    );
+    let window = observer.freeze(1_100).remove(0);
+    assert_eq!((window.evaluations, window.denied_evaluations), (1, 1));
+}
+
+/// A scheduler interval does not say who owns the load: an interval record with no process identity leaves the window
+/// with unattributed owners, which the observation producer refuses to report as identified.
+#[test]
+fn an_interval_with_no_process_identity_is_counted_as_an_unattributed_owner() {
+    let mut observer = ResidentObserver::default();
+    observer.arm(target(), Some(0), 1_000);
+    let mut anonymous = interval(4242, TaskClass::Compiler, 50, 1_000_000);
+    anonymous.process_pid = None;
+    observer.observe_intervals(
+        &[interval(4242, TaskClass::Game, 50, 500_000), anonymous],
+        0,
+    );
+    let window = observer.freeze(1_100).remove(0);
+    assert_eq!(window.unattributed_intervals, 1);
+    assert!(window.cpu_samples > 0);
 }

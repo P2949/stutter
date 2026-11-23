@@ -101,3 +101,13 @@ fn an_abstention_stands_only_on_what_the_planner_saw_in_every_attempt() {
         Err("PlannerObservationNotEveryAttempt")
     );
 }
+
+/// A pass the planner ran but that denied the authorized action (policy, capability, workload) is a refusal, not a
+/// finding that no action was indicated: the record that carries one cannot support a justified abstention.
+#[test]
+fn an_attempt_in_which_the_planner_denied_the_action_is_not_a_justified_abstention() {
+    let denied = record(|v| v["attempts"][3]["denied"] = 2.into());
+    assert_eq!(check(&denied), Err("PlannerDeniedTheAction"));
+    // A record without the field (written before it existed) reads as none denied.
+    assert_eq!(check(&record(|_| {})), Ok(()));
+}

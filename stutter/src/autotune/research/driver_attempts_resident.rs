@@ -96,6 +96,7 @@ impl DriverStudyAttempts {
                 "start_unix": window.started_unix.max(process.started_unix),
                 "end_unix": window.ended_unix.min(process.completed_unix),
                 "evaluations": window.evaluations, "candidates": candidates,
+                "denied": window.denied_evaluations,
                 "lost": window.lost_events.saturating_add(window.invalid_intervals),
                 "source_quality": if direct { "direct" } else { "derived" },
             }));
@@ -405,7 +406,7 @@ impl DriverStudyAttempts {
                 process,
                 &window.cgroup,
                 bound,
-                window.cpu_samples > 0,
+                window.cpu_samples > 0 && window.unattributed_intervals == 0,
                 false,
             ));
         }
