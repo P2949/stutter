@@ -77,13 +77,12 @@ pub struct DriverStudyAttempts {
     treatment_study: bool,
     /// Reads a process's environment (`/proc/<pid>/environ`); replaceable so the evidence can be tested.
     environ_of: Box<dyn Fn(u32) -> Option<Vec<u8>> + Send>,
-    /// The build a feature study measures, and for each attempt whether its factor's treatment was
-    /// observed in the game process's environment (index -> (treatment, reached)).
+    /// The build a feature study measures, and per attempt whether its treatment reached the process environment.
     feature_source: Option<ProtonSource>,
     feature_observed: BTreeMap<u32, (super::Treatment, bool)>,
-    /// The kernel's witness of each attempt's game process, merged over the attempt, with when it was last read.
+    /// The kernel's witness of each attempt's game process, merged over the attempt.
     feature_witness: BTreeMap<u32, super::feature_proof::AttemptWitness>,
-    /// Reads the kernel's witness of a process; replaceable so the proof can be tested without a real game.
+    /// Reads the kernel's witness of a process (replaceable in tests).
     witness_of: Box<dyn Fn(u32) -> Option<super::feature_proof::Witness> + Send>,
 }
 
@@ -181,8 +180,7 @@ impl DriverStudyAttempts {
         self.host.as_mut()
     }
 
-    /// Observe the attested game process of the running attempt: the observer counts what the resident
-    /// runtime reports of it from here on.
+    /// Observe the attested game process of the running attempt: the observer counts what the runtime reports.
     fn arm_telemetry(&mut self) {
         let (Some(telemetry), Some(target)) = (&self.telemetry, self.host.game_process()) else {
             return;
@@ -694,6 +692,8 @@ impl StudyAttempts for DriverStudyAttempts {
 
 #[path = "driver_attempts_persistence.rs"]
 mod persistence;
+#[path = "driver_attempts_resident.rs"]
+mod resident;
 pub(crate) use persistence::TimeFacts;
 #[cfg(test)]
 #[path = "driver_attempts_tests.rs"]
