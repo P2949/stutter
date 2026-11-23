@@ -338,3 +338,7 @@ pub fn cyberpunk_running() -> bool {
 #[cfg(test)]
 #[path = "profile_hook_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "profile_production_tests.rs"]
+mod production_tests;
