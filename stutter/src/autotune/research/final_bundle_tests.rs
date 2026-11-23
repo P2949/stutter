@@ -525,3 +525,65 @@ fn only_the_dossiers_the_campaigns_own_record_names_with_a_digest_read_as_observ
         "CrosswalkObservationsInvalid"
     );
 }
+
+/// A CP-LONG action study has no native FPS, so its report arm is `ActionMetricUnavailable`. The measured effect the
+/// bundle reports is the runnable-latency result reconstructed from the sealed paired record: a benefit only on Keep,
+/// and a regression or no effect is reported as such, never read from the placeholder.
+#[test]
+fn a_long_action_studys_measured_runnable_latency_result_reaches_the_bundle() {
+    let mut full = response();
+    full["child_studies"] = json!([
+        { "study_sha256": "ab".repeat(32), "profile": "long", "stage": {"stage": "action"},
+          "result": "qualified", "reason": "" }
+    ]);
+    let receipt = json!([{ "action": "CpuAffinityProfile", "pid": 4242, "transaction": "exp-1" }]);
+    let action = |latency: Value| {
+        let mut with = full.clone();
+        with["child_reports"] = json!({
+            "children": [{
+                "study": "abababababababab", "reconstruction": true, "raw_files_verified": true,
+                "action_receipts": receipt, "action_latency_result": latency,
+                "report": { "arms": [{ "status": "ActionMetricUnavailable", "pairs": 0 }] }
+            }],
+            "missing": []
+        });
+        let files: std::collections::BTreeMap<_, _> =
+            build(&json!({}), &with).into_iter().collect();
+        serde_json::from_slice::<Value>(&files["action-transactions.json"]).unwrap()
+    };
+    let result = |decision: &str, improved: u32, regressed: u32| {
+        json!({ "objective": "game_runnable_latency", "pairs": 4, "improved": improved,
+                "regressed": regressed, "decision": decision })
+    };
+    let kept = action(result("keep", 4, 0));
+    assert_eq!(kept["benefit_demonstrated"], true);
+    assert_eq!(
+        kept["outcome_comparison"][0]["status"],
+        "MeasuredRunnableLatency"
+    );
+    assert_eq!(kept["outcome_comparison"][0]["numeric_verdict"], "improved");
+    assert_eq!(kept["outcome_comparison"][0]["pairs"], 4);
+    assert_eq!(
+        kept["outcome_comparison"][0]["runnable_latency"]["objective"],
+        "game_runnable_latency"
+    );
+    let reverted = action(result("revert", 0, 4));
+    assert_eq!(reverted["benefit_demonstrated"], false);
+    assert_eq!(
+        reverted["outcome_comparison"][0]["numeric_verdict"],
+        "regressed"
+    );
+    let null = action(result("null", 0, 0));
+    assert_eq!(null["benefit_demonstrated"], false);
+    assert_eq!(
+        null["outcome_comparison"][0]["numeric_verdict"],
+        "no_effect"
+    );
+    // Without a reconstructed result the placeholder is still never a measurement.
+    let missing = action(Value::Null);
+    assert_eq!(missing["benefit_demonstrated"], false);
+    assert_eq!(
+        missing["outcome_comparison"][0]["status"],
+        "ActionMetricUnavailable"
+    );
+}

@@ -292,11 +292,29 @@ pub(super) fn action_metric_valid(
     intent: &ResearchIntentV1,
     evidence: &BTreeMap<u32, AttemptEvidenceV1>,
 ) -> bool {
-    (|| {
-        let bytes = read_private(dir, super::action_latency::FILE, uid).ok()?;
-        let treatments = super::treatment::treatments_of(intent).ok()??;
-        let processes = super::child_verify_rules::processes_of(evidence);
-        super::action_latency::verify(&bytes, &treatments, &processes).ok()
-    })()
-    .is_some()
+    action_result(dir, uid, intent, evidence).is_some()
+}
+
+/// The study's runnable-latency result, reconstructed from its sealed paired record, or `None` when it is not a valid
+/// measurement of these attempts.
+pub(super) fn action_result(
+    dir: &File,
+    uid: u32,
+    intent: &ResearchIntentV1,
+    evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+) -> Option<super::action_latency::LatencyResult> {
+    let bytes = read_private(dir, super::action_latency::FILE, uid).ok()?;
+    let treatments = super::treatment::treatments_of(intent).ok()??;
+    let processes = super::child_verify_rules::processes_of(evidence);
+    super::action_latency::verify(&bytes, &treatments, &processes).ok()
+}
+
+/// The result an action child's report carries into the bundle, read from the child's own directory.
+pub(super) fn action_result_of_child(dir: &File, uid: u32) -> Option<serde_json::Value> {
+    let intent: ResearchIntentV1 =
+        serde_json::from_slice(&read_private(dir, "intent.json", uid).ok()?).ok()?;
+    let evidence_dir =
+        File::from(crate::syscall::openat_dir_nofollow(dir.as_fd(), "evidence").ok()?);
+    let evidence = read_evidence(&evidence_dir, uid).ok()?;
+    action_result(dir, uid, &intent, &evidence).map(|result| result.to_json())
 }

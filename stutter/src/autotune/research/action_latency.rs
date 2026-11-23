@@ -99,6 +99,21 @@ pub struct LatencyResult {
     pub decision: Decision,
 }
 
+impl LatencyResult {
+    /// The result as the final report carries it: the objective, the pair counts and the decision, never a native FPS.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "objective": "game_runnable_latency",
+            "pairs": self.pairs, "improved": self.improved, "regressed": self.regressed,
+            "decision": match self.decision {
+                Decision::Keep => "keep",
+                Decision::Revert => "revert",
+                Decision::Null => "null",
+            },
+        })
+    }
+}
+
 fn replay_window(window: &Window, target: &IdentityRef) -> ReplayWindow {
     // Each window is its own attempt's game process (already checked against that attempt); the production
     // comparison needs the same target on both sides, so both carry the pair's baseline identity.

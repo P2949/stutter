@@ -39,6 +39,10 @@ pub struct ChildVerification {
     /// The action receipts an action child recorded beside its study (absent for other studies).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action_receipts: Option<serde_json::Value>,
+    /// An action child's runnable-latency result, reconstructed from its sealed paired record: the measured effect the
+    /// final report carries (a long session has no native FPS to compare).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_latency_result: Option<serde_json::Value>,
     /// Prefix initialization cohort observed by the host; it does not establish shader-cache state.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefix_cohort: Option<serde_json::Value>,
@@ -385,6 +389,10 @@ pub fn verify_children(
             Err(anyhow::anyhow!("unexpected entry in the studies directory"))
         };
         let receipts = action_receipts(&studies, &name, uid);
+        let latency_result = hex16(&name)
+            .then(|| crate::syscall::openat_dir_nofollow(studies.as_fd(), &name).ok())
+            .flatten()
+            .and_then(|dir| super::child_judgement::action_result_of_child(&File::from(dir), uid));
         let cohort = study_file(&studies, &name, uid, "prefix-cohort.json");
         // Absent is "the optional probe did not run"; present but unreadable or not a list is corrupt evidence,
         // carried as a non-list so the summary counts it against the study instead of reading it as absent.
@@ -413,6 +421,7 @@ pub fn verify_children(
                 problem: None,
                 report: Some(report),
                 action_receipts: receipts,
+                action_latency_result: latency_result,
                 prefix_cohort: cohort,
                 replication,
                 telemetry_receipts: telemetry,
@@ -429,6 +438,7 @@ pub fn verify_children(
                 problem: Some(format!("{error:#}")),
                 report: None,
                 action_receipts: None,
+                action_latency_result: None,
                 prefix_cohort: None,
                 replication: None,
                 telemetry_receipts: None,

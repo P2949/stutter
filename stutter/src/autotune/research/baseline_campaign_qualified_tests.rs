@@ -26,6 +26,15 @@ fn an_applied_action_with_its_sealed_measurement_qualifies_through_the_whole_cam
     );
     assert!(verified.all_verified(), "{:?}", verified.budget_problem);
     assert!(verified.actions_restored(&dispositions));
+    // The independently reconstructed runnable-latency result reaches the verification the bundle is built from.
+    let measured: Vec<_> = verified
+        .children
+        .iter()
+        .filter_map(|c| c.action_latency_result.as_ref())
+        .collect();
+    assert_eq!(measured.len(), 1, "{:?}", verified.children);
+    assert_eq!(measured[0]["decision"], "keep");
+    assert_eq!(measured[0]["objective"], "game_runnable_latency");
     let dir = study_with(&run_of, "action-receipts.json");
     let receipts: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join("action-receipts.json")).unwrap()).unwrap();
@@ -96,12 +105,16 @@ fn an_action_that_made_the_tail_worse_is_a_valid_study_whose_decision_is_revert(
         Some(StudyResult::Qualified),
         "{dispositions:?}"
     );
-    assert!(
-        verify_all(&run_of)
-            .children
-            .iter()
-            .all(|c| c.problem.is_none())
-    );
+    let verified = verify_all(&run_of);
+    assert!(verified.children.iter().all(|c| c.problem.is_none()));
+    // A valid study of an action that made the tail worse carries a Revert result, not a benefit.
+    let reverted: Vec<_> = verified
+        .children
+        .iter()
+        .filter_map(|c| c.action_latency_result.as_ref())
+        .collect();
+    assert_eq!(reverted.len(), 1);
+    assert_eq!(reverted[0]["decision"], "revert");
     let dir = study_with(&run_of, action_latency::FILE);
     let intent: ResearchIntentV1 =
         serde_json::from_slice(&std::fs::read(dir.join("intent.json")).unwrap()).unwrap();

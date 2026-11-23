@@ -321,6 +321,7 @@ fn child_rows(response: &Value, with_report: bool) -> Vec<Value> {
                         "raw_files_verified": child.get("raw_files_verified"),
                         "problem": child.get("problem"),
                         "action_receipts": child.get("action_receipts"),
+                        "action_latency_result": child.get("action_latency_result"),
                         "prefix_cohort": child.get("prefix_cohort"),
                         "replication": child.get("replication"),
                         // What the resident runtime saw per attempt and the process each completed
@@ -369,11 +370,36 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
                 .pointer("/report/arms/0")
                 .cloned()
                 .unwrap_or(Value::Null);
+            // A long session has no native FPS: its measured effect is the runnable-latency result reconstructed
+            // from the sealed paired record, reported as such and never derived from the placeholder FPS.
+            let latency = row
+                .get("action_latency_result")
+                .filter(|value| value.is_object());
+            let (status, pairs, verdict) = match latency {
+                Some(latency) => (
+                    json!("MeasuredRunnableLatency"),
+                    latency.get("pairs").cloned().unwrap_or(Value::Null),
+                    match latency.get("decision").and_then(Value::as_str) {
+                        Some("keep") => json!("improved"),
+                        Some("revert") => json!("regressed"),
+                        _ => json!("no_effect"),
+                    },
+                ),
+                None => (
+                    result.get("status").cloned().unwrap_or(Value::Null),
+                    result.get("pairs").cloned().unwrap_or(Value::Null),
+                    result
+                        .get("numeric_verdict")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                ),
+            };
             json!({
                 "study": row.get("study"),
-                "status": result.get("status"),
-                "pairs": result.get("pairs"),
-                "numeric_verdict": result.get("numeric_verdict"),
+                "status": status,
+                "pairs": pairs,
+                "numeric_verdict": verdict,
+                "runnable_latency": latency,
                 // A numeric verdict of an unqualified, unreplayed or unverified study is not a result.
                 "study_qualified": row.get("study_result") == Some(&json!("qualified"))
                     && row.get("reconstruction") == Some(&json!(true))
