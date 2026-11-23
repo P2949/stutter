@@ -481,3 +481,84 @@ pub fn chmod_nofollow_at(
         Err(io::Error::last_os_error())
     }
 }
+
+/// `linux/uinput.h` request numbers on 64-bit Linux (`_IO`/`_IOW` with type `U`).
+const UI_DEV_CREATE: libc::c_ulong = 0x5501;
+const UI_DEV_DESTROY: libc::c_ulong = 0x5502;
+const UI_DEV_SETUP: libc::c_ulong = 0x405c_5503;
+const UI_SET_EVBIT: libc::c_ulong = 0x4004_5564;
+const UI_SET_KEYBIT: libc::c_ulong = 0x4004_5565;
+
+/// `struct uinput_setup`: an `input_id`, an 80-byte name and `ff_effects_max`.
+#[repr(C)]
+struct UinputSetup {
+    bustype: u16,
+    vendor: u16,
+    product: u16,
+    version: u16,
+    name: [u8; 80],
+    ff_effects_max: u32,
+}
+
+const _: () = assert!(mem::size_of::<UinputSetup>() == 92);
+
+/// The request numbers, for a test to check against the kernel's encoding.
+#[cfg(test)]
+pub const fn uinput_requests() -> [libc::c_ulong; 5] {
+    [
+        UI_DEV_CREATE,
+        UI_DEV_DESTROY,
+        UI_DEV_SETUP,
+        UI_SET_EVBIT,
+        UI_SET_KEYBIT,
+    ]
+}
+
+/// Create a virtual keyboard on `node` that can press exactly `key_codes`. This registers a kernel-wide input device: the
+/// caller must have proven the session it runs in is the isolated one. `UinputUnavailable` when the node cannot be opened,
+/// `UinputSetupFailed` when the kernel refused a step.
+pub fn uinput_keyboard(
+    node: &std::path::Path,
+    key_codes: &[u16],
+    name: &str,
+) -> Result<std::os::fd::OwnedFd, &'static str> {
+    use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(node)
+        .map_err(|_| "UinputUnavailable")?;
+    let fd = std::os::fd::OwnedFd::from(file);
+    let raw = fd.as_raw_fd();
+    let by_value = |request: libc::c_ulong, argument: libc::c_int| {
+        // SAFETY: `raw` is a descriptor this function owns; the request takes one int argument by value.
+        (unsafe { libc::ioctl(raw, request, argument) }) == 0
+    };
+    let mut ok = by_value(UI_SET_EVBIT, 1) && by_value(UI_SET_EVBIT, 0);
+    for code in key_codes {
+        ok &= by_value(UI_SET_KEYBIT, libc::c_int::from(*code));
+    }
+    let mut setup = UinputSetup {
+        bustype: 6,
+        vendor: 0x5354,
+        product: 0x0001,
+        version: 1,
+        name: [0; 80],
+        ff_effects_max: 0,
+    };
+    for (slot, byte) in setup.name.iter_mut().zip(name.bytes().take(79)) {
+        *slot = byte;
+    }
+    // SAFETY: `setup` is a live `uinput_setup` of exactly the size the request encodes.
+    ok &= unsafe { libc::ioctl(raw, UI_DEV_SETUP, &raw const setup) } == 0;
+    // SAFETY: the request takes no argument.
+    ok &= unsafe { libc::ioctl(raw, UI_DEV_CREATE) } == 0;
+    if ok { Ok(fd) } else { Err("UinputSetupFailed") }
+}
+
+/// Destroy a device `uinput_keyboard` created (also what closing the descriptor does).
+pub fn uinput_destroy(fd: &std::os::fd::OwnedFd) {
+    use std::os::fd::AsRawFd;
+    // SAFETY: the descriptor is live for this call; the request takes no argument.
+    unsafe { libc::ioctl(fd.as_raw_fd(), UI_DEV_DESTROY) };
+}

@@ -18,6 +18,9 @@ pub(crate) mod seat_helper;
 /// The transport half of a sink: events to a helper inside the isolated session.
 #[path = "seat_socket_sink.rs"]
 pub(crate) mod seat_socket_sink;
+/// The virtual keyboard, written to only when its own udev record puts it on the isolated seat.
+#[path = "uinput_injector.rs"]
+pub(crate) mod uinput_injector;
 
 /// The keys a route may press (Linux `KEY_*` codes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
