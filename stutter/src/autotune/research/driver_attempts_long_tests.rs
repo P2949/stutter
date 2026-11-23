@@ -56,7 +56,7 @@ fn attempt_process(slot: u32) -> ChildTarget {
 thread_local! {
     /// What the test needs of the one study it runs: the process the host last attested and the worker tokens the
     /// gate's probe reads.
-    static RIG: std::cell::RefCell<Option<(Sighted, std::sync::Arc<std::sync::atomic::AtomicU32>)>> =
+    static RIG: std::cell::RefCell<Option<(Sighted, std::sync::Arc<std::sync::atomic::AtomicU32>, std::path::PathBuf)>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -203,7 +203,13 @@ fn build_with<D: LongSessionDriver + Send + 'static>(
     inner.processes = (0..64).map(attempt_process).collect();
     inner.schedule_out = Some(Default::default());
     let host = LongAttemptHost::new(inner, driver);
-    RIG.with(|rig| *rig.borrow_mut() = Some((sighted, tokens)));
+    RIG.with(|rig| {
+        *rig.borrow_mut() = Some((
+            sighted,
+            tokens,
+            root.path().join("studies").join(&study.study_sha256[..16]),
+        ))
+    });
     let base = parent.issued_unix_seconds + 1;
     let mut calls = 0u64;
     let attempts = DriverStudyAttempts::new(
@@ -231,7 +237,8 @@ fn run_acting(
     study: &ChildStudy,
     gate: &Shared,
 ) -> AttemptsOutcome {
-    let (sighted, tokens) = RIG.with(|rig| rig.borrow().clone().expect("a built study"));
+    let (sighted, tokens, study_dir) = RIG.with(|rig| rig.borrow().clone().expect("a built study"));
+    let mut journal: Vec<serde_json::Value> = Vec::new();
     let mut acted = std::collections::BTreeSet::new();
     for _ in 0..20_000 {
         if let Some(outcome) = runner.poll(study, 100).unwrap() {
@@ -260,7 +267,7 @@ fn run_acting(
                 true,
                 0,
                 vec![Holding {
-                    experiment_id: stutter_core::ids::ExperimentId::new("exp-1"),
+                    experiment_id: stutter_core::ids::ExperimentId::new(format!("exp-{pid:?}")),
                     action: Some(ResearchAction::CpuAffinityProfile),
                     pid: Some(pid),
                 }],
@@ -268,6 +275,18 @@ fn run_acting(
             tokens.store(0, std::sync::atomic::Ordering::SeqCst);
             gate.observe_runtime(false, 0);
             acted.insert(pid);
+            // The controller's own journal of that transaction, archived beside the study.
+            journal.push(
+                crate::autotune::research::evidence_producers::controller_journal_record(
+                    &format!("exp-{pid:?}"),
+                    "cpu-affinity-profile:game-main",
+                    (pid.as_u32(), process.start_ticks),
+                    (ACTED_AT.get(), ACTED_AT.get() + 1),
+                ),
+            );
+            let file = study_dir.join(crate::autotune::research::controller_provenance::FILE);
+            std::fs::write(&file, serde_json::to_vec(&journal).unwrap()).unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
     }
     panic!("the study never ended")
@@ -445,10 +464,35 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
     let untreated = (0..schedule.len() as u32)
         .find(|slot| !treated.contains(slot))
         .unwrap();
-    let write = |items: Vec<serde_json::Value>| {
-        let file = path.join("action-receipts.json");
+    // The controller's own journal of the same transactions, archived beside the receipts the gate wrote.
+    let journal_of = |items: &[serde_json::Value]| -> Vec<serde_json::Value> {
+        items
+            .iter()
+            .map(|item| {
+                crate::autotune::research::evidence_producers::controller_journal_record(
+                    item["transaction"].as_str().unwrap(),
+                    "cpu-affinity-profile:game-main",
+                    (
+                        u32::try_from(item["pid"].as_u64().unwrap()).unwrap(),
+                        item["start_ticks"].as_u64().unwrap(),
+                    ),
+                    (5_101, 5_102),
+                )
+            })
+            .collect()
+    };
+    let put = |name: &str, value: &Vec<serde_json::Value>| {
+        let file = path.join(name);
         let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
-        std::fs::write(&file, serde_json::to_vec(&items).unwrap()).unwrap();
+        std::fs::write(&file, serde_json::to_vec(value).unwrap()).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    };
+    let write = |items: Vec<serde_json::Value>| {
+        put("action-receipts.json", &items);
+        put(
+            crate::autotune::research::controller_provenance::FILE,
+            &journal_of(&items),
+        );
     };
     let replay = || {
         action_replay(
@@ -544,6 +588,27 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
     broken[0]["restored"]["cpus_allowed"] = "0-3".into();
     write(broken);
     assert!(!replay());
+    // The gate's receipts alone are not enough: the controller's own journal must corroborate every one.
+    let whole: Vec<_> = treated.iter().map(|slot| receipt(*slot)).collect();
+    write(whole.clone());
+    assert!(replay());
+    let mut journal = journal_of(&whole);
+    journal.pop();
+    put(
+        crate::autotune::research::controller_provenance::FILE,
+        &journal,
+    );
+    assert!(!replay(), "a transaction the controller never journaled");
+    let mut journal = journal_of(&whole);
+    journal[0]["state"] = "faulted".into();
+    put(
+        crate::autotune::research::controller_provenance::FILE,
+        &journal,
+    );
+    assert!(!replay(), "a transaction the controller did not restore");
+    std::fs::remove_file(path.join(crate::autotune::research::controller_provenance::FILE))
+        .unwrap();
+    assert!(!replay(), "no journal archive at all");
     // No receipts file at all.
     std::fs::remove_file(path.join("action-receipts.json")).unwrap();
     assert!(!replay());

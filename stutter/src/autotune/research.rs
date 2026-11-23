@@ -40,6 +40,7 @@ pub(crate) mod child_study;
 pub(crate) mod child_verify;
 mod child_verify_rules;
 pub(crate) mod control_socket;
+pub(crate) mod controller_provenance;
 #[cfg_attr(
     not(test),
     expect(

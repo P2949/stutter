@@ -54,6 +54,8 @@ struct Acting {
     on_tail_ns: u64,
     /// Whether the controller applies the action (else the planner never proposes it and the study abstains).
     applies: bool,
+    /// The controller's own journal of every transaction so far, as the resident runtime archives it.
+    journal: Vec<serde_json::Value>,
 }
 
 impl Acting {
@@ -75,13 +77,30 @@ impl Acting {
                 true,
                 0,
                 vec![crate::autotune::research::action_gate::Holding {
-                    experiment_id: stutter_core::ids::ExperimentId::new("exp-1"),
+                    experiment_id: stutter_core::ids::ExperimentId::new(format!(
+                        "exp-{:?}",
+                        process.pid
+                    )),
                     action: Some(ResearchAction::CpuAffinityProfile),
                     pid: Some(process.pid),
                 }],
             );
             self.tokens.store(0, SeqCst);
             gate.observe_runtime(false, 0);
+            drop(gate);
+            self.journal.push(
+                crate::autotune::research::evidence_producers::controller_journal_record(
+                    &format!("exp-{:?}", process.pid),
+                    "cpu-affinity-profile:game-main",
+                    (process.pid.as_u32(), process.start_ticks),
+                    (now, now + 1),
+                ),
+            );
+            let file = self
+                .running_study()
+                .join(crate::autotune::research::controller_provenance::FILE);
+            std::fs::write(&file, serde_json::to_vec(&self.journal).unwrap()).unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
     }
 
@@ -331,6 +350,7 @@ fn build_campaign(acting: Option<u64>) -> Campaign {
         history: Vec::new(),
         on_tail_ns: acting.unwrap_or(0),
         applies,
+        journal: Vec::new(),
     });
     let results_root = results.path().to_path_buf();
     let clock = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
@@ -583,11 +603,11 @@ fn an_applied_action_with_its_sealed_measurement_qualifies_through_the_whole_cam
     );
 }
 
-/// Altering what the verifier replays is caught: the sealed measurement removed, a receipt's restoration changed, and
-/// a receipt dropped (a partly applied action) each contradict the claimed qualification.
+/// Altering what the verifier replays is caught: the sealed measurement removed, a receipt's restoration changed, the
+/// controller's journal archive removed, and a receipt dropped (a partly applied action) each contradict the claimed qualification.
 #[test]
 fn a_qualified_action_campaign_is_refused_when_its_measurement_or_receipts_are_altered() {
-    for tamper in 0..3 {
+    for tamper in 0..4 {
         let mut run_of = campaign_that_acts(1_500_000);
         run(&mut run_of);
         let dispositions = run_of.driver.dispositions();
@@ -602,6 +622,10 @@ fn a_qualified_action_campaign_is_refused_when_its_measurement_or_receipts_are_a
                 receipts[0]["restored"]["cpus_allowed"] = "0-3".into();
                 rewrite(&receipts_path, &serde_json::to_vec(&receipts).unwrap());
             }
+            3 => std::fs::remove_file(
+                dir.join(crate::autotune::research::controller_provenance::FILE),
+            )
+            .unwrap(),
             _ => {
                 receipts.as_array_mut().unwrap().pop();
                 rewrite(&receipts_path, &serde_json::to_vec(&receipts).unwrap());

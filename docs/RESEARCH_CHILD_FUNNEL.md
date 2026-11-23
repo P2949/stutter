@@ -719,3 +719,13 @@ and replay both require the observation, and the synthetic campaign now seals it
 The production-composed campaign also runs a qualified action (applied on every treated attempt, collector-sealed
 latency measurement) through `verify_children`, a worse action (valid study, Revert decision), and tampers (measurement
 removed, restoration altered, receipt dropped) that verification refuses.
+
+## Controller journal corroborates every receipt (eighteenth audit)
+
+`research/controller_provenance.rs`: the gate's receipts are the gate's own account. The campaign also keeps an archive
+of the controller's own journal records (`controller-journal.json`, the production `ControllerJournalRecord` type, one
+final record per transaction), and the replay joins every receipt to its record: the same transaction, the production
+action id (`cpu-affinity-profile:` or `cgroup:`), the very pid and start time, state `reverted` with
+`rollback_verified`, a rollback token, no fault, and timestamps inside the attempt the receipt is attributed to. A
+receipt without a corroborating record, or a record no receipt accounts for, refuses the study (live and replay use
+the one function). The archive is produced by the resident runtime from the controller's journal during a physical run.

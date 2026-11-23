@@ -214,7 +214,13 @@ pub(super) fn action_replay(
         }
         let coverage =
             super::action_coverage::attribute(&receipts, &processes, &treatments).ok()?;
-        Some(coverage.applied_on_every_treated_attempt())
+        if !coverage.applied_on_every_treated_attempt() {
+            return Some(false);
+        }
+        // The gate's receipts are its own account; the controller's own journal must corroborate every one.
+        let journal = read_private(dir, super::controller_provenance::FILE, uid).ok()?;
+        super::controller_provenance::verify(&journal, action, &receipts, &processes).ok()?;
+        Some(true)
     })()
     .unwrap_or(false)
 }

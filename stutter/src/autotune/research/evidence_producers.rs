@@ -173,6 +173,25 @@ pub fn action_latency_document(pairs: Vec<Value>) -> Vec<u8> {
         .unwrap_or_default()
 }
 
+/// One transaction's final record in the controller's own journal format (applied, verified, rolled back), as the
+/// resident runtime archives it beside the study.
+pub fn controller_journal_record(
+    transaction: &str,
+    action_id: &str,
+    process: (u32, u64),
+    window_unix: (u64, u64),
+) -> Value {
+    json!({
+        "boot_id": "boot", "schema_version": 1, "state": "reverted",
+        "experiment_id": transaction, "action_id": action_id,
+        "target_identity": format!("pid:{}:starttime:{}:active_tasks:12", process.0, process.1),
+        "verify_result": "rollback_verified",
+        "rollback_token": { "kind": "cpu-affinity-restore-file", "restore_path": "restore.json", "affected_tasks": 12 },
+        "phase_started_unix_nanos": u128::from(window_unix.0) * 1_000_000_000,
+        "updated_unix_nanos": u128::from(window_unix.1) * 1_000_000_000,
+    })
+}
+
 #[cfg(test)]
 #[path = "evidence_producers_tests.rs"]
 mod tests;
