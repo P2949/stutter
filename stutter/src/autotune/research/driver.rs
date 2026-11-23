@@ -675,18 +675,22 @@ impl Driver {
                     self.unresolved_launch = Some(slot.index);
                     return Ok(Step::OwnershipUnresolved("SettlementUnproven"));
                 }
-                host.abort()?;
-                anyhow::ensure!(!arm_failed, "attempt arming needs independent recovery");
-                let sealed = self.seal(
+                if arm_failed {
+                    host.abort()?;
+                    anyhow::bail!("attempt arming needs independent recovery");
+                }
+                // The stop is one bounded step per tick: a slow settlement never blocks the controller, and the
+                // refusal is sealed once the launched tree is proven gone.
+                self.abort_then_seal(
+                    host,
                     slot,
                     AttemptOutcome::ClassifiedFailure {
                         class,
                         code: code.into(),
                     },
+                    Some(class),
                     now,
-                )?;
-                self.terminal_failure = Some(class);
-                Ok(sealed)
+                )
             }
         }
     }
