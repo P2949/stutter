@@ -882,3 +882,10 @@ log is the durable record. The archive is copied by the resident runtime during 
 
 The production-composed campaign now also runs a Feature child (ntsync, backend witnessed by the kernel on every attempt
 treated On) to a qualified study through `verify_children`, and a removed proof contradicts the claimed qualification.
+
+## PLAN.md re-check items closed (eighteenth audit)
+
+- D7 / CP-GAMESCOPE "no silent llvmpipe": a result whose reported renderer is a software rasteriser (`llvmpipe`, `lavapipe`,
+  `softpipe`, `swrast`) violates every profile, whatever else it shows.
+- CP-FSR-GE "requested DLL actually loaded (hash/version)": a library backend (`amdxcffx64.dll`) is hashed in the kernel's
+  witness of each attempt, so the build actually loaded is on record beside the proof of its presence.

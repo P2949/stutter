@@ -49,6 +49,9 @@ pub fn tool_builds(factor: ResearchFactor) -> Option<(&'static str, &'static str
 pub fn watched(factor: ResearchFactor) -> Vec<&'static str> {
     match backend(factor) {
         Some(Backend::Content { basename, .. }) => vec![basename],
+        // A library the factor loads is hashed too, so the version actually loaded is on record (a fallback build is a
+        // different identity); the proof stands on its presence, the hash is the evidence beside it.
+        Some(Backend::Module(name)) if name.ends_with(".dll") => vec![name],
         _ => Vec::new(),
     }
 }

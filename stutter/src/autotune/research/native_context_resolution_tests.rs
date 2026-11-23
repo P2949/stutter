@@ -83,3 +83,39 @@ fn the_rendered_resolution_and_dynamic_scaling_are_read_and_judged_against_the_p
     assert!(silent.matches_replay(&at_1080));
     assert!(!at_1080.matches_replay(&native));
 }
+
+#[test]
+fn a_result_rendered_on_a_software_rasteriser_violates_every_profile_whatever_else_it_shows() {
+    use crate::autotune::research::child_study::{Profile, Stage};
+    let context = |gpu: &str| NativeContext {
+        game_version: Some("2.5".into()),
+        preset_name: Some("P".into()),
+        gpu_name: Some(gpu.into()),
+        upscaling_type: Some(0),
+        ray_tracing_enabled: Some(false),
+        frame_generation_type: Some(0),
+        render_width: Some(1920),
+        render_height: Some(1080),
+        dynamic_resolution: Some(false),
+        frame_count: 100,
+        frame_stats: None,
+    };
+    let real = context("AMD Radeon RX 9070 XT (RADV GFX1201)");
+    assert!(!real.software_renderer());
+    assert_eq!(
+        real.conformance_in(Profile::Cpu, Stage::Screen),
+        ProfileConformance::Conforms
+    );
+    for software in [
+        "llvmpipe (LLVM 20.1.0, 256 bits)",
+        "AMD Radeon Graphics (lavapipe)",
+        "SwRast",
+    ] {
+        let soft = context(software);
+        assert!(soft.software_renderer(), "{software}");
+        assert_eq!(
+            soft.conformance_in(Profile::Cpu, Stage::Screen),
+            ProfileConformance::Violates
+        );
+    }
+}

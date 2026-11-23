@@ -226,6 +226,25 @@ pub enum ProfileConformance {
 }
 
 impl NativeContext {
+    /// Whether the game says it rendered on a software rasteriser (the plan's silent-llvmpipe case): never the GPU the
+    /// study is about, whatever else the result shows.
+    pub fn software_renderer(&self) -> bool {
+        self.gpu_name.as_deref().is_some_and(|name| {
+            let name = name.to_ascii_lowercase();
+            [
+                "llvmpipe",
+                "lavapipe",
+                "softpipe",
+                "swrast",
+                "software rasterizer",
+            ]
+            .iter()
+            .any(|software| name.contains(software))
+        })
+    }
+}
+
+impl NativeContext {
     /// The effective rendered resolution against the one the profile asked for.
     pub fn effective_resolution(
         &self,
@@ -290,6 +309,7 @@ impl NativeContext {
                 let ray_tracing = self.ray_tracing_enabled;
                 let off = |value: Option<i64>| value.is_some_and(|value| value != 0);
                 if ray_tracing == Some(true)
+                    || self.software_renderer()
                     || self.effective_resolution(profile) == EffectiveResolution::Contradicted
                     || (!free_frame_generation && off(self.frame_generation_type))
                     || (!free_upscaler && off(self.upscaling_type))
