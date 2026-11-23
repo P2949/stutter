@@ -679,8 +679,7 @@ impl Driver {
                     host.abort()?;
                     anyhow::bail!("attempt arming needs independent recovery");
                 }
-                // The stop is one bounded step per tick: a slow settlement never blocks the controller, and the
-                // refusal is sealed once the launched tree is proven gone.
+                // One bounded stop step per tick; the refusal is sealed once the launched tree is proven gone.
                 self.abort_then_seal(
                     host,
                     slot,
