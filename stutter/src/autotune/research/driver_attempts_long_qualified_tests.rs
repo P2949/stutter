@@ -121,3 +121,19 @@ fn a_long_action_study_with_its_sealed_latency_measurement_qualifies_and_replays
     moved[0] = stranger;
     assert!(action_latency::verify(&bytes, &schedule, &moved).is_err());
 }
+
+/// No receipts is not, by itself, a justified abstention: without the planner's own observation of every attempt a
+/// study in which nothing was applied is simply an action study with no evidence.
+#[test]
+fn nothing_applied_without_the_planners_observation_is_not_a_justified_abstention() {
+    let (_root, mut runner, study, _gate, _parent) = build(&unit().definition_sha256);
+    // A controller that never ran leaves no receipts either: nothing here ever lets the gate act.
+    let outcome = loop {
+        if let Some(outcome) = runner.poll(&study, 100).unwrap() {
+            break outcome;
+        }
+    };
+    assert!(!outcome.action_not_indicated, "no planner observation");
+    let run = judge(&study, &outcome);
+    assert_ne!(run.reason, "ActionNotIndicated");
+}

@@ -558,6 +558,29 @@ fn a_study_in_which_the_action_was_never_applied_is_a_replayable_justified_abste
     };
     let (root, mut runner, study, _gate, parent) = build(&unit().definition_sha256);
     assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    // The planner's own sealed observation: it watched every attempt and never proposed the action.
+    let study_path = root.path().join("studies").join(&study.study_sha256[..16]);
+    let attempts: Vec<_> = (0..8u32)
+        .map(|slot| {
+            let process = attempt_process(slot);
+            serde_json::json!({
+                "slot": slot,
+                "process": { "pid": process.pid, "start_ticks": process.start_ticks, "uid": process.uid },
+                "start_unix": 5_010, "end_unix": 6_190,
+                "evaluations": 600, "candidates": 0, "lost": 0, "source_quality": "direct",
+            })
+        })
+        .collect();
+    let planner = study_path.join(crate::autotune::research::planner_observation::FILE);
+    std::fs::write(
+        &planner,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": 1, "action": "CpuAffinityProfile", "attempts": attempts,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&planner, std::fs::Permissions::from_mode(0o600)).unwrap();
     // No `act`: the controller saw nothing to do for the whole study.
     let outcome = run_to_end(&mut runner, &study);
     assert_eq!(outcome.stage_evidence, Some(false));

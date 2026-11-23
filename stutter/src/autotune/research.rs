@@ -179,6 +179,7 @@ pub(crate) mod oracle_cases;
 pub(crate) mod owned_cleanup;
 pub(crate) mod owned_domain;
 pub(crate) mod pilot_rule;
+pub(crate) mod planner_observation;
 pub(crate) mod prefix_freeze;
 #[cfg_attr(
     not(test),

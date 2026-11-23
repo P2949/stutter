@@ -189,6 +189,12 @@ impl DriverStudyAttempts {
             }
             (_, other) => other,
         };
+        // An abstention also needs the planner's own observation that it watched every attempt and never proposed the
+        // action: no receipts alone is not evidence that none was indicated.
+        let abstained = abstained
+            && matches!(study.stage, Stage::Action(action)
+                if super::super::child_judgement::planner_observation_valid(
+                    study_dir, self.parent.uid, action, evidence));
         (checked, abstained)
     }
 

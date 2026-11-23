@@ -52,10 +52,15 @@ struct Acting {
     history: Vec<(SessionProcess, u64, u64)>,
     /// How much faster the candidate's tail is than the baseline's in the sealed measurement.
     on_tail_ns: u64,
+    /// Whether the controller applies the action (else the planner never proposes it and the study abstains).
+    applies: bool,
 }
 
 impl Acting {
     fn act(&mut self, process: SessionProcess, now: u64) {
+        if !self.applies {
+            return;
+        }
         use std::sync::atomic::Ordering::SeqCst;
         self.acted_at.store(now, SeqCst);
         let target = crate::autotune::research::action_child::ChildTarget {
@@ -80,6 +85,45 @@ impl Acting {
         }
     }
 
+    /// The study being run: the one beside which the sealed records go.
+    fn running_study(&self) -> std::path::PathBuf {
+        std::fs::read_dir(self.campaign.join("studies"))
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.join("intent.json").is_file() && !path.join("report.json").is_file())
+            .expect("the running study")
+    }
+
+    /// What the planner saw in each session: it evaluated the game throughout and never proposed the action.
+    fn seal_planner_observation(&self) {
+        let attempts: Vec<_> = self
+            .history
+            .iter()
+            .enumerate()
+            .map(|(slot, (process, started, ended))| {
+                serde_json::json!({
+                    "slot": slot,
+                    "process": { "pid": process.pid, "start_ticks": process.start_ticks, "uid": process.uid },
+                    "start_unix": started + 10, "end_unix": ended - 10,
+                    "evaluations": 600, "candidates": 0, "lost": 0, "source_quality": "direct",
+                })
+            })
+            .collect();
+        let file = self
+            .running_study()
+            .join(crate::autotune::research::planner_observation::FILE);
+        std::fs::write(
+            &file,
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 1, "action": "CpuAffinityProfile", "attempts": attempts,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
     /// The latency record the collectors counted over the study's eight sessions, sealed beside the running study.
     fn seal_measurement(&self) {
         use crate::autotune::research::{
@@ -90,13 +134,7 @@ impl Acting {
             },
             treatment::{Treatment, treatments_of},
         };
-        let studies = self.campaign.join("studies");
-        let dir = std::fs::read_dir(&studies)
-            .unwrap()
-            .flatten()
-            .map(|entry| entry.path())
-            .find(|path| path.join("intent.json").is_file() && !path.join("report.json").is_file())
-            .expect("the running study");
+        let dir = self.running_study();
         let intent: ResearchIntentV1 =
             serde_json::from_slice(&std::fs::read(dir.join("intent.json")).unwrap()).unwrap();
         let schedule = treatments_of(&intent).unwrap().unwrap();
@@ -187,7 +225,11 @@ impl LongSessionDriver for Route {
         if let Some(acting) = self.acting.as_mut() {
             acting.history.push((process, started, ended));
             if acting.history.len() == 8 {
-                acting.seal_measurement();
+                if acting.applies {
+                    acting.seal_measurement();
+                } else {
+                    acting.seal_planner_observation();
+                }
             }
         }
         LongProgress::Completed(Box::new(LongSessionRecord {
@@ -280,13 +322,15 @@ fn build_campaign(acting: Option<u64>) -> Campaign {
                 })
             })),
         ));
-    let acting = acting.map(|on_tail_ns| Acting {
+    let applies = acting.is_some();
+    let acting = Some(Acting {
         gate: gate.clone(),
         tokens,
         acted_at,
         campaign: root.path().to_path_buf(),
         history: Vec::new(),
-        on_tail_ns,
+        on_tail_ns: acting.unwrap_or(0),
+        applies,
     });
     let results_root = results.path().to_path_buf();
     let clock = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(

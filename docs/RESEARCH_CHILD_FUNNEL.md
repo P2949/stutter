@@ -707,3 +707,15 @@ Completed.
 - The real `cpu_profile`/`gpu_profile` run through the file hook over realistic per-arm settings: resolution, upscaler
   and frame generation resolved against observed indices, unobserved values and partial failure refuse the whole
   study with every arm's bytes untouched, restoration is byte for byte. Effective rendered resolution stays unproven.
+
+## Justified abstention rests on the planner's observation (eighteenth audit)
+
+`research/planner_observation.rs`: `ActionNotIndicated` is a claim about the planner, so it needs
+`planner-observation.json`: for every completed attempt, the resident planner's own evaluations of that game process
+over a window inside the attempt (at least ten, direct source, nothing lost) and no candidate for the authorized
+action. No receipts alone is no longer an abstention (a controller that never ran leaves none either): live outcome
+and replay both require the observation, and the synthetic campaign now seals it from the route's own history.
+
+The production-composed campaign also runs a qualified action (applied on every treated attempt, collector-sealed
+latency measurement) through `verify_children`, a worse action (valid study, Revert decision), and tampers (measurement
+removed, restoration altered, receipt dropped) that verification refuses.

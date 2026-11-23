@@ -89,8 +89,9 @@ pub(super) fn verify_qualification(
         comparison_valid: super::study_executor::comparison_valid(study.stage, &report.arms),
         action_metric_valid: matches!(study.stage, Stage::Action(_))
             && action_metric_valid(dir, uid, &intent, &evidence),
-        action_not_indicated: matches!(study.stage, Stage::Action(_))
-            && abstention_replay(dir, uid, u32::try_from(report.attempts_completed)?),
+        action_not_indicated: matches!(study.stage, Stage::Action(action)
+            if abstention_replay(dir, uid, u32::try_from(report.attempts_completed)?)
+                && planner_observation_valid(dir, uid, action, &evidence)),
         stage_evidence: if study.stage == Stage::Init {
             let arms: Vec<&str> = parent
                 .prefix_init_arms
@@ -220,6 +221,23 @@ pub(super) fn action_replay(
 
 /// Whether the action study's own durable abstention record names exactly the completed attempts, says nothing
 /// was applied, and sits beside no action receipts (an applied action would have left some).
+/// Whether the planner's own sealed observation supports abstaining from this action over these completed attempts.
+pub(super) fn planner_observation_valid(
+    dir: &File,
+    uid: u32,
+    action: super::ResearchAction,
+    evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+) -> bool {
+    read_private(dir, super::planner_observation::FILE, uid).is_ok_and(|bytes| {
+        super::planner_observation::verify(
+            &bytes,
+            action,
+            &super::child_verify_rules::processes_of(evidence),
+        )
+        .is_ok()
+    })
+}
+
 fn abstention_replay(dir: &File, uid: u32, completed: u32) -> bool {
     let recorded = read_private(dir, super::action_coverage::ABSTENTION_RECORD, uid)
         .ok()
