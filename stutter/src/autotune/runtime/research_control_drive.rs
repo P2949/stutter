@@ -334,6 +334,16 @@ impl ResearchCoordinator {
             .and_then(FunnelDriver::telemetry)
     }
 
+    /// The resident observer of a funnel campaign, for the runtime to report its events into.
+    pub(in crate::autotune::runtime) fn resident(
+        &self,
+    ) -> Option<crate::autotune::research::resident_observer::SharedResident> {
+        self.driver
+            .as_ref()
+            .and_then(|state| state.funnel.as_ref())
+            .and_then(FunnelDriver::resident)
+    }
+
     pub(in crate::autotune::runtime) fn action_gate(
         &self,
     ) -> Option<crate::autotune::research::action_gate::SharedActionGate> {

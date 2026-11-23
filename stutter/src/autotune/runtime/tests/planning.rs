@@ -174,6 +174,63 @@ mod research_action_gate {
     }
 
     #[test]
+    fn the_runtime_reports_its_interval_and_gpu_events_into_the_resident_observer() {
+        use crate::{
+            autotune::research::{
+                action_child::ChildTarget,
+                resident_observer::{ResidentObserver, SharedResident},
+            },
+            metrics::{IntervalRecord, LatencyHistogram},
+            process_tree::TaskClass,
+            session_events::MonitorEvent,
+        };
+        let pid = std::process::id();
+        let identity = process_identity(pid).expect("a live process");
+        let mut runtime = runtime_for(pid, vec![]);
+        let resident: SharedResident = Arc::new(Mutex::new(ResidentObserver::default()));
+        runtime.set_research_resident(Some(resident.clone()));
+        let game = |events: u64| {
+            let mut histogram = LatencyHistogram::new();
+            for _ in 0..events {
+                histogram.record(500_000);
+            }
+            IntervalRecord {
+                process_pid: Some(pid),
+                class: TaskClass::Game,
+                samples: events,
+                max_ns: 500_000,
+                histogram: histogram.snapshot(),
+                ..Default::default()
+            }
+        };
+        // Nothing attested yet: nothing is counted.
+        runtime.observe_research_intervals(&[game(10)], 0);
+        resident
+            .lock()
+            .unwrap()
+            .arm(ChildTarget { ..identity }, Some(0), 100);
+        runtime.observe_research_intervals(&[game(40), game(60)], 2);
+        for _ in 0..3 {
+            runtime
+                .on_event(MonitorEvent::GpuSample {
+                    sample: Box::default(),
+                })
+                .unwrap();
+        }
+        let windows = resident.lock().unwrap().freeze(200);
+        assert_eq!(windows.len(), 1);
+        assert_eq!(
+            (
+                windows[0].events(),
+                windows[0].lost_events,
+                windows[0].gpu_samples,
+                windows[0].cpu_samples
+            ),
+            (100, 2, 3, 1)
+        );
+    }
+
+    #[test]
     fn the_runtime_reports_its_frames_and_frame_source_into_the_telemetry_observer() {
         use crate::{
             autotune::research::{

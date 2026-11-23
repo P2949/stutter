@@ -137,3 +137,70 @@ fn nothing_applied_without_the_planners_observation_is_not_a_justified_abstentio
     let run = judge(&study, &outcome);
     assert_ne!(run.reason, "ActionNotIndicated");
 }
+
+/// What the resident runtime observed of each attempt's game process is kept beside the study as raw counters, one
+/// window per attempt on its own process, and survives only as that: nothing is stated, derived or decided here.
+#[test]
+fn every_attempts_observed_window_is_kept_beside_the_study_as_raw_counters() {
+    use crate::{
+        autotune::research::resident_observer::{SharedResident, WINDOWS_FILE},
+        metrics::{IntervalRecord, LatencyHistogram},
+        process_tree::TaskClass,
+    };
+    let (root, runner, study, _gate, _parent) = build(&unit().definition_sha256);
+    let resident: SharedResident = Default::default();
+    let mut runner = runner.with_resident(resident.clone());
+    let (sighted, _, _) = RIG.with(|rig| rig.borrow().clone().unwrap());
+    let outcome = 'run: {
+        for _ in 0..20_000 {
+            if let Some(outcome) = runner.poll(&study, 100).unwrap() {
+                break 'run outcome;
+            }
+            // The runtime's interval event for the game process the host attested.
+            if let Some(process) = *sighted.lock().unwrap() {
+                let mut histogram = LatencyHistogram::new();
+                for _ in 0..50 {
+                    histogram.record(700_000);
+                }
+                resident.lock().unwrap().observe_intervals(
+                    &[IntervalRecord {
+                        process_pid: Some(process.pid.as_u32()),
+                        class: TaskClass::Game,
+                        samples: 50,
+                        max_ns: 700_000,
+                        histogram: histogram.snapshot(),
+                        ..Default::default()
+                    }],
+                    0,
+                );
+            }
+        }
+        panic!("the study never ended");
+    };
+    assert_eq!(outcome.completed, 8);
+    let path = root
+        .path()
+        .join("studies")
+        .join(&study.study_sha256[..16])
+        .join(WINDOWS_FILE);
+    let windows: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let windows = windows.as_array().unwrap();
+    assert_eq!(windows.len(), 8, "one window per attempt");
+    let pids: std::collections::BTreeSet<_> =
+        windows.iter().map(|w| w["pid"].as_u64().unwrap()).collect();
+    assert_eq!(pids.len(), 8, "each on its own game process");
+    assert!(windows.iter().all(|w| {
+        w["lost_events"] == 0
+            && w["invalid_intervals"] == 0
+            && w["cpu_samples"].as_u64().unwrap() > 0
+            && w["histogram"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| b["count"].as_u64().unwrap())
+                .sum::<u64>()
+                > 0
+    }));
+    // Persisted and acknowledged: nothing is left to write twice.
+    assert!(resident.lock().unwrap().freeze(1).is_empty());
+}

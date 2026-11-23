@@ -67,6 +67,8 @@ pub struct DriverStudyAttempts {
     gate: Option<SharedActionGate>,
     /// What the resident runtime reports of the game during each attempt (absent: nothing kept).
     telemetry: Option<super::telemetry_observer::SharedTelemetry>,
+    /// The resident observer and the latest time seen (closes the open window); absent: none.
+    resident: Option<(super::resident_observer::SharedResident, u64)>,
     armed_for: Option<String>,
     /// The game process the gate is currently scoped to.
     armed_target: Option<super::action_child::ChildTarget>,
@@ -126,6 +128,7 @@ impl DriverStudyAttempts {
             override_now: None,
             gate: None,
             telemetry: None,
+            resident: None,
             armed_for: None,
             armed_target: None,
             treatment_study: false,
@@ -378,6 +381,7 @@ impl DriverStudyAttempts {
     ) -> anyhow::Result<AttemptsOutcome> {
         let report = driver.finalize()?;
         self.record_telemetry(study)?;
+        self.record_resident(study)?;
         let study_dir = open_dir(&open_dir(&self.campaign, STUDIES_DIR)?, dir_name(study))?;
         // The study's report is sealed beside its journal; verification recomputes and compares it.
         match write_report(&study_dir, &report) {
@@ -658,6 +662,7 @@ impl StudyAttempts for DriverStudyAttempts {
         self.arm_gate_for(study);
         self.observe_feature(study);
         self.arm_telemetry();
+        self.arm_resident(now);
         let halted = matches!(step, Step::Halted(_));
         let terminal_failure = match step {
             Step::Stopped(class) => Some(class),
@@ -690,7 +695,6 @@ impl StudyAttempts for DriverStudyAttempts {
 #[path = "driver_attempts_persistence.rs"]
 mod persistence;
 pub(crate) use persistence::TimeFacts;
-
 #[cfg(test)]
 #[path = "driver_attempts_tests.rs"]
 mod tests;

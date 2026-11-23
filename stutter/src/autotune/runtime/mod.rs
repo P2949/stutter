@@ -93,6 +93,7 @@ pub struct AutotuneRuntime {
     research_action_gate: Option<research_gate::SharedGate>,
     /// What the resident controller sees of the game during research attempts (absent: nothing kept).
     research_telemetry: Option<crate::autotune::research::telemetry_observer::SharedTelemetry>,
+    research_resident: Option<crate::autotune::research::resident_observer::SharedResident>,
     controller: OnlineAutotuneController,
     latest_focus: Option<AutotuneObservationFocus>,
     target_state: RuntimeTargetState,

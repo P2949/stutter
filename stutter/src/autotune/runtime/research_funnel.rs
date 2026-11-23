@@ -203,6 +203,7 @@ fn build(
         )),
     ));
     let telemetry: SharedTelemetry = Default::default();
+    let resident: crate::autotune::research::resident_observer::SharedResident = Default::default();
     let rules = RuleRegistry::default();
     let results = study_dir.to_path_buf();
     // The driver rejects a clock that moves backward, so the clock is clamped to never do so.
@@ -221,7 +222,8 @@ fn build(
         production_inputs(campaign.try_clone()?, intent.clone(), rules.clone()),
     )
     .with_action_gate(gate.clone())
-    .with_telemetry(telemetry.clone());
+    .with_telemetry(telemetry.clone())
+    .with_resident(resident.clone());
     if let Some(socket) = worker_socket.map(std::path::Path::to_path_buf) {
         attempts = attempts.with_claim_verifier_factory(Box::new(move || {
             super::drive::production_claim_verifier(socket.clone())
@@ -257,6 +259,7 @@ fn build(
     )?
     .with_selection_blocker(selection)
     .with_telemetry(telemetry)
+    .with_resident(resident)
     .with_action_gate(gate))
 }
 

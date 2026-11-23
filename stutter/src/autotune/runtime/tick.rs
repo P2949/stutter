@@ -139,6 +139,7 @@ impl AutotuneRuntime {
                         ..record
                     })
                     .collect::<Vec<_>>();
+                self.observe_research_intervals(&records, lost.total());
                 self.latest_drop_counters = lost;
                 self.controller.window.push_intervals(records);
                 return self.evaluate_and_emit(None);
@@ -153,6 +154,7 @@ impl AutotuneRuntime {
                 self.controller.window.push_block_io_event(*event);
             }
             MonitorEvent::GpuSample { sample } => {
+                self.observe_research_gpu_sample();
                 self.controller.window.push_gpu_sample(*sample);
             }
             MonitorEvent::GpuEngineSample { .. } => {}

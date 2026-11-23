@@ -109,7 +109,7 @@ pub struct WindowGuards {
 #[derive(Clone, Debug)]
 pub struct LatencyWindowBuilder {
     start_unix: u64,
-    histogram: crate::metrics::LatencyHistogram,
+    buckets: Vec<crate::metrics::LatencyHistogramBucket>,
     max_ns: u64,
     lost: u64,
     same_target: bool,
@@ -119,7 +119,7 @@ impl LatencyWindowBuilder {
     pub fn new(now_unix: u64) -> Self {
         Self {
             start_unix: now_unix,
-            histogram: crate::metrics::LatencyHistogram::new(),
+            buckets: crate::metrics::LatencyHistogram::new().snapshot(),
             max_ns: 0,
             lost: 0,
             same_target: true,
@@ -128,8 +128,43 @@ impl LatencyWindowBuilder {
     /// One runnable-delay event of the scoped game target, in nanoseconds as the kernel source reports it. A delay
     /// that is not a number of nanoseconds cannot be passed: the type is the validation.
     pub fn event(&mut self, delay_ns: u64) {
-        self.histogram.record(delay_ns);
+        // The controller's own rule: the first bucket whose bound holds the delay, else the unbounded last one.
+        let index = self
+            .buckets
+            .iter()
+            .position(|bucket| bucket.upper_bound_ns.is_some_and(|bound| delay_ns <= bound))
+            .unwrap_or(self.buckets.len() - 1);
+        self.buckets[index].count = self.buckets[index].count.saturating_add(1);
         self.max_ns = self.max_ns.max(delay_ns);
+    }
+
+    /// A population the resident runtime already merged in the controller's canonical layout (its interval records'
+    /// histograms summed). A layout that is not the canonical one is refused, never reinterpreted.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the latency record is assembled once the foreground and thermal guard facts are fed"
+        )
+    )]
+    pub fn from_population(
+        now_unix: u64,
+        buckets: Vec<crate::metrics::LatencyHistogramBucket>,
+        max_ns: u64,
+    ) -> Option<Self> {
+        let canonical = crate::metrics::LatencyHistogram::new().snapshot();
+        let same_layout = buckets.len() == canonical.len()
+            && buckets
+                .iter()
+                .zip(&canonical)
+                .all(|(a, b)| a.upper_bound_ns == b.upper_bound_ns);
+        same_layout.then_some(Self {
+            start_unix: now_unix,
+            buckets,
+            max_ns,
+            lost: 0,
+            same_target: true,
+        })
     }
     /// Events the source dropped, or samples that could not be read: the window is then not a population.
     pub fn lost(&mut self, count: u64) {
@@ -143,7 +178,7 @@ impl LatencyWindowBuilder {
     pub fn finish(&self, end_unix: u64, guards: WindowGuards) -> Value {
         json!({
             "start_unix": self.start_unix, "end_unix": end_unix, "lost": self.lost,
-            "same_target": self.same_target, "histogram": self.histogram.snapshot(),
+            "same_target": self.same_target, "histogram": self.buckets,
             "max_ns": self.max_ns,
             "foreground_p99_ms": guards.foreground_p99_ms,
             "foreground_samples": guards.foreground_samples,

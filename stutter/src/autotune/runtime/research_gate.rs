@@ -58,6 +58,37 @@ impl AutotuneRuntime {
         self.research_telemetry = telemetry;
     }
 
+    /// Install (or remove) the observer the funnel reads each attempt's observed window from.
+    pub fn set_research_resident(
+        &mut self,
+        resident: Option<crate::autotune::research::resident_observer::SharedResident>,
+    ) {
+        self.research_resident = resident;
+    }
+
+    /// Report an interval event the runtime just handled: the records it carried and the events its sources
+    /// dropped. Reading only; the observer counts what concerns the attested game process.
+    pub(super) fn observe_research_intervals(
+        &self,
+        records: &[crate::metrics::IntervalRecord],
+        lost_events: u64,
+    ) {
+        if let Some(resident) = self.research_resident.as_ref()
+            && let Ok(mut observer) = resident.lock()
+        {
+            observer.observe_intervals(records, lost_events);
+        }
+    }
+
+    /// Report a GPU sample event the runtime just handled.
+    pub(super) fn observe_research_gpu_sample(&self) {
+        if let Some(resident) = self.research_resident.as_ref()
+            && let Ok(mut observer) = resident.lock()
+        {
+            observer.observe_gpu_sample();
+        }
+    }
+
     /// Report what the runtime just saw: a frame event, and the frame source's own status. Reading
     /// only; nothing here changes what the controller does.
     pub(super) fn observe_research_telemetry(&mut self, frame_event: bool) {

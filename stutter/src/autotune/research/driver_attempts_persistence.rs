@@ -13,6 +13,75 @@ use super::{
 };
 
 impl DriverStudyAttempts {
+    /// Share the resident observer with the runtime: each attempt's observed window is kept beside its study.
+    pub fn with_resident(
+        mut self,
+        resident: super::super::resident_observer::SharedResident,
+    ) -> Self {
+        self.resident = Some((resident, 0));
+        self
+    }
+
+    /// Observe the attested game process of the running attempt: the runtime's interval and GPU events are counted
+    /// against it from here on.
+    pub(super) fn arm_resident(&mut self, now: u64) {
+        let Some(target) = self.host.game_process() else {
+            return;
+        };
+        let attempt = self.host.attempt_index();
+        if let Some((resident, latest)) = self.resident.as_mut() {
+            *latest = now;
+            if let Ok(mut observer) = resident.lock() {
+                observer.arm(target, attempt, now);
+            }
+        }
+    }
+
+    /// Keep every attempt's observed window beside the study as raw, immutable counters (write-once; a conflicting
+    /// file means the windows cannot be recorded and the study simply has none).
+    pub(super) fn record_resident(&self, study: &ChildStudy) -> anyhow::Result<()> {
+        let Some((resident, latest)) = &self.resident else {
+            return Ok(());
+        };
+        let windows = resident
+            .lock()
+            .map_err(|_| anyhow::anyhow!("the resident observer is poisoned"))?
+            .freeze(*latest);
+        if windows.is_empty() {
+            return Ok(());
+        }
+        let rows: Vec<serde_json::Value> = windows
+            .iter()
+            .map(super::super::resident_observer::window_record)
+            .collect();
+        let studies = open_dir(&self.campaign, STUDIES_DIR)?;
+        let dir = open_dir(&studies, dir_name(study))?;
+        let bytes = serde_json::to_vec_pretty(&rows)?;
+        match write_new(&dir, super::super::resident_observer::WINDOWS_FILE, &bytes) {
+            Ok(()) => {}
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                anyhow::ensure!(
+                    super::super::report_store::read_private(
+                        &dir,
+                        super::super::resident_observer::WINDOWS_FILE,
+                        self.parent.uid
+                    )? == bytes,
+                    "resident windows not recorded: the existing windows differ"
+                );
+            }
+            Err(error) => return Err(error.context("resident windows not recorded")),
+        }
+        resident
+            .lock()
+            .map_err(|_| anyhow::anyhow!("the resident observer is poisoned"))?
+            .acknowledge(windows.len());
+        Ok(())
+    }
+
     /// An Action study arms the gate (once) on the game process the host has sighted and attested,
     /// authorizing only that study's action, for the rest of the campaign's window.
     pub(super) fn arm_gate_for(&mut self, study: &ChildStudy) {

@@ -196,6 +196,7 @@ pub(crate) mod protected_state;
 pub(crate) mod raw_archive;
 pub(crate) mod replication;
 pub mod resident_observation;
+pub(crate) mod resident_observer;
 pub(crate) mod route_driver;
 #[cfg_attr(
     not(test),

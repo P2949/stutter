@@ -207,6 +207,8 @@ pub struct FunnelDriver {
     gate: Option<SharedActionGate>,
     /// What the resident runtime sees of the game, shared with it (absent: none kept).
     telemetry: Option<SharedTelemetry>,
+    /// The resident runtime's observed windows of each attempt, shared with it (absent: none kept).
+    resident: Option<super::resident_observer::SharedResident>,
 }
 
 impl FunnelDriver {
@@ -228,6 +230,7 @@ impl FunnelDriver {
             rules,
             gate: None,
             telemetry: None,
+            resident: None,
         })
     }
 
@@ -247,6 +250,16 @@ impl FunnelDriver {
     pub fn with_telemetry(mut self, telemetry: SharedTelemetry) -> Self {
         self.telemetry = Some(telemetry);
         self
+    }
+
+    /// Share the observer whose windows each attempt keeps.
+    pub fn with_resident(mut self, resident: super::resident_observer::SharedResident) -> Self {
+        self.resident = Some(resident);
+        self
+    }
+
+    pub fn resident(&self) -> Option<super::resident_observer::SharedResident> {
+        self.resident.clone()
     }
 
     pub fn telemetry(&self) -> Option<SharedTelemetry> {

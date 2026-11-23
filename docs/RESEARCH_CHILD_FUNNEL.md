@@ -729,3 +729,19 @@ action id (`cpu-affinity-profile:` or `cgroup:`), the very pid and start time, s
 `rollback_verified`, a rollback token, no fault, and timestamps inside the attempt the receipt is attributed to. A
 receipt without a corroborating record, or a record no receipt accounts for, refuses the study (live and replay use
 the one function). The archive is produced by the resident runtime from the controller's journal during a physical run.
+
+## The resident observer is fed by the runtime's own events (eighteenth audit)
+
+`research/resident_observer.rs` is a shared observer in the telemetry observer's pattern: the funnel arms it on the
+attested game process of each attempt (`DriverStudyAttempts::arm_resident`), and the existing runtime event path feeds
+it (`AutotuneRuntime::on_event`: interval records and the events their sources dropped; GPU samples). It counts only
+what concerns that exact pid, merges the target game classes' histograms in the controller's canonical layout (an
+interval that is not a valid canonical population is counted as unusable, never merged; another game process in the
+target's intervals marks the window not one population), and at study end `record_resident` keeps one raw window per
+attempt beside the study as `resident-windows.json` (write-once, acknowledged only after it is durable). No second
+sensor path, optimizer or mutation channel is created.
+
+Typed gaps still needed before these windows become the sealed `resident-observation.json` and `action-latency.json`:
+the renderer binding from the frame-source receipt, the target's cgroup, owner attribution, and the foreground
+frame-tail, over-5-ms and thermal/power guard facts of each window; `resident_entry` and
+`LatencyWindowBuilder::from_population` derive the records once those are fed.
