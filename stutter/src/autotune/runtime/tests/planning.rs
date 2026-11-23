@@ -256,7 +256,7 @@ mod research_action_gate {
         for _ in 0..50 {
             histogram.record(400_000);
         }
-        for second in 1..=3u64 {
+        for second in 1..=12u64 {
             let game = IntervalRecord {
                 elapsed_ms: second * 1_000,
                 process_pid: Some(pid),
@@ -309,7 +309,32 @@ mod research_action_gate {
                 window.invalid_intervals,
                 window.target_changed
             ),
-            (150, 3, 3, 3, 0, false)
+            (600, 12, 12, 12, 0, false)
+        );
+        // And the sealed document those runtime events produced is one the independent verifier accepts.
+        let process = crate::autotune::research::child_verify::AttemptProcess {
+            slot: 0,
+            pid: identity.pid,
+            start_ticks: identity.start_ticks,
+            uid: identity.uid,
+            started_unix: 100,
+            completed_unix: 200,
+        };
+        let entry = crate::autotune::research::resident_observer::resident_entry(
+            window,
+            &process,
+            "0::/app.slice",
+            true,
+            true,
+            false,
+        );
+        let document =
+            crate::autotune::research::evidence_producers::resident_observation_document(vec![
+                entry,
+            ]);
+        assert_eq!(
+            crate::autotune::research::resident_observation::verify(&document, &[process]),
+            Ok(())
         );
     }
 
