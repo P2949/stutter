@@ -658,3 +658,26 @@ The gate now records, per proven restoration, when the action was permitted, whe
 ## Seventeenth audit: producer collectors
 
 `evidence_producers` holds the producer half of the sealed records: `ResidentCollector` (counts of CPU/GPU/PSI samples, lost samples, runnable events, cgroup, renderer, owners; `finish` yields the attempt's entry) and `LatencyWindowBuilder` (raw runnable-delay events binned into the histogram, lost events, target change; `finish` yields the window), plus the document builders. The tests feed them and check the output with `resident_observation::verify` and `action_latency::verify`, so producer and verifier cannot drift apart. They hold only what they are given; feeding them from the live game through the runtime's event path is the part that needs the game and is not wired.
+
+## G5 objective unification (eighteenth audit)
+
+The action study's measurement no longer has a decision rule of its own. `autotune/objective/runnable_replay.rs`
+builds, from a sealed window (the controller's canonical `LatencyHistogram` buckets, its maximum, the foreground
+frame tail and over-5-ms count, thermal and power flags), the very `ObjectiveSignals` the live controller builds
+(`set_runnable_latency_from_histogram` shares its validation and percentile code with the interval-record path) and
+decides each off/on pair with `compare_for_objective` for `GameRunnableLatency`: 12.5% improvement, 7.5%
+regression, 1000-sample floor, worsening >5 ms tail rejection, frame (+1 ms), foreground (+2 ms and over-5-ms share),
+thermal and power guards. The only addition is resolution honesty: an improvement is reported only when the
+candidate's bucket bound already clears the frozen improvement from the bottom of the baseline's bucket; otherwise the
+pair is inconclusive ("resolution cannot show the claimed improvement"). A differential test checks the offline
+signal field for field against the controller's interval-record signal on identical populations.
+
+`research/action_latency.rs` (schema 3) combines the per-pair production decisions over every planned pair: Keep when
+most pairs improved and none regressed; Revert when most regressed; otherwise Null. A broken guard is a regressed
+pair, not a refused record. `LatencyWindowBuilder` counts into the canonical histogram from nanosecond events (no
+float, so no NaN or negative delay is representable) and carries the guard facts.
+
+Also: the live action qualification now uses the replay's own coverage function (a receipt on every attempt treated
+On, each attributed to its own process), so a partly applied action can no longer be live-qualified and then
+contradicted at verification; a qualified long action study with a collector-built latency record is proven through
+`verify_qualification`; the daemon restore dry-run test uses its own state instead of the live controller's journal.

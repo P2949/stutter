@@ -10,7 +10,9 @@ fn a_long_action_study_with_its_sealed_latency_measurement_qualifies_and_replays
     use crate::autotune::research::{
         action_latency,
         child_verify::AttemptProcess,
-        evidence_producers::{LatencyWindowBuilder, action_latency_document, latency_pair},
+        evidence_producers::{
+            LatencyWindowBuilder, WindowGuards, action_latency_document, latency_pair,
+        },
         treatment::{Treatment, treatments_of},
     };
     let (root, mut runner, study, gate, parent) = build(&unit().definition_sha256);
@@ -27,17 +29,28 @@ fn a_long_action_study_with_its_sealed_latency_measurement_qualifies_and_replays
         started_unix: 5_000,
         completed_unix: 6_200,
     };
-    let window = |tail: f64| {
+    let window = |tail_ns: u64| {
         let mut builder = LatencyWindowBuilder::new(5_010);
-        for _ in 0..1_960 {
-            builder.event(0.4);
+        for _ in 0..1_900 {
+            builder.event(500_000);
         }
-        for _ in 0..40 {
-            builder.event(tail);
+        for _ in 0..100 {
+            builder.event(tail_ns);
         }
-        builder.finish(6_190, 16.0)
+        builder.finish(
+            6_190,
+            WindowGuards {
+                foreground_p99_ms: 12.0,
+                foreground_samples: 1_000,
+                foreground_over_5ms: 10,
+                thermal_degraded: false,
+                thermal_throttle_count: 0,
+                cpu_power_limited: false,
+                gpu_power_limited: false,
+            },
+        )
     };
-    let record = |off_tail: f64, on_tail: f64| {
+    let record = |off_tail: u64, on_tail: u64| {
         action_latency_document(
             (0..schedule.len() as u32 / 2)
                 .map(|block| {
@@ -56,7 +69,7 @@ fn a_long_action_study_with_its_sealed_latency_measurement_qualifies_and_replays
         )
     };
     let file = path.join(action_latency::FILE);
-    std::fs::write(&file, record(30.0, 8.0)).unwrap();
+    std::fs::write(&file, record(20_000_000, 1_500_000)).unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     let outcome = run_acting(&mut runner, &study, &gate);
     assert!(
@@ -98,7 +111,8 @@ fn a_long_action_study_with_its_sealed_latency_measurement_qualifies_and_replays
         (result.pairs, result.decision),
         (4, action_latency::Decision::Keep)
     );
-    let worse = action_latency::verify(&record(8.0, 30.0), &schedule, &processes).unwrap();
+    let worse =
+        action_latency::verify(&record(1_500_000, 20_000_000), &schedule, &processes).unwrap();
     assert_eq!(worse.decision, action_latency::Decision::Revert);
     // A record that names another process cannot stand for these attempts.
     let mut stranger = process(0);

@@ -1,11 +1,14 @@
 //! The measured objective an action study must carry beside its safety evidence (PLAN G5): the game's
-//! runnable latency, as the 99th percentile, with the action off and on over paired attempts. Applying and
-//! restoring an action is a safety claim; whether it helped is a measurement, and a study without a valid one
-//! is not a qualified action. The record carries sealed per-window populations (histograms), never a stated
-//! percentile or a declared quality: this reader recomputes the 99th percentile itself, judges each window's
-//! source with the same runnable-source rule the controller uses, applies the frozen keep and revert thresholds
-//! and the foreground guardrail, and requires every planned pair. The record is produced from the resident
-//! runtime's own samples during a physical run; nothing here fabricates one.
+//! runnable latency with the action off and on over paired attempts. Applying and restoring an action is a safety
+//! claim; whether it helped is a measurement, and a study without a valid one is not a qualified action.
+//!
+//! The record carries sealed per-window populations in the controller's own canonical histogram layout, never a
+//! stated percentile or a declared quality. Each pair is decided by the production objective comparison
+//! (`objective::runnable_replay`): the controller's thresholds, its worsening-tail rejection and its frame,
+//! foreground, power and thermal guards. This module only validates that the windows are measurements of the
+//! planned attempts, requires every planned pair, and combines the pair decisions. It defines no keep or revert
+//! threshold of its own. The record is produced from the resident runtime's own samples during a physical run;
+//! nothing here fabricates one.
 
 use serde::Deserialize;
 
@@ -14,17 +17,18 @@ use super::{
     child_verify::AttemptProcess,
     quality::{RunnableVerdict, judge_runnable},
 };
+use crate::{
+    autotune::{
+        comparison::ExperimentResult,
+        objective::runnable_replay::{ReplayWindow, replay_pair, window_problem},
+    },
+    metrics::LatencyHistogramBucket,
+};
 
 /// The file, beside the study, holding the paired runnable-latency record.
 pub const FILE: &str = "action-latency.json";
 /// Paired off/on attempts needed before a comparison means anything.
 pub const MIN_PAIRS: usize = 3;
-/// The frozen practical-effect threshold on the relative change of the 99th percentile: the median pair must move
-/// by at least this much for a keep (down) or a revert (up); anything inside is a null result.
-pub const KEEP_RELATIVE: f64 = 0.05;
-/// The foreground frame-time guardrail: the action may not make the foreground's 99th percentile worse by more.
-pub const FOREGROUND_REGRESSION: f64 = 0.05;
-const PERCENTILE: f64 = 0.99;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,14 +36,6 @@ pub struct IdentityRef {
     pub pid: stutter_core::ids::Pid,
     pub start_ticks: u64,
     pub uid: u32,
-}
-
-/// One histogram bucket: events whose runnable delay was at most `le_ms` (and above the previous bucket).
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Bucket {
-    pub le_ms: f64,
-    pub count: u64,
 }
 
 /// One attempt's scoped window.
@@ -52,9 +48,17 @@ pub struct Window {
     pub lost: u64,
     /// The scoped target (pid, start time, uid) was the same process for the whole window.
     pub same_target: bool,
-    pub histogram: Vec<Bucket>,
-    /// The foreground's own 99th-percentile frame time over the same window, for the guardrail.
+    /// The target game's merged runnable-delay population, in the canonical bucket layout, and its maximum.
+    pub histogram: Vec<LatencyHistogramBucket>,
+    pub max_ns: u64,
+    /// The foreground's own frame-time tail, frame count and over-5-ms count over the same window.
     pub foreground_p99_ms: f64,
+    pub foreground_samples: u64,
+    pub foreground_over_5ms: u64,
+    pub thermal_degraded: bool,
+    pub thermal_throttle_count: u64,
+    pub cpu_power_limited: bool,
+    pub gpu_power_limited: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -76,14 +80,14 @@ pub struct LatencyRecord {
     pub pairs: Vec<LatencyPair>,
 }
 
-/// What the objective's frozen rule says of the measurement.
+/// What the controller's own decision says of the planned pairs, taken together.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decision {
-    /// The median pair's 99th percentile fell by at least `KEEP_RELATIVE` and most pairs improved.
+    /// Most pairs improved under the production decision and none regressed.
     Keep,
-    /// The median pair's 99th percentile rose by at least `KEEP_RELATIVE`.
+    /// Most pairs regressed under the production decision.
     Revert,
-    /// Inside the threshold: a valid result that finds no effect.
+    /// Anything else: a valid measurement that does not show a benefit.
     Null,
 }
 
@@ -91,38 +95,32 @@ pub enum Decision {
 pub struct LatencyResult {
     pub pairs: usize,
     pub improved: usize,
+    pub regressed: usize,
     pub decision: Decision,
 }
 
-/// The nearest-rank 99th percentile of a histogram, `None` when its buckets are not a valid population.
-fn p99(histogram: &[Bucket]) -> Option<(f64, u64)> {
-    let mut last = 0.0f64;
-    let mut total = 0u64;
-    for bucket in histogram {
-        if !(bucket.le_ms.is_finite() && bucket.le_ms > last) {
-            return None;
-        }
-        last = bucket.le_ms;
-        total = total.checked_add(bucket.count)?;
+fn replay_window(window: &Window, target: &IdentityRef) -> ReplayWindow {
+    // Each window is its own attempt's game process (already checked against that attempt); the production
+    // comparison needs the same target on both sides, so both carry the pair's baseline identity.
+    ReplayWindow {
+        histogram: window.histogram.clone(),
+        max_ns: window.max_ns,
+        target_pid: target.pid.as_u32(),
+        target_start_ticks: target.start_ticks,
+        frame_p99_ms: window.foreground_p99_ms,
+        scored_samples: window.foreground_samples,
+        foreground_over_5ms: window.foreground_over_5ms,
+        thermal_degraded: window.thermal_degraded,
+        thermal_throttle_count: window.thermal_throttle_count,
+        cpu_power_limited: window.cpu_power_limited,
+        gpu_power_limited: window.gpu_power_limited,
     }
-    if total == 0 {
-        return None;
-    }
-    let rank = (PERCENTILE * total as f64).ceil() as u64;
-    let mut cumulative = 0u64;
-    for bucket in histogram {
-        cumulative += bucket.count;
-        if cumulative >= rank {
-            return Some((bucket.le_ms, total));
-        }
-    }
-    None
 }
 
 /// Why the record cannot stand as the study's measurement, or its result. Every planned pair (a block whose Off and
 /// On attempts both completed) must be present and no other; each names the schedule's own attempts and the very
 /// processes they recorded; each window lies inside its attempt, comes from one unchanged target with no lost events
-/// and at least the runnable sample floor, and has a valid histogram the 99th percentile is recomputed from.
+/// and at least the production sample floor, and is a valid canonical population.
 pub fn verify(
     bytes: &[u8],
     treatments: &[Treatment],
@@ -130,7 +128,7 @@ pub fn verify(
 ) -> Result<LatencyResult, &'static str> {
     let record: LatencyRecord =
         serde_json::from_slice(bytes).map_err(|_| "ActionLatencyUnreadable")?;
-    if record.schema != 2 || record.metric != "GameRunnableLatency" {
+    if record.schema != 3 || record.metric != "GameRunnableLatency" {
         return Err("ActionLatencyWrongMetric");
     }
     let completed = |slot: u32| processes.iter().find(|p| p.slot == slot);
@@ -164,7 +162,7 @@ pub fn verify(
     if named != planned {
         return Err("ActionLatencyPairNotInTheSchedule");
     }
-    let mut changes = Vec::new();
+    let (mut improved, mut regressed) = (0usize, 0usize);
     for pair in &record.pairs {
         for (slot, identity, window) in [
             (pair.off_slot, &pair.off_process, &pair.off),
@@ -185,45 +183,42 @@ pub fn verify(
             {
                 return Err("ActionLatencyWindowOutsideTheAttempt");
             }
-            let Some((_, events)) = p99(&window.histogram) else {
+            if !(window.foreground_p99_ms.is_finite() && window.foreground_p99_ms > 0.0) {
                 return Err("ActionLatencyNotFinite");
-            };
-            match judge_runnable(Some(events), Some(window.lost), window.same_target) {
+            }
+            let events = window
+                .histogram
+                .iter()
+                .try_fold(0u64, |total, bucket| total.checked_add(bucket.count));
+            match judge_runnable(events, Some(window.lost), window.same_target) {
                 RunnableVerdict::Eligible => {}
                 RunnableVerdict::BelowSampleFloor => return Err("ActionLatencyTooFewEvents"),
                 _ => return Err("ActionLatencySourceNotQualified"),
             }
-            if !(window.foreground_p99_ms.is_finite() && window.foreground_p99_ms > 0.0) {
-                return Err("ActionLatencyNotFinite");
+            if window_problem(&replay_window(window, identity)).is_some() {
+                return Err("ActionLatencyHistogramInvalid");
             }
         }
-        // The guardrail: the action may not have made the foreground's tail worse.
-        if pair.on.foreground_p99_ms > pair.off.foreground_p99_ms * (1.0 + FOREGROUND_REGRESSION) {
-            return Err("ActionLatencyGuardrailBroken");
+        let baseline = replay_window(&pair.off, &pair.off_process);
+        let candidate = replay_window(&pair.on, &pair.off_process);
+        match replay_pair(&baseline, &candidate) {
+            ExperimentResult::Improved { .. } => improved += 1,
+            ExperimentResult::Regressed { .. } => regressed += 1,
+            _ => {}
         }
-        let (Some((off, _)), Some((on, _))) = (p99(&pair.off.histogram), p99(&pair.on.histogram))
-        else {
-            return Err("ActionLatencyNotFinite");
-        };
-        changes.push(on / off - 1.0);
     }
-    changes.sort_by(f64::total_cmp);
-    let median = if changes.len() % 2 == 1 {
-        changes[changes.len() / 2]
-    } else {
-        (changes[changes.len() / 2 - 1] + changes[changes.len() / 2]) / 2.0
-    };
-    let improved = changes.iter().filter(|change| **change < 0.0).count();
-    let decision = if median <= -KEEP_RELATIVE && improved * 2 > changes.len() {
+    let pairs = record.pairs.len();
+    let decision = if improved * 2 > pairs && regressed == 0 {
         Decision::Keep
-    } else if median >= KEEP_RELATIVE {
+    } else if regressed * 2 > pairs {
         Decision::Revert
     } else {
         Decision::Null
     };
     Ok(LatencyResult {
-        pairs: changes.len(),
+        pairs,
         improved,
+        regressed,
         decision,
     })
 }

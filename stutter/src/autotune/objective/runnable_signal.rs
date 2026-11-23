@@ -71,26 +71,7 @@ impl WindowHistogram {
                     return Err("runnable-latency histogram disagrees with tail counters");
                 }
             }
-            // A populated bucket's lower bound must be below the observed max.
-            let mut lower_bound = None;
-            for bucket in &record.histogram {
-                if bucket.count > 0 && lower_bound.is_some_and(|lower| record.max_ns <= lower) {
-                    return Err("runnable-latency histogram disagrees with maximum");
-                }
-                lower_bound = bucket.upper_bound_ns;
-            }
-            if record
-                .histogram
-                .iter()
-                .find(|bucket| {
-                    bucket
-                        .upper_bound_ns
-                        .is_none_or(|upper| record.max_ns <= upper)
-                })
-                .is_none_or(|bucket| bucket.count == 0)
-            {
-                return Err("runnable-latency maximum has no histogram observation");
-            }
+            check_histogram_max(&record.histogram, record.max_ns)?;
             window.samples = window
                 .samples
                 .checked_add(count)
@@ -107,6 +88,36 @@ impl WindowHistogram {
             return Err("direct runnable-latency signal unavailable: no game scheduler samples");
         }
         Ok(window)
+    }
+
+    /// A window from one population: its buckets must be the canonical layout, its counts must not overflow, and
+    /// its maximum must agree with them. Nothing but the counts and the maximum is taken on trust.
+    fn from_histogram(
+        histogram: &[LatencyHistogramBucket],
+        max_ns: u64,
+    ) -> Result<Self, &'static str> {
+        let canonical = LatencyHistogram::new().snapshot();
+        if histogram.len() != canonical.len()
+            || histogram
+                .iter()
+                .zip(&canonical)
+                .any(|(incoming, expected)| incoming.upper_bound_ns != expected.upper_bound_ns)
+        {
+            return Err("missing or incompatible runnable-latency histogram");
+        }
+        let samples = histogram
+            .iter()
+            .try_fold(0u64, |total, bucket| total.checked_add(bucket.count))
+            .ok_or("runnable-latency histogram count overflow")?;
+        if samples == 0 {
+            return Err("direct runnable-latency signal unavailable: no game scheduler samples");
+        }
+        check_histogram_max(histogram, max_ns)?;
+        Ok(Self {
+            buckets: histogram.to_vec(),
+            samples,
+            max_ns,
+        })
     }
 
     fn percentile(&self, per_thousand: u64) -> u64 {
@@ -127,6 +138,28 @@ impl WindowHistogram {
     }
 }
 
+/// A populated bucket's lower bound must be below the observed maximum, and the maximum must lie in a populated bucket.
+fn check_histogram_max(
+    histogram: &[LatencyHistogramBucket],
+    max_ns: u64,
+) -> Result<(), &'static str> {
+    let mut lower_bound = None;
+    for bucket in histogram {
+        if bucket.count > 0 && lower_bound.is_some_and(|lower| max_ns <= lower) {
+            return Err("runnable-latency histogram disagrees with maximum");
+        }
+        lower_bound = bucket.upper_bound_ns;
+    }
+    if histogram
+        .iter()
+        .find(|bucket| bucket.upper_bound_ns.is_none_or(|upper| max_ns <= upper))
+        .is_none_or(|bucket| bucket.count == 0)
+    {
+        return Err("runnable-latency maximum has no histogram observation");
+    }
+    Ok(())
+}
+
 fn tail_count(buckets: &[LatencyHistogramBucket], threshold: u64) -> u64 {
     // Boundaries are validated against the canonical histogram and include each
     // threshold. Counts therefore describe strict >threshold events exactly.
@@ -142,7 +175,19 @@ impl ObjectiveSignals {
         &mut self,
         records: impl Iterator<Item = &'a IntervalRecord>,
     ) {
-        let result = WindowHistogram::from_records(records);
+        self.set_runnable_latency(WindowHistogram::from_records(records));
+    }
+
+    /// The same signal from one sealed canonical population (the offline replay of a recorded window).
+    pub(crate) fn set_runnable_latency_from_histogram(
+        &mut self,
+        histogram: &[LatencyHistogramBucket],
+        max_ns: u64,
+    ) {
+        self.set_runnable_latency(WindowHistogram::from_histogram(histogram, max_ns));
+    }
+
+    fn set_runnable_latency(&mut self, result: Result<WindowHistogram, &'static str>) {
         let window = result.as_ref().ok();
         self.runnable_latency_p50_ns = window.map(|window| window.percentile(500));
         self.runnable_latency_p95_ns = window.map(|window| window.percentile(950));
@@ -238,5 +283,69 @@ mod target_signal_tests {
             ObjectiveSignalQuality::Missing
         );
         assert!(other.runnable_samples.is_none());
+    }
+
+    /// The offline replay and the live controller read one population the same way: the signal built from a sealed
+    /// histogram is field-for-field the signal built from the controller's interval records of that population.
+    #[test]
+    fn a_sealed_histogram_yields_the_signal_the_controllers_records_do() {
+        let populations: [(&[(u64, u64)], u64); 4] = [
+            (&[(500_000, 1_900), (20_000_000, 100)], 20_000_000),
+            (&[(500_000, 1_900), (8_000_000, 100)], 8_000_000),
+            (
+                &[(900_000, 700), (3_000_000, 500), (6_000_000, 800)],
+                6_000_000,
+            ),
+            (&[(1_000_000, 2_000)], 1_000_000),
+        ];
+        for (events, max_ns) in populations {
+            let mut histogram = LatencyHistogram::new();
+            for (delay, count) in events {
+                for _ in 0..*count {
+                    histogram.record(*delay);
+                }
+            }
+            let snapshot = histogram.snapshot();
+            let samples: u64 = snapshot.iter().map(|bucket| bucket.count).sum();
+            let interval = IntervalRecord {
+                process_pid: Some(10),
+                class: TaskClass::Game,
+                samples,
+                max_ns,
+                over_1ms: tail_count(&snapshot, 1_000_000),
+                over_2ms: tail_count(&snapshot, 2_000_000),
+                over_5ms: tail_count(&snapshot, 5_000_000),
+                histogram: snapshot.clone(),
+                ..Default::default()
+            };
+            let live = runnable_signals_for_target(&[interval], 10, 77);
+            let mut offline = ObjectiveSignals::default();
+            offline.set_runnable_latency_from_histogram(&snapshot, max_ns);
+            assert_eq!(
+                (
+                    live.runnable_latency_p50_ns,
+                    live.runnable_latency_p95_ns,
+                    live.runnable_latency_p99_ns,
+                    live.runnable_latency_max_ns,
+                    live.runnable_samples,
+                    live.runnable_over_1ms,
+                    live.runnable_over_2ms,
+                    live.runnable_over_5ms,
+                    live.runnable_latency_source.clone(),
+                ),
+                (
+                    offline.runnable_latency_p50_ns,
+                    offline.runnable_latency_p95_ns,
+                    offline.runnable_latency_p99_ns,
+                    offline.runnable_latency_max_ns,
+                    offline.runnable_samples,
+                    offline.runnable_over_1ms,
+                    offline.runnable_over_2ms,
+                    offline.runnable_over_5ms,
+                    offline.runnable_latency_source.clone(),
+                ),
+                "{events:?}"
+            );
+        }
     }
 }

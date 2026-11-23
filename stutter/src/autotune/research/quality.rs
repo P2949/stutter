@@ -7,7 +7,7 @@ pub const MIN_DIRECT_FRAMES: u64 = 2_400;
 /// Direct frame-primary gate: authenticated clock alignment bound, in nanoseconds.
 pub const MAX_CLOCK_ALIGNMENT_NS: u64 = 2_000_000;
 /// Supported runnable objective floor per comparison window.
-pub const MIN_RUNNABLE_EVENTS: u64 = 1_000;
+pub const MIN_RUNNABLE_EVENTS: u64 = crate::autotune::objective::MINIMUM_RUNNABLE_SAMPLES;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameSourceFacts {

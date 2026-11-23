@@ -48,6 +48,7 @@ pub use game_frame_pacing::{
 mod game_runnable_latency;
 mod io_latency;
 mod irq_overlap;
+pub mod runnable_replay;
 pub(crate) mod runnable_signal;
 mod stutter_score;
 mod thermal;

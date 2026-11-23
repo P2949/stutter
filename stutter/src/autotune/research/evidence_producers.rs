@@ -9,22 +9,6 @@ use serde_json::{Value, json};
 
 use super::child_verify::AttemptProcess;
 
-/// Histogram bounds in milliseconds, ascending; the last bucket takes everything above the previous bound.
-const BOUNDS_MS: [f64; 12] = [
-    0.05,
-    0.1,
-    0.25,
-    0.5,
-    1.0,
-    2.0,
-    4.0,
-    8.0,
-    16.0,
-    32.0,
-    64.0,
-    1_000_000.0,
-];
-
 /// What one attempt's resident observation is built from.
 #[derive(Clone, Debug)]
 pub struct ResidentCollector {
@@ -108,11 +92,25 @@ pub fn resident_observation_document(entries: Vec<Value>) -> Vec<u8> {
     serde_json::to_vec(&json!({ "schema": 2, "attempts": entries })).unwrap_or_default()
 }
 
-/// One attempt's runnable-delay population, counted event by event.
+/// What the foreground and the host reported over a window, for the production guardrails.
+#[derive(Clone, Copy, Debug)]
+pub struct WindowGuards {
+    pub foreground_p99_ms: f64,
+    pub foreground_samples: u64,
+    pub foreground_over_5ms: u64,
+    pub thermal_degraded: bool,
+    pub thermal_throttle_count: u64,
+    pub cpu_power_limited: bool,
+    pub gpu_power_limited: bool,
+}
+
+/// One attempt's runnable-delay population, counted event by event into the controller's own canonical histogram
+/// (the same buckets, so a quantization the controller has, the replay has, and no other).
 #[derive(Clone, Debug)]
 pub struct LatencyWindowBuilder {
     start_unix: u64,
-    counts: [u64; BOUNDS_MS.len()],
+    histogram: crate::metrics::LatencyHistogram,
+    max_ns: u64,
     lost: u64,
     same_target: bool,
 }
@@ -121,38 +119,39 @@ impl LatencyWindowBuilder {
     pub fn new(now_unix: u64) -> Self {
         Self {
             start_unix: now_unix,
-            counts: [0; BOUNDS_MS.len()],
+            histogram: crate::metrics::LatencyHistogram::new(),
+            max_ns: 0,
             lost: 0,
             same_target: true,
         }
     }
-    /// One runnable-delay event of the scoped game target, in milliseconds.
-    pub fn event(&mut self, delay_ms: f64) {
-        let index = BOUNDS_MS
-            .iter()
-            .position(|bound| delay_ms <= *bound)
-            .unwrap_or(BOUNDS_MS.len() - 1);
-        self.counts[index] += 1;
+    /// One runnable-delay event of the scoped game target, in nanoseconds as the kernel source reports it. A delay
+    /// that is not a number of nanoseconds cannot be passed: the type is the validation.
+    pub fn event(&mut self, delay_ns: u64) {
+        self.histogram.record(delay_ns);
+        self.max_ns = self.max_ns.max(delay_ns);
     }
+    /// Events the source dropped, or samples that could not be read: the window is then not a population.
     pub fn lost(&mut self, count: u64) {
-        self.lost += count;
+        self.lost = self.lost.saturating_add(count);
     }
     /// The scoped target changed during the window (a different process): the window is not one population.
     pub fn target_changed(&mut self) {
         self.same_target = false;
     }
-    /// The window ended at `end_unix`, with the foreground's own tail over the same time.
-    pub fn finish(&self, end_unix: u64, foreground_p99_ms: f64) -> Value {
-        let histogram: Vec<Value> = BOUNDS_MS
-            .iter()
-            .zip(&self.counts)
-            .filter(|(_, count)| **count > 0)
-            .map(|(bound, count)| json!({ "le_ms": bound, "count": count }))
-            .collect();
+    /// The window ended at `end_unix`, with the guard facts the host observed over the same time.
+    pub fn finish(&self, end_unix: u64, guards: WindowGuards) -> Value {
         json!({
             "start_unix": self.start_unix, "end_unix": end_unix, "lost": self.lost,
-            "same_target": self.same_target, "histogram": histogram,
-            "foreground_p99_ms": foreground_p99_ms,
+            "same_target": self.same_target, "histogram": self.histogram.snapshot(),
+            "max_ns": self.max_ns,
+            "foreground_p99_ms": guards.foreground_p99_ms,
+            "foreground_samples": guards.foreground_samples,
+            "foreground_over_5ms": guards.foreground_over_5ms,
+            "thermal_degraded": guards.thermal_degraded,
+            "thermal_throttle_count": guards.thermal_throttle_count,
+            "cpu_power_limited": guards.cpu_power_limited,
+            "gpu_power_limited": guards.gpu_power_limited,
         })
     }
 }
@@ -170,7 +169,7 @@ pub fn latency_pair(off: (&AttemptProcess, Value), on: (&AttemptProcess, Value))
 
 /// The document `action_latency` verifies.
 pub fn action_latency_document(pairs: Vec<Value>) -> Vec<u8> {
-    serde_json::to_vec(&json!({ "schema": 2, "metric": "GameRunnableLatency", "pairs": pairs }))
+    serde_json::to_vec(&json!({ "schema": 3, "metric": "GameRunnableLatency", "pairs": pairs }))
         .unwrap_or_default()
 }
 

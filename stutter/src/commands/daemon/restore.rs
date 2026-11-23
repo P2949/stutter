@@ -153,14 +153,17 @@ mod tests {
 
     #[test]
     fn daemon_restore_dry_run_discovers_autotune_and_profile_restore_records() {
+        // Its own empty state: the default paths are the live controller's journal, which is mid-experiment
+        // whenever the service is applying, and the test would then report that service's state, not its own.
+        let state = tempfile::tempdir().unwrap();
         let output = run_restore_command_with_profile_paths(
             crate::commands::input::DaemonRestoreCommandInput {
                 dry_run: true,
                 emergency: false,
             },
-            None,
-            None,
-            None,
+            Some(state.path().join("controller_journal.json")),
+            Some(state.path().join("audit")),
+            Some(state.path().join("history")),
             "/dev/null/affinity".into(),
             "/dev/null/profile".into(),
         )
