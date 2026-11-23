@@ -456,8 +456,19 @@ mod research_action_gate {
     /// affinity changed by the runtime's own apply and restored by the stop rollback, and the gate proves the
     /// restoration by comparing the target's /proc state before and after. Nothing here touches the game, the
     /// GPU or any other process.
+    /// The runtime's /proc scan has a 50 ms budget (`DEFAULT_MAX_PROC_SCAN_MS`); on a loaded host it can end before it
+    /// reaches the stand-in, and the apply then correctly refuses with "no effective changes" (reproduced: 12 of 150
+    /// runs under 12 busy loops). Nothing was changed on that round, so another round is a fresh, safe attempt.
     #[test]
     fn a_real_apply_and_restore_on_a_stand_in_process_is_proven_against_procfs() {
+        assert!(
+            (0..20).any(|_| stand_in_round()),
+            "the scan budget truncated every round"
+        );
+    }
+
+    /// One round; `false` only when the apply refused because the scan did not reach the stand-in.
+    fn stand_in_round() -> bool {
         let mut child = std::process::Command::new("sleep")
             .arg("120")
             .spawn()
@@ -532,6 +543,11 @@ mod research_action_gate {
         let evidence = shared.lock().unwrap().evidence();
         let _ = child.kill();
         let _ = child.wait();
+        if let Err(error) = &applied
+            && format!("{error:#}").contains("no effective changes")
+        {
+            return false;
+        }
         applied.unwrap_or_else(|e| panic!("apply failed: {e:#}"));
         stopped.unwrap();
         assert_eq!(
@@ -544,6 +560,7 @@ mod research_action_gate {
             "{evidence:?}"
         );
         assert_eq!(evidence.settled.len(), 1);
+        true
     }
 
     #[test]
