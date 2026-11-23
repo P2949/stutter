@@ -114,7 +114,13 @@ fn integration_matrix() -> Value {
 /// embedded ledger. A ledger that does not yield exactly 34 known rows is reported as such, never as a
 /// shorter table; no row is a game-benefit validation.
 fn crosswalk(response: &Value) -> Value {
-    let observed = super::crosswalk::observations_from(response.get("crosswalk_observations"));
+    let observed = match super::crosswalk_evidence::observations_from(
+        response.get("crosswalk_observations"),
+    ) {
+        Ok(observed) => observed,
+        // A record that cannot be verified is an integrity failure of the bundle, not a campaign that observed nothing.
+        Err(error) => return json!({ "status": error }),
+    };
     match super::crosswalk::build_rows_observed(COVERAGE, &observed) {
         Ok(rows) => {
             let mut counts = std::collections::BTreeMap::<String, u32>::new();

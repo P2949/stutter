@@ -681,3 +681,15 @@ Also: the live action qualification now uses the replay's own coverage function 
 On, each attributed to its own process), so a partly applied action can no longer be live-qualified and then
 contradicted at verification; a qualified long action study with a collector-built latency record is proven through
 `verify_qualification`; the daemon restore dry-run test uses its own state instead of the live controller's journal.
+
+## Crosswalk observations are reopened evidence (eighteenth audit)
+
+`research/crosswalk_evidence.rs`: an observation names a dossier and the SHA-256 of an immutable artifact beside the
+study (`crosswalk-evidence-<sha>.json`). The report reopens each one (no-follow, private, bounded), requires it to
+hash to the digest, to be bound to this campaign and this dossier, to name a provider and a direct or derived source
+quality, and to carry a real interval. A malformed, repeated, unknown, missing, altered or foreign record is the
+distinct integrity failure `CrosswalkObservationsInvalid` in the bundle, never an empty observation map.
+
+Finalization: the protected-state seal result is kept, an existing seal is accepted only when well formed, a qualified
+campaign without a valid seal is blocked rather than completed, and terminal verification requires a valid seal for
+Completed.

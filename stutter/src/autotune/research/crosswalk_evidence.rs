@@ -1,0 +1,111 @@
+//! A dossier is observed by a campaign only when the evidence it names can be reopened: the observation record lists
+//! each dossier with the SHA-256 of an immutable artifact beside the study, and that artifact must hash to the
+//! digest, be bound to this campaign and this dossier, name its provider and source quality, and carry a real
+//! observation interval. A digest that merely looks like a digest, a missing or altered artifact, another
+//! campaign's artifact or a malformed record is an integrity failure, reported as such, never an empty observation.
+
+use std::collections::BTreeMap;
+
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+use super::{crosswalk::SPECS, report_store::read_private};
+
+/// The observation record's integrity failure: distinct from "nothing was observed".
+pub const INVALID: &str = "CrosswalkObservationsInvalid";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Artifact {
+    schema: u32,
+    dossier: String,
+    campaign_sha256: String,
+    provider: String,
+    source_quality: String,
+    start_unix: u64,
+    end_unix: u64,
+}
+
+/// The file name of the evidence artifact with this digest.
+pub fn file_name(digest: &str) -> String {
+    format!("crosswalk-evidence-{digest}.json")
+}
+
+fn is_digest(text: &str) -> bool {
+    text.len() == 64
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The observation record with every row's evidence reopened and checked, or why it cannot stand. `None` (no record)
+/// is simply no observations; anything else must verify in full.
+pub fn verified(
+    record: Option<&Value>,
+    study: &std::fs::File,
+    uid: u32,
+    campaign: &str,
+) -> Result<Value, &'static str> {
+    let Some(record) = record.filter(|value| !value.is_null()) else {
+        return Ok(Value::Null);
+    };
+    let rows = record["rows"].as_array().ok_or(INVALID)?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut checked = Vec::new();
+    for row in rows {
+        let (Some(id), Some(digest)) = (row["id"].as_str(), row["evidence_sha256"].as_str()) else {
+            return Err(INVALID);
+        };
+        if !SPECS.iter().any(|spec| spec.0 == id) || !is_digest(digest) || !seen.insert(id) {
+            return Err(INVALID);
+        }
+        let bytes = read_private(study, &file_name(digest), uid).map_err(|_| INVALID)?;
+        if stutter_core::hash::sha256_hex(&bytes) != digest {
+            return Err(INVALID);
+        }
+        let artifact: Artifact = serde_json::from_slice(&bytes).map_err(|_| INVALID)?;
+        if artifact.schema != 1
+            || artifact.dossier != id
+            || artifact.campaign_sha256 != campaign
+            || artifact.provider.is_empty()
+            || artifact.provider.len() > 64
+            || !matches!(artifact.source_quality.as_str(), "direct" | "derived")
+            || artifact.start_unix >= artifact.end_unix
+        {
+            return Err(INVALID);
+        }
+        checked.push(json!({
+            "id": id, "evidence_sha256": digest,
+            "provider": artifact.provider, "source_quality": artifact.source_quality,
+        }));
+    }
+    Ok(json!({ "rows": checked }))
+}
+
+/// The dossiers a verified record observed, by id with the digest of the evidence. A record the report marked
+/// invalid is an error; an absent one observes nothing.
+pub fn observations_from(value: Option<&Value>) -> Result<BTreeMap<String, String>, &'static str> {
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return Ok(BTreeMap::new());
+    };
+    if value.get("error").is_some() {
+        return Err(INVALID);
+    }
+    let mut found = BTreeMap::new();
+    for row in value["rows"].as_array().ok_or(INVALID)? {
+        let (Some(id), Some(digest)) = (row["id"].as_str(), row["evidence_sha256"].as_str()) else {
+            return Err(INVALID);
+        };
+        if !SPECS.iter().any(|spec| spec.0 == id)
+            || !is_digest(digest)
+            || found.insert(id.to_owned(), digest.to_owned()).is_some()
+        {
+            return Err(INVALID);
+        }
+    }
+    Ok(found)
+}
+
+#[cfg(test)]
+#[path = "crosswalk_evidence_tests.rs"]
+mod tests;

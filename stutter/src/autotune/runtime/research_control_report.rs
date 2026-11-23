@@ -357,8 +357,22 @@ impl ResearchCoordinator {
                                 .trim_end_matches(".json"),
                             |_| 0,
                         ) {
-                            crate::autotune::research::newest_record::Newest::Found(value) => value,
-                            _ => serde_json::Value::Null,
+                            // Only evidence that reopens and verifies counts; anything else is marked, never read as none.
+                            crate::autotune::research::newest_record::Newest::Found(value) => {
+                                crate::autotune::research::crosswalk_evidence::verified(
+                                    Some(&value),
+                                    &dir,
+                                    uid,
+                                    &report.intent_sha256,
+                                )
+                                .unwrap_or_else(|error| serde_json::json!({ "error": error }))
+                            }
+                            crate::autotune::research::newest_record::Newest::Invalid => {
+                                serde_json::json!({ "error": crate::autotune::research::crosswalk_evidence::INVALID })
+                            }
+                            crate::autotune::research::newest_record::Newest::None => {
+                                serde_json::Value::Null
+                            }
                         },
                     ),
                     // The diagnosis oracle's own scored cases (frozen truth, captured output), or
