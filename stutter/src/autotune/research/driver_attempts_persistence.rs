@@ -459,7 +459,13 @@ impl DriverStudyAttempts {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
             Err(_) => return Err("BudgetEvidenceUnreadable"),
         };
-        let remaining = u64::from(self.parent.max_active_seconds).saturating_sub(spent);
+        let active_left = u64::from(self.parent.max_active_seconds).saturating_sub(spent);
+        // The wall-clock deadline bounds it as well: time left to the authorization's end is never more than what a study
+        // can still use. Without a sampled clock only the active budget applies.
+        let wall_left = self.override_now.map_or(u64::MAX, |now| {
+            self.parent.deadline_unix_seconds.saturating_sub(now)
+        });
+        let remaining = active_left.min(wall_left);
         let long_min = self.parent.long_work_unit.as_ref().map_or(
             u64::from(
                 self.parent

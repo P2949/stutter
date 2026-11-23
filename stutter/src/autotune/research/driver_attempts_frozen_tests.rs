@@ -148,3 +148,22 @@ fn unreadable_spend_is_not_zero_and_a_study_is_refused_only_when_it_is_certain_n
         );
     }
 }
+
+/// The wall-clock deadline bounds the admission as well as the active budget: with the clock sampled, a study is
+/// planned against the time left to the authorization's end when that is less than the active seconds left.
+#[test]
+fn the_time_left_to_the_deadline_bounds_the_admission_when_it_is_less_than_the_active_budget() {
+    let calls = Arc::new(AtomicU32::new(0));
+    let (_root, mut runner, _study) = runner(calls, u32::MAX);
+    let deadline = runner.parent.deadline_unix_seconds;
+    runner.set_now(deadline - 100);
+    assert_eq!(runner.time_facts().unwrap().remaining, 100);
+    // Past the deadline nothing is left; far from it the active budget is the bound.
+    runner.set_now(deadline + 5);
+    assert_eq!(runner.time_facts().unwrap().remaining, 0);
+    runner.set_now(0);
+    assert_eq!(
+        runner.time_facts().unwrap().remaining,
+        u64::from(runner.parent.max_active_seconds)
+    );
+}
