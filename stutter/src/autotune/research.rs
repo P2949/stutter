@@ -75,6 +75,7 @@ pub(crate) mod entitlement;
 )]
 pub mod evidence_producers;
 pub(crate) mod fault_matrix;
+pub(crate) mod feature_proof;
 #[cfg_attr(
     not(test),
     expect(

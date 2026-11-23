@@ -745,3 +745,17 @@ Typed gaps still needed before these windows become the sealed `resident-observa
 the renderer binding from the frame-source receipt, the target's cgroup, owner attribution, and the foreground
 frame-tail, over-5-ms and thermal/power guard facts of each window; `resident_entry` and
 `LatencyWindowBuilder::from_population` derive the records once those are fed.
+
+## Per-factor backend proof (eighteenth audit, G7)
+
+`research/feature_proof.rs`: activation (the treatment reached the game's environment) and the game's own reported
+selection do not say the backend that implements a factor was in use. For the factors whose backend is modelled the
+runtime now reads the kernel's own view of the game process during each feature attempt (the files its address space
+maps, the devices it holds open, its ancestor processes; merged over the attempt, read every few seconds, because a
+backend loads after the process appears) and keeps one witness per attempt as `feature-proof.json`. The proof holds
+only when the backend shows on every attempt treated On and on none treated Off, from witnesses of the very processes
+the attempts recorded: `WineWayland` (`winewayland.drv` mapped), `NtSync` (`/dev/ntsync` held open), `Fsr4`
+(`amdxcffx64.dll` mapped), `Gamescope` (a `gamescope` ancestor). Every other factor stays `FeatureBackendNotModelled`
+and unproven: no backend is guessed. A feature's stage evidence is now activation AND this proof, by the one function
+the live outcome and the replay share. The module names are modelled from the factors' documented implementations and
+must be confirmed against a real run before a feature result is trusted; a wrong name fails closed.

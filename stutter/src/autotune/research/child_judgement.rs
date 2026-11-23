@@ -107,7 +107,14 @@ pub(super) fn verify_qualification(
                 dir, uid, parent.uid, action, &intent, &evidence,
             ))
         } else {
-            matches!(study.stage, Stage::Feature(_)).then_some(false)
+            // Activation reached the game and the kernel's witness proves the factor's modelled backend, or neither.
+            match study.stage {
+                Stage::Feature(factor) => Some(
+                    activation == Some(true)
+                        && feature_proof_valid(dir, uid, factor, &intent, &evidence),
+                ),
+                _ => None,
+            }
         },
         activation,
         functional,
@@ -227,6 +234,24 @@ pub(super) fn action_replay(
 
 /// Whether the action study's own durable abstention record names exactly the completed attempts, says nothing
 /// was applied, and sits beside no action receipts (an applied action would have left some).
+/// Whether the kernel's witness of each attempt's game process proves the factor's modelled backend was in use on
+/// every attempt treated On and on none treated Off. Live outcome and replay use this one function.
+pub(super) fn feature_proof_valid(
+    dir: &File,
+    uid: u32,
+    factor: super::ResearchFactor,
+    intent: &ResearchIntentV1,
+    evidence: &BTreeMap<u32, AttemptEvidenceV1>,
+) -> bool {
+    (|| {
+        let bytes = read_private(dir, super::feature_proof::FILE, uid).ok()?;
+        let treatments = super::treatment::treatments_of(intent).ok()??;
+        let processes = super::child_verify_rules::processes_of(evidence);
+        super::feature_proof::verify(&bytes, factor, &treatments, &processes).ok()
+    })()
+    .is_some()
+}
+
 /// Whether the planner's own sealed observation supports abstaining from this action over these completed attempts.
 pub(super) fn planner_observation_valid(
     dir: &File,

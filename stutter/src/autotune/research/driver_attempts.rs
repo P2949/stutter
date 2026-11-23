@@ -14,7 +14,7 @@ use super::{
     driver::{AttemptHost, Driver, Step, build_schedule},
     loaded_runtime::RuntimeBinding,
     pilot_rule::FrozenConfirmationRule,
-    report::{AttemptEvidenceV1, evidence_context_consistent},
+    report::evidence_context_consistent,
     report_store::{read_evidence, write_new, write_report},
     study_executor::{AttemptsOutcome, StudyAttempts},
 };
@@ -81,6 +81,10 @@ pub struct DriverStudyAttempts {
     /// observed in the game process's environment (index -> (treatment, reached)).
     feature_source: Option<ProtonSource>,
     feature_observed: BTreeMap<u32, (super::Treatment, bool)>,
+    /// The kernel's witness of each attempt's game process, merged over the attempt, with when it was last read.
+    feature_witness: BTreeMap<u32, super::feature_proof::AttemptWitness>,
+    /// Reads the kernel's witness of a process; replaceable so the proof can be tested without a real game.
+    witness_of: Box<dyn Fn(u32) -> Option<super::feature_proof::Witness> + Send>,
 }
 
 fn dir_name(study: &ChildStudy) -> &str {
@@ -135,6 +139,8 @@ impl DriverStudyAttempts {
             environ_of: Box::new(|pid| std::fs::read(format!("/proc/{pid}/environ")).ok()),
             feature_source: None,
             feature_observed: BTreeMap::new(),
+            feature_witness: BTreeMap::new(),
+            witness_of: Box::new(super::feature_proof::observe),
         }
     }
 
@@ -189,7 +195,7 @@ impl DriverStudyAttempts {
 
     /// During a feature study, once per attempt: does the factor's treatment (on or off) show in the
     /// sighted game process's own environment? Observation only; an unreadable process records nothing.
-    fn observe_feature(&mut self, study: &ChildStudy) {
+    fn observe_feature(&mut self, study: &ChildStudy, now: u64) {
         let Stage::Feature(factor) = study.stage else {
             return;
         };
@@ -201,6 +207,25 @@ impl DriverStudyAttempts {
         else {
             return;
         };
+        // The backend's modules load after the process appears: the witness is merged over the whole attempt, read at
+        // most every few seconds, so a backend that shows at any point counts and one that never shows does not.
+        let key = (target.pid, target.start_ticks, target.uid);
+        let stale = self
+            .feature_witness
+            .get(&index)
+            .is_none_or(|seen| now >= seen.3 + 5);
+        if stale && let Some(witness) = (self.witness_of)(u32::from(target.pid)) {
+            let seen = self.feature_witness.entry(index).or_insert((
+                treatment,
+                key,
+                Default::default(),
+                now,
+            ));
+            seen.2.modules.extend(witness.modules);
+            seen.2.devices.extend(witness.devices);
+            seen.2.ancestors.extend(witness.ancestors);
+            seen.3 = now;
+        }
         if self.feature_observed.contains_key(&index) {
             return;
         }
@@ -214,44 +239,6 @@ impl DriverStudyAttempts {
             treatment == super::Treatment::On,
         );
         self.feature_observed.insert(index, (treatment, reached));
-    }
-
-    /// What the game itself reported of a feature study's factor across its completed attempts (frame
-    /// generation and the upscaler appear in the native context); `None` for any other study.
-    fn feature_functional(
-        &self,
-        study: &ChildStudy,
-        evidence: &BTreeMap<u32, AttemptEvidenceV1>,
-    ) -> Option<super::functional_probe::Functional> {
-        let Stage::Feature(factor) = study.stage else {
-            return None;
-        };
-        let mut attempts = Vec::new();
-        for (slot, item) in evidence {
-            // Which treatment an attempt ran is known only where it was observed.
-            let Some((treatment, _)) = self.feature_observed.get(slot) else {
-                return Some(super::functional_probe::Functional::Unproven);
-            };
-            attempts.push((
-                *treatment,
-                item.native_completion
-                    .as_deref()
-                    .and_then(|native| native.context.as_ref()),
-            ));
-        }
-        Some(super::functional_probe::probe(factor, &attempts))
-    }
-
-    /// Whether every completed attempt of a feature study showed its own treatment in the game
-    /// process's environment (and both treatments ran). `None` for any other study.
-    fn feature_activation(&self, study: &ChildStudy, completed: u32) -> Option<bool> {
-        matches!(study.stage, Stage::Feature(_)).then(|| {
-            let both = [super::Treatment::Off, super::Treatment::On]
-                .iter()
-                .all(|wanted| self.feature_observed.values().any(|(t, _)| t == wanted));
-            both && self.feature_observed.len() as u32 >= completed
-                && self.feature_observed.values().all(|(_, reached)| *reached)
-        })
     }
 
     /// Record what a finished child spent of the campaign's active-time and evidence budgets.
@@ -439,7 +426,7 @@ impl DriverStudyAttempts {
                 .values()
                 .filter_map(|item| item.native_completion.as_deref()),
         );
-        self.feature_receipt(&study_dir)?;
+        self.feature_receipt(&study_dir, study)?;
         let activation = self.feature_activation(study, u32::try_from(report.attempts_completed)?);
         let functional = self.feature_functional(study, &evidence);
         // The game's enum cannot establish the exact backend or functional fork-specific activation.
@@ -447,7 +434,18 @@ impl DriverStudyAttempts {
         // evidence is connected, even when the environment and game-reported selection agree.
         let mut action_not_indicated = false;
         let stage_evidence = match study.stage {
-            Stage::Feature(_) => Some(false),
+            // The treatment reached the game and the kernel's own witness of its process shows the factor's modelled
+            // backend on every On attempt and no Off attempt; a factor whose backend is not modelled stays unproven.
+            Stage::Feature(factor) => Some(
+                activation == Some(true)
+                    && super::child_judgement::feature_proof_valid(
+                        &study_dir,
+                        self.parent.uid,
+                        factor,
+                        driver.intent(),
+                        &evidence,
+                    ),
+            ),
             Stage::Init => self.init_receipt(&study_dir)?,
             _ => {
                 let (checked, abstained) = self.action_stage_evidence(
@@ -660,7 +658,7 @@ impl StudyAttempts for DriverStudyAttempts {
         };
         self.last_step = Some(step.clone());
         self.arm_gate_for(study);
-        self.observe_feature(study);
+        self.observe_feature(study, now);
         self.arm_telemetry();
         self.arm_resident(now);
         let halted = matches!(step, Step::Halted(_));

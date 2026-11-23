@@ -13,6 +13,16 @@ use super::{
 };
 
 impl DriverStudyAttempts {
+    /// Replace how a game process's witness is read.
+    #[cfg(test)]
+    pub(super) fn with_witness_reader(
+        mut self,
+        reader: Box<dyn Fn(u32) -> Option<super::super::feature_proof::Witness> + Send>,
+    ) -> Self {
+        self.witness_of = reader;
+        self
+    }
+
     /// Share the resident observer with the runtime: each attempt's observed window is kept beside its study.
     pub fn with_resident(
         mut self,
@@ -155,6 +165,44 @@ impl DriverStudyAttempts {
             .map_err(|_| anyhow::anyhow!("the telemetry observer is poisoned"))?
             .acknowledge(receipts.len());
         Ok(())
+    }
+
+    /// What the game itself reported of a feature study's factor across its completed attempts (frame
+    /// generation and the upscaler appear in the native context); `None` for any other study.
+    pub(super) fn feature_functional(
+        &self,
+        study: &ChildStudy,
+        evidence: &std::collections::BTreeMap<u32, super::super::report::AttemptEvidenceV1>,
+    ) -> Option<super::super::functional_probe::Functional> {
+        let Stage::Feature(factor) = study.stage else {
+            return None;
+        };
+        let mut attempts = Vec::new();
+        for (slot, item) in evidence {
+            // Which treatment an attempt ran is known only where it was observed.
+            let Some((treatment, _)) = self.feature_observed.get(slot) else {
+                return Some(super::super::functional_probe::Functional::Unproven);
+            };
+            attempts.push((
+                *treatment,
+                item.native_completion
+                    .as_deref()
+                    .and_then(|native| native.context.as_ref()),
+            ));
+        }
+        Some(super::super::functional_probe::probe(factor, &attempts))
+    }
+
+    /// Whether every completed attempt of a feature study showed its own treatment in the game
+    /// process's environment (and both treatments ran). `None` for any other study.
+    pub(super) fn feature_activation(&self, study: &ChildStudy, completed: u32) -> Option<bool> {
+        matches!(study.stage, Stage::Feature(_)).then(|| {
+            let both = [super::super::Treatment::Off, super::super::Treatment::On]
+                .iter()
+                .all(|wanted| self.feature_observed.values().any(|(t, _)| t == wanted));
+            both && self.feature_observed.len() as u32 >= completed
+                && self.feature_observed.values().all(|(_, reached)| *reached)
+        })
     }
 
     /// Record a settled attempt's accounting and outcome. The driver is retained on failure, with the
@@ -328,9 +376,32 @@ impl DriverStudyAttempts {
     }
 
     /// A feature study's per-attempt observation, recorded once beside the study (an existing record wins).
-    pub(super) fn feature_receipt(&self, study_dir: &std::fs::File) -> anyhow::Result<()> {
+    pub(super) fn feature_receipt(
+        &self,
+        study_dir: &std::fs::File,
+        study: &ChildStudy,
+    ) -> anyhow::Result<()> {
         if self.feature_observed.is_empty() {
             return Ok(());
+        }
+        // The kernel's witness of each attempt's game process, for the per-factor backend proof (write-once).
+        if let Stage::Feature(factor) = study.stage {
+            let rows: Vec<_> = self
+                .feature_witness
+                .iter()
+                .map(|(slot, (treatment, process, witness, _))| {
+                    (*slot, *treatment, *process, witness.clone())
+                })
+                .collect();
+            let bytes = super::super::feature_proof::record_bytes(factor, &rows);
+            match write_new(study_dir, super::super::feature_proof::FILE, &bytes) {
+                Ok(()) => {}
+                Err(error)
+                    if error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) => {}
+                Err(error) => return Err(error),
+            }
         }
         let bytes =
             crate::autotune::research::init_receipt::feature_receipt_bytes(&self.feature_observed)?;
