@@ -54,7 +54,7 @@ producing these records during a real game (the deployed controller predates the
 
 ### Scene/save identity (2026-11-23)
 
-`research/save_identity.rs`: `save_identity_sha256(dir)` hashes a game save directory (file names, sizes and contents in
+`research/save_identity.rs` (child of `route_driver`): `save_identity_sha256(dir)` hashes a game save directory (file names, sizes and contents in
 name order; refuses symlinks, nested directories, an empty or oversized save) and `session_definition_sha256` binds the
 route, its script and that save into one definition digest, so two long runs are comparable only from the same save.
 Offline-tested on temporary directories. The operator still has to choose the save and the in-game conditions and

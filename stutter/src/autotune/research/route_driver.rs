@@ -239,6 +239,16 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
     }
 }
 
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged: the save is hashed when the operator authorizes a long work unit"
+    )
+)]
+#[path = "save_identity.rs"]
+pub(crate) mod save_identity;
+
 #[cfg(test)]
 #[path = "route_driver_tests.rs"]
 mod tests;

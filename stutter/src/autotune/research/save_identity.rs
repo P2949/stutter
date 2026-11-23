@@ -4,7 +4,7 @@
 
 use std::{io::Read, path::Path};
 
-use super::route_driver::{RouteStep, definition_sha256_of};
+use super::{RouteStep, definition_sha256_of};
 
 /// A save has a handful of small files; anything larger or deeper is not one.
 const MAX_FILES: usize = 64;
