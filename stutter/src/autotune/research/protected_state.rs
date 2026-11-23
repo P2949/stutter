@@ -264,7 +264,9 @@ pub fn seal_unchanged(
                 .downcast_ref::<std::io::Error>()
                 .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
         {
-            Ok(())
+            // A retry finds the seal already there: it stands only if it is a well-formed unchanged-state seal, never
+            // because a file of that name exists.
+            sealed(study_dir, uid, campaign).map_err(|_| "ProtectedStateSealMalformed")
         }
         Err(_) => Err("ProtectedStateSealFailed"),
     }

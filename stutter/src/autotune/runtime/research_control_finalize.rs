@@ -356,8 +356,9 @@ impl ResearchCoordinator {
                 .ok_or_else(|| anyhow::anyhow!("lease lost"))?
                 .intent_sha256
                 .clone();
-            if let Some(steamapps) = self.host_sources.0.as_deref() {
-                let _ = crate::autotune::research::protected_state::seal_unchanged(
+            // The seal outcome is kept: a campaign cannot complete on a seal that was not written or is not valid.
+            let sealed = self.host_sources.0.as_deref().map(|steamapps| {
+                crate::autotune::research::protected_state::seal_unchanged(
                     steamapps,
                     &dir,
                     uid,
@@ -365,13 +366,17 @@ impl ResearchCoordinator {
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_or(0, |elapsed| elapsed.as_secs()),
-                );
-            }
+                )
+            });
             let seal_digest = crate::autotune::research::protected_state::seal_digest(
                 &dir,
                 uid,
                 &intent_for_seal,
             );
+            let seal_valid = matches!(sealed, Some(Ok(())))
+                && seal_digest.is_some()
+                && crate::autotune::research::protected_state::sealed(&dir, uid, &intent_for_seal)
+                    .is_ok();
             let report =
                 crate::autotune::research::report_store::read_private(&dir, "report.json", uid)?;
             let evidence: serde_json::Value =
@@ -393,7 +398,7 @@ impl ResearchCoordinator {
                     "BlockedGpuStability",
                     Some(crate::autotune::research::driver::FailureClass::Health),
                 )
-            } else if qualified {
+            } else if qualified && seal_valid {
                 (ResearchPhase::Completed, "QualifiedEndToEnd", None)
             } else if verdict["disposition"] == "PartiallyQualified" {
                 (ResearchPhase::Blocked, "PartiallyQualified", None)
@@ -411,6 +416,7 @@ impl ResearchCoordinator {
                 "report_sha256": stutter_core::hash::sha256_hex(&report),
                 "target_phase": phase, "terminal_failure": cause, "verdict": verdict,
                 "protected_state_seal_sha256": seal_digest,
+                "protected_state_seal_valid": seal_valid,
             }))?;
             write_identical(&dir, uid, "finalization-prepared.json", &decision)?;
             Ok(PreparedFinalization {
@@ -493,6 +499,19 @@ impl ResearchCoordinator {
         anyhow::ensure!(
             before["protected_state_seal_sha256"] == serde_json::json!(sealed_now),
             "the protected-state seal changed after the prepared decision"
+        );
+        // A completed campaign names a valid seal: present, well-formed and bound to this campaign.
+        anyhow::ensure!(
+            phase != ResearchPhase::Completed
+                || (sealed_now.is_some()
+                    && before["protected_state_seal_valid"] == true
+                    && crate::autotune::research::protected_state::sealed(
+                        dir,
+                        uid,
+                        &terminal.intent_sha256
+                    )
+                    .is_ok()),
+            "a completed campaign needs a valid protected-state seal"
         );
         anyhow::ensure!(
             before["intent_sha256"] == terminal.intent_sha256

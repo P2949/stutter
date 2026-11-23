@@ -340,3 +340,66 @@ fn only_the_preterminal_finalization_step_may_write_the_seal() {
         "and binds the digest into the decision"
     );
 }
+
+#[test]
+fn a_seal_that_is_corrupt_or_unwritable_never_stands_in_for_the_unchanged_state() {
+    let world = steam();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let study = std::fs::File::open(dir.path()).unwrap();
+    let uid = crate::syscall::geteuid();
+    let campaign = "ef".repeat(32);
+    record_baseline(&world.steamapps, &study, uid, &campaign).unwrap();
+    // Something of the seal's own name is already there but is not a seal: sealing again is refused, never
+    // accepted because the file exists, and the digest a decision would bind is of that file, not a valid seal.
+    let name =
+        crate::autotune::research::report_store::baseline_name("protected-state-final", &campaign)
+            .unwrap();
+    std::fs::write(dir.path().join(&name), b"not json").unwrap();
+    std::fs::set_permissions(
+        dir.path().join(&name),
+        std::fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    assert_eq!(
+        seal_unchanged(&world.steamapps, &study, uid, &campaign, 10),
+        Err("ProtectedStateSealMalformed")
+    );
+    assert_eq!(
+        sealed(&study, uid, &campaign),
+        Err("ProtectedStateNotSealedAtFinalization")
+    );
+    // A well-formed record that says the state was not unchanged is no seal either.
+    std::fs::write(
+        dir.path().join(&name),
+        br#"{"schema":1,"unchanged":false,"sealed_unix":1}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        seal_unchanged(&world.steamapps, &study, uid, &campaign, 10),
+        Err("ProtectedStateSealMalformed")
+    );
+    // A study that cannot be written to cannot be sealed.
+    let locked = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(locked.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let locked_study = std::fs::File::open(locked.path()).unwrap();
+    record_baseline(&world.steamapps, &locked_study, uid, &campaign).unwrap();
+    std::fs::set_permissions(locked.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+    let outcome = seal_unchanged(&world.steamapps, &locked_study, uid, &campaign, 10);
+    std::fs::set_permissions(locked.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    // Running as a user that ignores directory modes cannot show this case; everywhere else it must fail.
+    if crate::syscall::geteuid() != 0 {
+        assert_eq!(outcome, Err("ProtectedStateSealFailed"));
+    }
+}
+
+#[test]
+fn finalization_neither_discards_the_seal_result_nor_completes_without_a_valid_seal() {
+    let finalize = include_str!("../runtime/research_control_finalize.rs");
+    assert!(
+        !finalize.contains("let _ = crate::autotune::research::protected_state::seal_unchanged"),
+        "the seal result must be kept"
+    );
+    assert!(finalize.contains("qualified && seal_valid"));
+    assert!(finalize.contains("a completed campaign needs a valid protected-state seal"));
+}
