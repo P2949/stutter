@@ -62,3 +62,18 @@ fn a_study_over_incomparable_prefixes_is_refused_before_anything_is_created() {
     assert!(!root.path().join("studies").exists(), "nothing was created");
     assert!(!runner.has_running());
 }
+
+/// With no attempt driver running (nothing was started by the study) the host is still asked to stop: a host that
+/// proves settlement releases nothing, and one that cannot never reports a settled stop.
+#[test]
+fn an_abort_with_no_running_attempt_still_asks_the_host_and_never_reports_an_unproven_stop_as_settled()
+ {
+    let (_root, mut idle, _study, _) = attempts(Host::finishing());
+    assert!(!idle.has_running());
+    assert_eq!(idle.abort(), Ok(()));
+    let mut host = Host::finishing();
+    host.abort_fails = true;
+    let (_root, mut stuck, _study, _) = attempts(host);
+    assert!(!stuck.has_running());
+    assert_eq!(stuck.abort(), Err("SettlementUnproven"));
+}
