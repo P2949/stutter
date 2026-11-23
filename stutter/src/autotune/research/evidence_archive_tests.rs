@@ -118,3 +118,34 @@ fn the_worker_audit_is_read_line_by_line_and_only_its_own_events_for_the_action_
     );
     assert!(worker_audit_for(&path, ResearchAction::CpuAffinityProfile, &[]).is_empty());
 }
+
+#[test]
+fn the_workers_audit_is_found_under_its_own_private_home_and_an_unreadable_one_says_why() {
+    use std::path::Path;
+    // The socket directory names the user the worker serves; its audit is under that worker's own home.
+    assert_eq!(
+        worker_audit_path(Some(Path::new("/run/stutter-worker-p2949/worker.sock"))),
+        Path::new("/var/lib/stutter/worker-p2949/.local/state/stutter/audit/actions.jsonl")
+    );
+    // A socket that names no user, or one trying to climb out of the state directory, uses the controller's default.
+    for socket in [
+        None,
+        Some("/tmp/worker.sock"),
+        Some("/run/stutter-worker-/worker.sock"),
+        Some("/run/stutter-worker-a/b/worker.sock"),
+    ] {
+        assert_eq!(
+            worker_audit_path(socket.map(Path::new)),
+            crate::audit::default_audit_log_path(),
+            "{socket:?}"
+        );
+    }
+    assert_eq!(
+        worker_audit_readable(Path::new("/proc/self/status")),
+        Ok(())
+    );
+    assert_eq!(
+        worker_audit_readable(Path::new("/proc/self/definitely-absent")),
+        Err(std::io::ErrorKind::NotFound)
+    );
+}

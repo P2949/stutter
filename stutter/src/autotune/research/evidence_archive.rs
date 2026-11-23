@@ -93,6 +93,33 @@ fn prefix(action: ResearchAction) -> &'static str {
     }
 }
 
+/// The root worker runs with its own private home (`HOME=/var/lib/stutter/worker-<user>`, mode 0700, root), so its audit
+/// log is under that home, not under the controller user's. The worker's unit and its socket directory name the same user
+/// (`/run/stutter-worker-<user>/worker.sock`), which is how the path is found; any other socket falls back to the
+/// controller's own default.
+pub fn worker_audit_path(worker_socket: Option<&Path>) -> std::path::PathBuf {
+    let user = worker_socket
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix("stutter-worker-"))
+        .filter(|user| !user.is_empty() && !user.contains('/'));
+    match user {
+        Some(user) => Path::new("/var/lib/stutter")
+            .join(format!("worker-{user}"))
+            .join(".local/state/stutter/audit/actions.jsonl"),
+        None => crate::audit::default_audit_log_path(),
+    }
+}
+
+/// Whether the worker's audit file can be read by this process at all (`Err` carries why not: the worker's home is
+/// private to root unless a deployment shares it).
+pub fn worker_audit_readable(path: &Path) -> Result<(), std::io::ErrorKind> {
+    std::fs::File::open(path)
+        .map(|_| ())
+        .map_err(|error| error.kind())
+}
+
 /// The worker's own audit events for this action inside the study's attempts, from the audit file (`path`). A missing or
 /// unreadable file has none.
 pub fn worker_audit_for(

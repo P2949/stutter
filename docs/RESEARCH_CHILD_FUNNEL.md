@@ -913,3 +913,17 @@ Built, so no verifier waits on a hand-written file:
 
 Still outside any offline build: that these are fed by a running controller on the real host (the tap is installed by the
 funnel builder; the audit path of a root worker is configured by the deployment).
+
+## Worker audit path found, and the isolated-session helper's logic (eighteenth audit)
+
+- The root worker unit runs with `HOME=/var/lib/stutter/worker-<user>` (state directory mode 0700, root), so its audit log is
+  `/var/lib/stutter/worker-<user>/.local/state/stutter/audit/actions.jsonl`, not under the controller user's home, and the
+  controller user cannot read it (`evidence_archive::worker_audit_path` derives it from the worker socket directory name
+  `/run/stutter-worker-<user>/`). When it cannot be read the study records `worker-audit-unavailable.json` with the reason
+  and the action has no independent corroboration, so it does not qualify: a stated absence, never a silent one. Making that
+  one file readable to the controller (or another root-owned, controller-readable copy) is a deployment and trust decision
+  for the operator; no new request was added to the root worker's IPC.
+- `scripted_input::seat_helper`: the logic of the process inside the isolated session. Built only from an attested
+  `IsolatedSeat`; reads the stream record by record and injects only what `decode` accepts through an `Injector` trait; tracks
+  every key it holds and, on a clean end, a torn record, a refused event or a failed injection, releases every one and reports
+  whether every release was accepted. The `Injector` that registers a virtual keyboard is the one part not in this build.

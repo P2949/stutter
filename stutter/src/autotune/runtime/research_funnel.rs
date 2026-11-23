@@ -229,7 +229,10 @@ fn build(
     .with_action_gate(gate.clone())
     .with_telemetry(telemetry.clone())
     .with_resident(resident.clone())
-    .with_provenance(journal_archive, crate::audit::default_audit_log_path());
+    .with_provenance(
+        journal_archive,
+        crate::autotune::research::evidence_archive::worker_audit_path(worker_socket),
+    );
     if let Some(socket) = worker_socket.map(std::path::Path::to_path_buf) {
         attempts = attempts.with_claim_verifier_factory(Box::new(move || {
             super::drive::production_claim_verifier(socket.clone())
