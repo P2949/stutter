@@ -96,6 +96,7 @@ fn six_arm_campaign() -> Six {
         screens_before_init: 0,
         processes: false,
         scheduled: None,
+        treatment_now: Default::default(),
     };
     let results_root = results.path().to_path_buf();
     let mut now = parent.issued_unix_seconds + 1;

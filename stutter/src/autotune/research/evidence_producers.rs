@@ -201,6 +201,17 @@ pub fn action_latency_document(pairs: Vec<Value>) -> Vec<u8> {
         .unwrap_or_default()
 }
 
+/// One boundary decision of the privileged worker in its audit log's format: an allowed, successful `operation` (apply or
+/// rollback) of `action_id` that touched `tasks` tasks, at `at_unix`.
+pub fn worker_audit_event(action_id: &str, operation: &str, at_unix: u64, tasks: usize) -> Value {
+    json!({
+        "schema_version": 1, "unix_nanos": u128::from(at_unix) * 1_000_000_000, "command": "daemon_privilege",
+        "action_id": action_id, "safety_class": "ReversibleLowRisk", "dry_run": false, "success": true,
+        "affected_tasks": tasks, "restore_path": null,
+        "message": format!("stage=execution verdict=allow reason_code=ok caller_role=privileged_worker transport=socket operation={operation} policy_intent=Apply request=apply action_id={action_id} error_category=ok detail=ok"),
+    })
+}
+
 /// One transaction's final record in the controller's own journal format (applied, verified, rolled back), as the
 /// resident runtime archives it beside the study.
 pub fn controller_journal_record(

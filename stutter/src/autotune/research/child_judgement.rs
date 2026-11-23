@@ -227,6 +227,9 @@ pub(super) fn action_replay(
         // The gate's receipts are its own account; the controller's own journal must corroborate every one.
         let journal = read_private(dir, super::controller_provenance::FILE, uid).ok()?;
         super::controller_provenance::verify(&journal, action, &receipts, &processes).ok()?;
+        // And the privileged worker's own audit must show the apply and the restoration the receipts claim.
+        let worker = read_private(dir, super::worker_provenance::FILE, uid).ok()?;
+        super::worker_provenance::verify(&worker, action, &receipts, &processes).ok()?;
         Some(true)
     })()
     .unwrap_or(false)

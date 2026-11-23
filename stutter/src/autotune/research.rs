@@ -212,6 +212,7 @@ pub(crate) mod settings_binding;
 pub(crate) mod telemetry_observer;
 pub(crate) mod thermal;
 pub(crate) mod treatment;
+pub(crate) mod worker_provenance;
 pub use treatment::{Treatment, TreatmentSpec};
 #[cfg_attr(
     not(test),

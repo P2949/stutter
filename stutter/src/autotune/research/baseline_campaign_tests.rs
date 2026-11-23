@@ -76,6 +76,9 @@ pub(super) struct NativeHost {
     pub(super) processes: bool,
     /// The treatment of each attempt of the running within-source study, as the driver gave the host.
     pub(super) scheduled: Option<Vec<crate::autotune::research::Treatment>>,
+    /// The treatment of the attempt now running, for the readers a test hands the driver.
+    pub(super) treatment_now:
+        std::sync::Arc<std::sync::Mutex<Option<crate::autotune::research::Treatment>>>,
     pub(super) results: PathBuf,
     pub(super) intent: ResearchIntentV1,
     pub(super) current: Option<AttemptSlot>,
@@ -141,8 +144,17 @@ impl NativeHost {
             proton_source: slot.arm,
             proton_identity_sha256: tool.identity_sha256.clone(),
             process: CyberpunkProcessIdentity {
-                pid: stutter_core::ids::Pid::new(4000 + slot.index),
-                start_ticks: 100 + u64::from(slot.index),
+                // A host that names its game processes records the very one it names.
+                pid: stutter_core::ids::Pid::new(if self.processes {
+                    6_000 + self.launches.saturating_sub(1)
+                } else {
+                    4000 + slot.index
+                }),
+                start_ticks: if self.processes {
+                    200 + u64::from(self.launches.saturating_sub(1))
+                } else {
+                    100 + u64::from(slot.index)
+                },
                 uid: self.intent.uid,
                 app_id: self.intent.app_id,
                 build_id: self.intent.build_id,
@@ -218,6 +230,9 @@ impl AttemptHost for NativeHost {
     }
     fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()> {
         self.launches += 1;
+        self.current = Some(slot.clone());
+        let now = self.attempt_treatment();
+        *self.treatment_now.lock().unwrap() = now;
         self.initializing = context.intent.initialization;
         if self.initializing {
             self.initialization_launches += 1;
@@ -297,6 +312,7 @@ fn composed(
         screens_before_init: 0,
         processes: false,
         scheduled: None,
+        treatment_now: Default::default(),
     };
     let results_root = results.path().to_path_buf();
     let mut now = parent.issued_unix_seconds + 1;
@@ -640,55 +656,5 @@ fn every_result_must_have_run_with_the_settings_the_applied_profile_left() {
     let _ = Stage::Screen;
 }
 
-#[test]
-fn a_profile_that_left_other_settings_than_the_game_ran_with_is_unqualified() {
-    use crate::autotune::research::child_study::Stage;
-    let run = run_campaign_with_profile(Some("e".repeat(64)));
-    let all = run.driver.dispositions();
-    let screen = all.iter().find(|d| d.stage == Stage::Screen).unwrap();
-    assert_eq!(screen.result, Some(StudyResult::Unqualified), "{all:?}");
-    assert_eq!(screen.reason, "ProfileViolated");
-}
-
-#[test]
-fn a_study_that_applied_a_profile_cannot_lose_or_scramble_its_settings_record() {
-    let run = run_campaign_with_profile(Some("c".repeat(64)));
-    let campaign_path = std::fs::read_link(format!(
-        "/proc/self/fd/{}",
-        std::os::fd::AsRawFd::as_raw_fd(&run.campaign)
-    ))
-    .unwrap();
-    let receipt = std::fs::read_dir(campaign_path.join("studies"))
-        .unwrap()
-        .flatten()
-        .map(|entry| {
-            entry
-                .path()
-                .join(crate::autotune::research::init_receipt::SETTINGS_RECEIPT)
-        })
-        .find(|path| path.is_file())
-        .expect("a study recorded the settings its profile left");
-    let original = std::fs::read(&receipt).unwrap();
-    std::fs::set_permissions(&receipt, std::fs::Permissions::from_mode(0o600)).unwrap();
-    let digests: Vec<String> =
-        crate::autotune::research::init_receipt::read_settings_receipt(&original).unwrap();
-    // One arm's digest is wrong while another's matches: membership in the list is not enough.
-    let mut scrambled = digests.clone();
-    scrambled[0] = "e".repeat(64);
-    // A partial record (an arm missing) cannot be tied to every arm.
-    let partial = digests[..digests.len() - 1].to_vec();
-    for bad in [scrambled, partial] {
-        std::fs::write(
-            &receipt,
-            crate::autotune::research::init_receipt::settings_receipt_bytes(&bad).unwrap(),
-        )
-        .unwrap();
-        assert!(
-            verify(&run).children.iter().any(|c| c.problem.is_some()),
-            "{bad:?}"
-        );
-    }
-    // A record that is gone from a study that applied a profile is not a study with no profile.
-    std::fs::remove_file(&receipt).unwrap();
-    assert!(verify(&run).children.iter().any(|c| c.problem.is_some()));
-}
+#[path = "baseline_campaign_settings_tests.rs"]
+mod settings_tests;

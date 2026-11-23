@@ -56,6 +56,8 @@ struct Acting {
     applies: bool,
     /// The controller's own journal of every transaction so far, as the resident runtime archives it.
     journal: Vec<serde_json::Value>,
+    /// The privileged worker's own audit events of those transactions, as the resident runtime archives them.
+    worker_audit: Vec<serde_json::Value>,
 }
 
 impl Acting {
@@ -100,6 +102,22 @@ impl Acting {
                 .running_study()
                 .join(crate::autotune::research::controller_provenance::FILE);
             std::fs::write(&file, serde_json::to_vec(&self.journal).unwrap()).unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+            // The worker applied the action and rolled it back, and says so in its own audit log.
+            for operation in ["apply_action", "rollback_action"] {
+                self.worker_audit.push(
+                    crate::autotune::research::evidence_producers::worker_audit_event(
+                        "cpu-affinity-profile:game-main",
+                        operation,
+                        now + 1,
+                        12,
+                    ),
+                );
+            }
+            let file = self
+                .running_study()
+                .join(crate::autotune::research::worker_provenance::FILE);
+            std::fs::write(&file, serde_json::to_vec(&self.worker_audit).unwrap()).unwrap();
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
     }
@@ -280,16 +298,19 @@ struct Campaign {
 }
 
 fn campaign_with_an_action() -> Campaign {
-    build_campaign(None)
+    build_campaign(None, None)
 }
 
 /// The same campaign whose controller applies the action in every attempt the gate allows, with the candidate's
 /// runnable tail at `on_tail_ns` against the baseline's 20 ms in the measurement the collectors seal.
 fn campaign_that_acts(on_tail_ns: u64) -> Campaign {
-    build_campaign(Some(on_tail_ns))
+    build_campaign(Some(on_tail_ns), None)
 }
 
-fn build_campaign(acting: Option<u64>) -> Campaign {
+fn build_campaign(
+    acting: Option<u64>,
+    factor: Option<crate::autotune::research::ResearchFactor>,
+) -> Campaign {
     let root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let results = tempfile::tempdir().unwrap();
@@ -301,6 +322,7 @@ fn build_campaign(acting: Option<u64>) -> Campaign {
     parent.max_active_seconds = 28_000;
     parent.max_attempts = 400;
     parent.actions = vec![ResearchAction::CpuAffinityProfile];
+    parent.factors = factor.into_iter().collect();
     parent.long_attempt_seconds = Some(1800);
     parent.long_work_unit = Some(unit());
     parent.validate().unwrap();
@@ -317,9 +339,11 @@ fn build_campaign(acting: Option<u64>) -> Campaign {
         warms_prefix: true,
         initialization_launches: 0,
         screens_before_init: 0,
-        processes: acting.is_some(),
+        processes: acting.is_some() || factor.is_some(),
         scheduled: None,
+        treatment_now: Default::default(),
     };
+    let treatment_now = host.treatment_now.clone();
     let tokens = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
     let acted_at = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let (held, at) = (tokens.clone(), acted_at.clone());
@@ -351,6 +375,7 @@ fn build_campaign(acting: Option<u64>) -> Campaign {
         on_tail_ns: acting.unwrap_or(0),
         applies,
         journal: Vec::new(),
+        worker_audit: Vec::new(),
     });
     let results_root = results.path().to_path_buf();
     let clock = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
@@ -376,6 +401,30 @@ fn build_campaign(acting: Option<u64>) -> Campaign {
         production_inputs(campaign.try_clone().unwrap(), parent.clone(), rules.clone()),
     )
     .with_action_gate(gate);
+    // A feature campaign: the game shows the treatment's environment and the kernel's witness of the factor's backend.
+    let attempts = if factor.is_some() {
+        let (env_now, witness_now) = (treatment_now.clone(), treatment_now);
+        attempts
+            .with_environ_reader(Box::new(move |_| {
+                let on = *env_now.lock().unwrap() == Some(crate::autotune::research::Treatment::On);
+                Some(if on {
+                    b"HOME=/h\0".to_vec()
+                } else {
+                    b"PROTON_NO_NTSYNC=1\0".to_vec()
+                })
+            }))
+            .with_witness_reader(Box::new(move |_, _| {
+                let on =
+                    *witness_now.lock().unwrap() == Some(crate::autotune::research::Treatment::On);
+                let mut witness = crate::autotune::research::feature_proof::Witness::default();
+                if on {
+                    witness.devices.insert("/dev/ntsync".to_owned());
+                }
+                Some(witness)
+            }))
+    } else {
+        attempts
+    };
     let driver = FunnelDriver::new(
         &campaign,
         &parent,
@@ -567,129 +616,7 @@ fn rewrite(path: &std::path::Path, bytes: &[u8]) {
     std::fs::write(path, bytes).unwrap();
 }
 
-/// The controller applies the action in every attempt the schedule treats On, each on its own game process, and the
-/// collectors seal the paired runnable-latency measurement before the study ends: the whole production-composed
-/// campaign qualifies the action and independent verification replays the receipts, the measurement and the budget.
-#[test]
-fn an_applied_action_with_its_sealed_measurement_qualifies_through_the_whole_campaign_and_verifies()
-{
-    let mut run_of = campaign_that_acts(1_500_000);
-    run(&mut run_of);
-    let dispositions = run_of.driver.dispositions();
-    let action = dispositions
-        .iter()
-        .find(|d| matches!(d.stage, Stage::Action(_)))
-        .expect("the action study is planned");
-    assert_eq!(
-        (action.result, action.reason.as_str()),
-        (Some(StudyResult::Qualified), ""),
-        "{dispositions:?}"
-    );
-    let verified = verify_all(&run_of);
-    assert!(
-        verified.children.iter().all(|c| c.problem.is_none()),
-        "{:?}",
-        verified.children
-    );
-    assert!(verified.all_verified(), "{:?}", verified.budget_problem);
-    assert!(verified.actions_restored(&dispositions));
-    let dir = study_with(&run_of, "action-receipts.json");
-    let receipts: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(dir.join("action-receipts.json")).unwrap()).unwrap();
-    assert_eq!(
-        receipts.as_array().unwrap().len(),
-        4,
-        "one per treated attempt"
-    );
-}
-
-/// Altering what the verifier replays is caught: the sealed measurement removed, a receipt's restoration changed, the
-/// controller's journal archive removed, and a receipt dropped (a partly applied action) each contradict the claimed qualification.
-#[test]
-fn a_qualified_action_campaign_is_refused_when_its_measurement_or_receipts_are_altered() {
-    for tamper in 0..4 {
-        let mut run_of = campaign_that_acts(1_500_000);
-        run(&mut run_of);
-        let dispositions = run_of.driver.dispositions();
-        let dir = study_with(&run_of, "action-receipts.json");
-        let receipts_path = dir.join("action-receipts.json");
-        let mut receipts: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&receipts_path).unwrap()).unwrap();
-        match tamper {
-            0 => std::fs::remove_file(dir.join(crate::autotune::research::action_latency::FILE))
-                .unwrap(),
-            1 => {
-                receipts[0]["restored"]["cpus_allowed"] = "0-3".into();
-                rewrite(&receipts_path, &serde_json::to_vec(&receipts).unwrap());
-            }
-            3 => std::fs::remove_file(
-                dir.join(crate::autotune::research::controller_provenance::FILE),
-            )
-            .unwrap(),
-            _ => {
-                receipts.as_array_mut().unwrap().pop();
-                rewrite(&receipts_path, &serde_json::to_vec(&receipts).unwrap());
-            }
-        }
-        let verified = verify_all(&run_of);
-        assert!(
-            verified.children.iter().any(|c| c.problem.is_some())
-                || !verified.actions_restored(&dispositions),
-            "tamper {tamper} was not caught"
-        );
-    }
-}
-
-/// An action that made the runnable tail worse is a valid, applied and restored measurement: the study is a
-/// qualified one, and what the production decision says of it is Revert, never a benefit.
-#[test]
-fn an_action_that_made_the_tail_worse_is_a_valid_study_whose_decision_is_revert() {
-    use crate::autotune::research::{
-        action_latency::{self, Decision},
-        child_verify_rules::processes_of,
-        treatment::treatments_of,
-    };
-    let mut run_of = campaign_that_acts(40_000_000);
-    run(&mut run_of);
-    let dispositions = run_of.driver.dispositions();
-    let action = dispositions
-        .iter()
-        .find(|d| matches!(d.stage, Stage::Action(_)))
-        .unwrap();
-    assert_eq!(
-        action.result,
-        Some(StudyResult::Qualified),
-        "{dispositions:?}"
-    );
-    assert!(
-        verify_all(&run_of)
-            .children
-            .iter()
-            .all(|c| c.problem.is_none())
-    );
-    let dir = study_with(&run_of, action_latency::FILE);
-    let intent: ResearchIntentV1 =
-        serde_json::from_slice(&std::fs::read(dir.join("intent.json")).unwrap()).unwrap();
-    let evidence: std::collections::BTreeMap<
-        u32,
-        crate::autotune::research::report::AttemptEvidenceV1,
-    > = std::fs::read_dir(dir.join("evidence"))
-        .unwrap()
-        .flatten()
-        .map(|entry| {
-            let item: crate::autotune::research::report::AttemptEvidenceV1 =
-                serde_json::from_slice(&std::fs::read(entry.path()).unwrap()).unwrap();
-            (item.slot_index, item)
-        })
-        .collect();
-    let result = action_latency::verify(
-        &std::fs::read(dir.join(action_latency::FILE)).unwrap(),
-        &treatments_of(&intent).unwrap().unwrap(),
-        &processes_of(&evidence),
-    )
-    .unwrap();
-    assert_eq!(result.decision, Decision::Revert);
-}
-
 #[path = "baseline_campaign_graphics_tests.rs"]
 mod graphics;
+#[path = "baseline_campaign_qualified_tests.rs"]
+mod qualified;

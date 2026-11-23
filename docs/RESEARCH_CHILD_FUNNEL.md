@@ -868,3 +868,17 @@ this side of that device is now real and tested without a device:
 What remains is not offline work: the helper process that owns the virtual keyboard inside a real isolated session
 (a nested compositor or equivalent) and the scene/save identity of that session. Both need a session of their own on the
 physical machine, which the GPU incident halt forbids starting.
+
+## The worker's own audit corroborates every receipt; a feature qualifies through the campaign (eighteenth audit)
+
+`research/worker_provenance.rs`: the privileged worker writes its own boundary decisions to its audit log (`daemon_privilege`
+events: stage, verdict, operation, action id, timestamp from its own clock). The campaign keeps an archive of those events
+for the study (the production `AuditEvent` type, `worker-audit.json`), and the replay joins it to every receipt: inside
+that receipt's window the worker allowed exactly one successful, non-dry-run apply of the authorized action's id that
+touched at least one task, and exactly one rollback after it; and no apply of that action was allowed during the study's
+attempts that no receipt accounts for. With the gate's receipts and the controller's journal this makes three
+independent accounts of one action. The worker's own token ledger cannot serve (it compacts settled tokens), so the audit
+log is the durable record. The archive is copied by the resident runtime during a physical run.
+
+The production-composed campaign now also runs a Feature child (ntsync, backend witnessed by the kernel on every attempt
+treated On) to a qualified study through `verify_children`, and a removed proof contradicts the claimed qualification.
