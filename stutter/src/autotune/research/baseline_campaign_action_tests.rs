@@ -28,23 +28,39 @@ fn unit() -> LongWorkUnit {
     }
 }
 
-/// A route that completes on its second look, as a settled session of the authorized unit.
-struct Route(u32);
+/// A route that completes on its second look, as a settled session of the authorized unit. It plays on the
+/// campaign's own clock: completing the route is twenty minutes passing on that clock, so the production accounting
+/// measures what a real route would take.
+struct Route {
+    polls: u32,
+    started: u64,
+    clock: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
 impl LongSessionDriver for Route {
     fn start(&mut self, _: &LongWorkUnit) -> Result<(), &'static str> {
-        self.0 = 0;
+        self.polls = 0;
+        self.started = self.clock.load(std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
     fn poll(&mut self) -> LongProgress {
-        self.0 += 1;
-        if self.0 < 2 {
+        self.polls += 1;
+        if self.polls < 2 {
+            // The route runs for twenty minutes; the controller reads the clock again only on its next look.
+            self.clock.fetch_add(
+                u64::from(unit().duration_seconds),
+                std::sync::atomic::Ordering::SeqCst,
+            );
             return LongProgress::Running;
         }
+        let (started, ended) = (
+            self.started,
+            self.started + u64::from(unit().duration_seconds),
+        );
         LongProgress::Completed(Box::new(LongSessionRecord {
             unit_id: unit().id,
             definition_sha256: unit().definition_sha256,
-            started_unix: 5_000,
-            ended_unix: 6_200,
+            started_unix: started,
+            ended_unix: ended,
             process: SessionProcess {
                 pid: stutter_core::ids::Pid::new(4242),
                 start_ticks: 99,
@@ -52,8 +68,8 @@ impl LongSessionDriver for Route {
             },
             phases: vec![Phase {
                 name: "route".into(),
-                started_unix: 5_000,
-                ended_unix: 6_200,
+                started_unix: started,
+                ended_unix: ended,
             }],
             max_poll_gap_seconds: Some(1),
             settled: true,
@@ -112,15 +128,22 @@ fn campaign_with_an_action() -> Campaign {
             })),
         ));
     let results_root = results.path().to_path_buf();
-    let mut now = parent.issued_unix_seconds + 1;
+    let clock = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
+        parent.issued_unix_seconds + 1,
+    ));
+    let shared = clock.clone();
     let attempts = DriverStudyAttempts::new(
         campaign.try_clone().unwrap(),
         parent.clone(),
-        Box::new(LongAttemptHost::new(host, Route(0))),
-        Box::new(move || {
-            now += 1;
-            now
-        }),
+        Box::new(LongAttemptHost::new(
+            host,
+            Route {
+                polls: 0,
+                started: 0,
+                clock,
+            },
+        )),
+        Box::new(move || shared.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1),
         Box::new(|| Ok(())),
         Box::new(move |source| results_root.join(source.dir_name())),
         production_inputs(campaign.try_clone().unwrap(), parent.clone(), rules.clone()),
@@ -184,28 +207,6 @@ fn an_action_the_controller_never_applied_is_a_justified_abstention_through_the_
             .all(|d| d.result == Some(StudyResult::Qualified)),
         "{dispositions:?}"
     );
-    // The synthetic controller clock ticks one second per read, while a real twenty-minute route witnesses twenty
-    // minutes: give the long child the active time its attempts witnessed, as a real clock would have recorded.
-    let path = std::fs::read_link(format!(
-        "/proc/self/fd/{}",
-        std::os::fd::AsRawFd::as_raw_fd(&run_of.campaign)
-    ))
-    .unwrap();
-    let action_dir = std::fs::read_dir(path.join("studies"))
-        .unwrap()
-        .flatten()
-        .map(|e| e.path())
-        .find(|p| {
-            p.join(crate::autotune::research::action_coverage::ABSTENTION_RECORD)
-                .is_file()
-        })
-        .expect("the abstention record");
-    let budget = action_dir.join("budget.json");
-    let mut spent: crate::autotune::research::campaign_budget::Spent =
-        serde_json::from_slice(&std::fs::read(&budget).unwrap()).unwrap();
-    spent.active_seconds = 8 * 1200;
-    std::fs::set_permissions(&budget, std::fs::Permissions::from_mode(0o600)).unwrap();
-    std::fs::write(&budget, serde_json::to_vec(&spent).unwrap()).unwrap();
     // The independent verification replays every child, including the abstention (its own record, no receipts).
     let results = run_of.results.path().to_path_buf();
     let verified = crate::autotune::research::child_verify::verify_children(
@@ -259,4 +260,52 @@ fn an_action_the_controller_never_applied_is_a_justified_abstention_through_the_
     )
     .unwrap();
     assert!(tampered.children.iter().any(|c| c.problem.is_some()));
+}
+
+#[test]
+fn a_budget_record_that_understates_the_witnessed_sessions_is_refused_at_verification() {
+    let mut run_of = campaign_with_an_action();
+    run(&mut run_of);
+    let path = std::fs::read_link(format!(
+        "/proc/self/fd/{}",
+        std::os::fd::AsRawFd::as_raw_fd(&run_of.campaign)
+    ))
+    .unwrap();
+    let study = std::fs::read_dir(path.join("studies"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.join(crate::autotune::research::action_coverage::ABSTENTION_RECORD)
+                .is_file()
+        })
+        .expect("the action study");
+    let verify = |run_of: &Campaign| {
+        let results = run_of.results.path().to_path_buf();
+        crate::autotune::research::child_verify::verify_children(
+            &run_of.campaign,
+            crate::syscall::geteuid(),
+            &run_of.parent,
+            &move |source| results.join(source.dir_name()),
+        )
+        .unwrap()
+    };
+    // As the campaign recorded it, the accounting is whole.
+    assert!(verify(&run_of).budget_problem.is_none());
+    // Lowering the active time the long child recorded below what its sealed sessions witnessed is caught.
+    let budget = study.join("budget.json");
+    let mut spent: crate::autotune::research::campaign_budget::Spent =
+        serde_json::from_slice(&std::fs::read(&budget).unwrap()).unwrap();
+    spent.active_seconds = 60;
+    std::fs::set_permissions(&budget, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(&budget, serde_json::to_vec(&spent).unwrap()).unwrap();
+    let verified = verify(&run_of);
+    assert!(
+        verified
+            .budget_problem
+            .as_deref()
+            .is_some_and(|problem| problem.starts_with("BudgetActiveSecondsUnderstated")),
+        "{:?}",
+        verified.budget_problem
+    );
 }
