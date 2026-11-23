@@ -206,6 +206,14 @@ pub(crate) mod route_driver;
     not(test),
     expect(
         dead_code,
+        reason = "staged: the save is hashed when the operator authorizes a long work unit"
+    )
+)]
+pub(crate) mod save_identity;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
         reason = "staged: no device sink is supplied; the build keeps UnavailableInput"
     )
 )]

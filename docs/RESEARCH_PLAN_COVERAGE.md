@@ -51,3 +51,11 @@ producing these records during a real game (the deployed controller predates the
 - The five uinput request numbers and `sizeof(struct uinput_setup)` (92) in `syscall.rs` were compared with a C program
   compiled against the kernel's own `linux/uinput.h` (6.18.7 headers): all equal (0x5501, 0x5502, 0x405c5503,
   0x40045564, 0x40045565, 92). No device was opened. What is still unexercised is only the live call sequence.
+
+### Scene/save identity (2026-11-23)
+
+`research/save_identity.rs`: `save_identity_sha256(dir)` hashes a game save directory (file names, sizes and contents in
+name order; refuses symlinks, nested directories, an empty or oversized save) and `session_definition_sha256` binds the
+route, its script and that save into one definition digest, so two long runs are comparable only from the same save.
+Offline-tested on temporary directories. The operator still has to choose the save and the in-game conditions and
+authorize the resulting `LongWorkUnit`; the module is staged (dead in the production build) until then.
