@@ -682,3 +682,5 @@ fn a_restarted_driver_seals_only_a_provably_settled_interrupted_attempt() {
 mod failure_tests;
 #[path = "driver_health_tests.rs"]
 mod health;
+#[path = "driver_refusal_tests.rs"]
+mod refusal;
