@@ -204,3 +204,120 @@ fn every_attempts_observed_window_is_kept_beside_the_study_as_raw_counters() {
     // Persisted and acknowledged: nothing is left to write twice.
     assert!(resident.lock().unwrap().freeze(1).is_empty());
 }
+
+/// The sealed resident observation is derived from the raw windows and the attempt's own facts, and written only
+/// when the real verifier accepts it for every completed attempt: an unbound renderer, a window missing for an
+/// attempt or a sparse one leaves no record, and a campaign without it has no G3.
+#[test]
+fn the_sealed_resident_observation_is_derived_only_when_every_attempt_verifies() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use crate::{
+        autotune::research::{
+            report::AttemptEvidenceV1,
+            resident_observation,
+            resident_observer::{AttemptResident, ResidentObserver},
+        },
+        metrics::{IntervalRecord, LatencyHistogram},
+        process_tree::TaskClass,
+    };
+    let (root, mut runner, study, _gate, _parent) = build(&unit().definition_sha256);
+    assert_eq!(runner.poll(&study, 100).unwrap(), None);
+    let path = root.path().join("studies").join(&study.study_sha256[..16]);
+    let dir = std::fs::File::open(&path).unwrap();
+    let uid = crate::syscall::geteuid();
+    let evidence: std::collections::BTreeMap<u32, AttemptEvidenceV1> = (0..8u32)
+        .map(|slot| {
+            let mut record = session(&unit().definition_sha256);
+            let target = attempt_process(slot);
+            record.process = SessionProcess {
+                pid: target.pid,
+                start_ticks: target.start_ticks,
+                uid,
+            };
+            let item = AttemptEvidenceV1 {
+                schema_version: 1,
+                slot_index: slot,
+                average_fps: 1.0,
+                native_completion: None,
+                long_session: Some(Box::new(record)),
+                thermal: None,
+            };
+            (slot, item)
+        })
+        .collect();
+    let windows = |intervals: u32| -> Vec<AttemptResident> {
+        let mut observer = ResidentObserver::default();
+        for slot in 0..8u32 {
+            let target = attempt_process(slot);
+            observer.arm(target, Some(slot), 5_010);
+            let mut histogram = LatencyHistogram::new();
+            for _ in 0..50 {
+                histogram.record(700_000);
+            }
+            for _ in 0..intervals {
+                observer.observe_intervals(
+                    &[IntervalRecord {
+                        process_pid: Some(target.pid.as_u32()),
+                        class: TaskClass::Game,
+                        samples: 50,
+                        max_ns: 700_000,
+                        histogram: histogram.snapshot(),
+                        ..Default::default()
+                    }],
+                    0,
+                );
+                observer.observe_gpu_sample();
+            }
+            observer.end_attempt(6_190);
+        }
+        // These pids are not live processes, so the kernel shows no cgroup for them: the window carries what a real
+        // process's /proc/<pid>/cgroup would have shown.
+        let mut windows = observer.freeze(6_190);
+        for window in &mut windows {
+            window.cgroup = "/app.slice/game.scope".to_owned();
+        }
+        windows
+    };
+    let receipts = |bound_all: bool| {
+        let items: Vec<_> = (0..8u32)
+            .map(|slot| {
+                let target = attempt_process(slot);
+                serde_json::json!({
+                    "attempt": slot, "pid": target.pid, "start_ticks": target.start_ticks, "uid": uid,
+                    "source_bound_to_game": bound_all || slot != 3, "source_healthy": true, "snapshots": 5,
+                })
+            })
+            .collect();
+        let file = path.join("telemetry-receipts.json");
+        let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
+        std::fs::write(&file, serde_json::to_vec(&items).unwrap()).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    };
+    let sealed = path.join(resident_observation::FILE);
+    // One attempt's renderer was not bound to the game: no record.
+    receipts(false);
+    runner
+        .seal_resident_observation(&dir, &windows(12), &evidence)
+        .unwrap();
+    assert!(!sealed.exists());
+    // Too few samples to say the game was watched: no record.
+    receipts(true);
+    runner
+        .seal_resident_observation(&dir, &windows(3), &evidence)
+        .unwrap();
+    assert!(!sealed.exists());
+    // A window missing for an attempt: no record.
+    let mut missing = windows(12);
+    missing.pop();
+    runner
+        .seal_resident_observation(&dir, &missing, &evidence)
+        .unwrap();
+    assert!(!sealed.exists());
+    // Everything observed: the record exists and the independent verifier accepts it.
+    runner
+        .seal_resident_observation(&dir, &windows(12), &evidence)
+        .unwrap();
+    let processes = crate::autotune::research::child_verify_rules::processes_of(&evidence);
+    resident_observation::verify(&std::fs::read(&sealed).unwrap(), &processes).unwrap();
+}

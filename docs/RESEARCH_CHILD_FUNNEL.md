@@ -759,3 +759,14 @@ the attempts recorded: `WineWayland` (`winewayland.drv` mapped), `NtSync` (`/dev
 and unproven: no backend is guessed. A feature's stage evidence is now activation AND this proof, by the one function
 the live outcome and the replay share. The module names are modelled from the factors' documented implementations and
 must be confirmed against a real run before a feature result is trusted; a wrong name fails closed.
+
+## The sealed resident observation is derived (eighteenth audit)
+
+At study end `seal_resident_observation` derives `resident-observation.json` from the raw windows and the facts of each
+attempt: the cgroup the kernel showed for the process when its window opened (`/proc/<pid>/cgroup`), the renderer
+binding the attempt's own telemetry receipt shows (bound to this pid and start time, healthy, at least one snapshot),
+owners attributed by the game's own interval records, and the lost counts. The interval is clamped to the part of the
+window inside the attempt. It is written only when the real `resident_observation::verify` accepts it for every
+completed attempt; an unbound renderer, a missing or sparse window leaves no record (and a campaign without it has no
+G3). Still not derived: `action-latency.json`, which needs each window's foreground frame-tail, over-5-ms and
+thermal/power guard facts from the controller's window score.

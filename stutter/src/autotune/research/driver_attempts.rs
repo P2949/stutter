@@ -368,7 +368,7 @@ impl DriverStudyAttempts {
     ) -> anyhow::Result<AttemptsOutcome> {
         let report = driver.finalize()?;
         self.record_telemetry(study)?;
-        self.record_resident(study)?;
+        let windows = self.record_resident(study)?;
         let study_dir = open_dir(&open_dir(&self.campaign, STUDIES_DIR)?, dir_name(study))?;
         // The study's report is sealed beside its journal; verification recomputes and compares it.
         match write_report(&study_dir, &report) {
@@ -427,6 +427,7 @@ impl DriverStudyAttempts {
                 .filter_map(|item| item.native_completion.as_deref()),
         );
         self.feature_receipt(&study_dir, study)?;
+        self.seal_resident_observation(&study_dir, &windows, &evidence)?;
         let activation = self.feature_activation(study, u32::try_from(report.attempts_completed)?);
         let functional = self.feature_functional(study, &evidence);
         // The game's enum cannot establish the exact backend or functional fork-specific activation.

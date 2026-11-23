@@ -20,6 +20,8 @@ pub type SharedResident = Arc<Mutex<ResidentObserver>>;
 #[derive(Clone, Debug)]
 pub struct AttemptResident {
     pub target: ChildTarget,
+    /// The process's cgroup as the kernel showed it when the window opened (empty when unreadable).
+    pub cgroup: String,
     pub attempt: Option<u32>,
     pub started_unix: u64,
     pub ended_unix: u64,
@@ -49,6 +51,7 @@ impl AttemptResident {
 #[derive(Debug)]
 struct Running {
     target: ChildTarget,
+    cgroup: String,
     attempt: Option<u32>,
     started_unix: u64,
     buckets: Vec<LatencyHistogramBucket>,
@@ -81,6 +84,7 @@ impl ResidentObserver {
         self.end_attempt(now_unix);
         self.running = Some(Running {
             target,
+            cgroup: cgroup_of(target.pid.as_u32()),
             attempt,
             started_unix: now_unix,
             buckets: LatencyHistogram::new().snapshot(),
@@ -151,6 +155,7 @@ impl ResidentObserver {
         if let Some(running) = self.running.take() {
             self.finished.push(AttemptResident {
                 target: running.target,
+                cgroup: running.cgroup,
                 attempt: running.attempt,
                 started_unix: running.started_unix,
                 ended_unix: now_unix,
@@ -184,13 +189,24 @@ impl ResidentObserver {
     }
 }
 
+/// The unified-hierarchy cgroup of a process from its own `/proc/<pid>/cgroup`, empty when it cannot be read.
+fn cgroup_of(pid: u32) -> String {
+    std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+        .ok()
+        .and_then(|text| {
+            text.lines()
+                .find_map(|line| line.strip_prefix("0::").map(str::to_owned))
+        })
+        .unwrap_or_default()
+}
+
 /// The file, beside a study, holding every attempt's raw observed window.
 pub const WINDOWS_FILE: &str = "resident-windows.json";
 
 /// One window as raw counters, the immutable evidence the sealed records are derived from.
 pub fn window_record(window: &AttemptResident) -> serde_json::Value {
     serde_json::json!({
-        "attempt": window.attempt,
+        "attempt": window.attempt, "cgroup": window.cgroup,
         "pid": window.target.pid, "start_ticks": window.target.start_ticks, "uid": window.target.uid,
         "started_unix": window.started_unix, "ended_unix": window.ended_unix,
         "histogram": window.histogram, "max_ns": window.max_ns,
@@ -203,13 +219,6 @@ pub fn window_record(window: &AttemptResident) -> serde_json::Value {
 
 /// The resident-observation entry of one finished window, from what was counted (nothing is stated): the lost samples
 /// are the dropped events and the unusable intervals, and a window that saw another game process is lossy too.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the sealed observation record is derived once the renderer, cgroup and owner facts are fed"
-    )
-)]
 pub fn resident_entry(
     window: &AttemptResident,
     process: &AttemptProcess,

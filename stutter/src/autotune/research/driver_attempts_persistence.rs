@@ -49,16 +49,19 @@ impl DriverStudyAttempts {
 
     /// Keep every attempt's observed window beside the study as raw, immutable counters (write-once; a conflicting
     /// file means the windows cannot be recorded and the study simply has none).
-    pub(super) fn record_resident(&self, study: &ChildStudy) -> anyhow::Result<()> {
+    pub(super) fn record_resident(
+        &self,
+        study: &ChildStudy,
+    ) -> anyhow::Result<Vec<super::super::resident_observer::AttemptResident>> {
         let Some((resident, latest)) = &self.resident else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         let windows = resident
             .lock()
             .map_err(|_| anyhow::anyhow!("the resident observer is poisoned"))?
             .freeze(*latest);
         if windows.is_empty() {
-            return Ok(());
+            return Ok(windows);
         }
         let rows: Vec<serde_json::Value> = windows
             .iter()
@@ -89,7 +92,85 @@ impl DriverStudyAttempts {
             .lock()
             .map_err(|_| anyhow::anyhow!("the resident observer is poisoned"))?
             .acknowledge(windows.len());
-        Ok(())
+        Ok(windows)
+    }
+
+    /// The sealed resident observation G3 stands on, derived from the windows the runtime counted and the facts the
+    /// kernel and the frame source gave of each attempt: the cgroup the window opened with, the renderer binding the
+    /// attempt's own telemetry receipt shows, and owners attributed by the game's own interval records. It is written
+    /// only when the real verifier accepts it for every completed attempt; a campaign without it has no G3.
+    pub(super) fn seal_resident_observation(
+        &self,
+        study_dir: &std::fs::File,
+        windows: &[super::super::resident_observer::AttemptResident],
+        evidence: &std::collections::BTreeMap<u32, super::super::report::AttemptEvidenceV1>,
+    ) -> anyhow::Result<()> {
+        use super::super::{
+            child_verify_rules::processes_of,
+            resident_observation,
+            resident_observer::{AttemptResident, resident_entry},
+        };
+        let processes = processes_of(evidence);
+        if windows.is_empty() || processes.is_empty() {
+            return Ok(());
+        }
+        let telemetry: serde_json::Value = super::super::report_store::read_private(
+            study_dir,
+            "telemetry-receipts.json",
+            self.parent.uid,
+        )
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+        let mut entries = Vec::new();
+        for process in &processes {
+            let Some(window) = windows.iter().find(|window| {
+                window.attempt == Some(process.slot)
+                    && window.target.pid == process.pid
+                    && window.target.start_ticks == process.start_ticks
+            }) else {
+                return Ok(());
+            };
+            let bound = telemetry.as_array().is_some_and(|receipts| {
+                receipts.iter().any(|receipt| {
+                    receipt["attempt"].as_u64() == Some(u64::from(process.slot))
+                        && receipt["pid"].as_u64() == Some(u64::from(process.pid.as_u32()))
+                        && receipt["start_ticks"].as_u64() == Some(process.start_ticks)
+                        && receipt["source_bound_to_game"] == true
+                        && receipt["source_healthy"] == true
+                        && receipt["snapshots"].as_u64().unwrap_or(0) > 0
+                })
+            });
+            // The observation covers the part of the window inside the attempt.
+            let clamped = AttemptResident {
+                started_unix: window.started_unix.max(process.started_unix),
+                ended_unix: window.ended_unix.min(process.completed_unix),
+                ..window.clone()
+            };
+            entries.push(resident_entry(
+                &clamped,
+                process,
+                &window.cgroup,
+                bound,
+                window.cpu_samples > 0,
+                false,
+            ));
+        }
+        let bytes = super::super::evidence_producers::resident_observation_document(entries);
+        if resident_observation::verify(&bytes, &processes).is_err() {
+            return Ok(());
+        }
+        match write_new(study_dir, resident_observation::FILE, &bytes) {
+            Ok(()) => Ok(()),
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// An Action study arms the gate (once) on the game process the host has sighted and attested,

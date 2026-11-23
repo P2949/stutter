@@ -177,3 +177,26 @@ fn an_observed_window_becomes_a_latency_window_only_in_the_canonical_layout() {
     other.pop();
     assert!(LatencyWindowBuilder::from_population(1, other, 1).is_none());
 }
+
+#[test]
+fn the_cgroup_is_read_from_the_kernels_view_of_the_attested_process() {
+    let own = ChildTarget {
+        pid: stutter_core::ids::Pid::new(std::process::id()),
+        start_ticks: 1,
+        uid: 1000,
+    };
+    let mut observer = ResidentObserver::default();
+    observer.arm(own, Some(0), 10);
+    let window = observer.freeze(20).remove(0);
+    assert!(window.cgroup.starts_with('/'), "{:?}", window.cgroup);
+    // A process that is not there shows none, and an observation then cannot claim one.
+    observer.arm(
+        ChildTarget {
+            pid: stutter_core::ids::Pid::new(u32::MAX - 1),
+            ..own
+        },
+        Some(1),
+        30,
+    );
+    assert!(observer.freeze(40).remove(1).cgroup.is_empty());
+}
