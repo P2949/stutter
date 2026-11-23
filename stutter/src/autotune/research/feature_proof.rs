@@ -27,7 +27,14 @@ pub enum Backend {
     Ancestor(&'static str),
 }
 
-/// The modelled backend witness of a factor, or `None` when its backend is not modelled.
+/// The modelled backend witness of a factor, or `None` when its backend is not modelled. The names were checked against
+/// the builds installed on the research host: `winewayland.drv` (and its unix side `winewayland.so`) ships in GE-Proton and
+/// the study prefix, `amdxcffx64.dll` ships in Proton Experimental's `contrib` and the prefix's `system32`, and
+/// `/dev/ntsync` is the kernel's ntsync device node. The other factors are deliberately not modelled: the audio and input
+/// backends act in Wine's services processes (`winepulse`, `winealsa`, `winebus`), not the game's, the low-latency layer
+/// of `Vkd3dLowLatency` is a Vulkan implicit layer whose loading is not a mapped file of this build, and the CachyOS
+/// tool directory here is a stub that cannot be inspected. Whether the game process really maps these at run time is
+/// what a real run will show; a wrong name fails closed.
 pub fn backend(factor: ResearchFactor) -> Option<Backend> {
     match factor {
         // Wine's Wayland display driver is a module of the game's own process.

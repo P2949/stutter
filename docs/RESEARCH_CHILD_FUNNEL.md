@@ -757,7 +757,7 @@ only when the backend shows on every attempt treated On and on none treated Off,
 the attempts recorded: `WineWayland` (`winewayland.drv` mapped), `NtSync` (`/dev/ntsync` held open), `Fsr4`
 (`amdxcffx64.dll` mapped), `Gamescope` (a `gamescope` ancestor). Every other factor stays `FeatureBackendNotModelled`
 and unproven: no backend is guessed. A feature's stage evidence is now activation AND this proof, by the one function
-the live outcome and the replay share. The module names are modelled from the factors' documented implementations and
+the live outcome and the replay share. The names were checked against the builds installed on the host (see `feature_proof::backend`); the others are deliberately
 must be confirmed against a real run before a feature result is trusted; a wrong name fails closed.
 
 ## The sealed resident observation is derived (eighteenth audit)
@@ -807,3 +807,9 @@ resolution is the profile's and dynamic scaling was off), `Contradicted` (anothe
 changes the internal resolution whatever the output says), `Unproven` (the result does not report it) or `NotSpecified`
 (the long profile). A contradiction is a profile violation (`ProfileConformance::Violates`); a silent result is typed
 `Unproven` and is never assumed to match.
+
+Which factors have no modelled backend, and why (checked against the installed Proton builds): `AudioBackend` and
+`InputBackend` act in Wine's services processes (`winepulse`/`winealsa`/`winebus`), not the game's; `Vkd3dLowLatency` is a
+Vulkan implicit layer (GE ships `libVkLayer_KORTHOS_LowLatency.so`, the CachyOS tool directory here is only a stub);
+`AntiLag2`, `Hdr` and `FrameGeneration` have no environment control or file witness to prove from outside the process.
+A real run decides whether the modelled names are mapped; a wrong name fails closed.
