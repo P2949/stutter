@@ -33,6 +33,7 @@ const SIX: [ProtonSource; 6] = [
 ];
 
 fn spec(profile: Profile) -> Result<Option<ProfileSpec>, ProfileFailure> {
+    super::baseline_campaign::PROFILE_NOW.with(|now| now.set(Some(profile)));
     Ok((profile != Profile::Long).then(ray_tracing_off))
 }
 

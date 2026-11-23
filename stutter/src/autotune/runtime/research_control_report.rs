@@ -349,31 +349,10 @@ impl ResearchCoordinator {
                     "child_reports": children,
                     "intent_sha256": report.intent_sha256,
                     // Which dossiers the resident runtime recorded as observed, from its own sealed record.
-                    "crosswalk_observations": self.study_dir.as_deref().map_or(
-                        serde_json::Value::Null,
-                        |study| match crate::autotune::research::newest_record::newest::<serde_json::Value>(
-                            study,
-                            crate::autotune::research::crosswalk::OBSERVATIONS_FILE
-                                .trim_end_matches(".json"),
-                            |_| 0,
-                        ) {
-                            // Only evidence that reopens and verifies counts; anything else is marked, never read as none.
-                            crate::autotune::research::newest_record::Newest::Found(value) => {
-                                crate::autotune::research::crosswalk_evidence::verified(
-                                    Some(&value),
-                                    &dir,
-                                    uid,
-                                    &report.intent_sha256,
-                                )
-                                .unwrap_or_else(|error| serde_json::json!({ "error": error }))
-                            }
-                            crate::autotune::research::newest_record::Newest::Invalid => {
-                                serde_json::json!({ "error": crate::autotune::research::crosswalk_evidence::INVALID })
-                            }
-                            crate::autotune::research::newest_record::Newest::None => {
-                                serde_json::Value::Null
-                            }
-                        },
+                    "crosswalk_observations": crate::autotune::research::crosswalk_evidence::observed_in(
+                        &dir,
+                        uid,
+                        &report.intent_sha256,
                     ),
                     // The diagnosis oracle's own scored cases (frozen truth, captured output), or
                     // exactly why there are none.

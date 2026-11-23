@@ -318,6 +318,13 @@ impl NativeContext {
                 } else if ray_tracing == Some(false)
                     && (free_frame_generation || self.frame_generation_type == Some(0))
                     && (free_upscaler || self.upscaling_type == Some(0))
+                    // The resolution the game rendered at must be shown, not merely not contradicted; an upscaler
+                    // study changes the internal resolution on purpose and is judged on its other fields.
+                    && (free_upscaler
+                        || matches!(
+                            self.effective_resolution(profile),
+                            EffectiveResolution::Confirmed | EffectiveResolution::NotSpecified
+                        ))
                 {
                     ProfileConformance::Conforms
                 } else {
@@ -444,10 +451,17 @@ mod tests {
             frame_stats: None,
         };
         for profile in [Profile::Cpu, Profile::Gpu] {
-            assert_eq!(
-                ctx(Some(false), Some(0)).conformance(profile),
-                ProfileConformance::Conforms
-            );
+            // Conforms only with the resolution the profile asked for shown; unreported, it is unproven.
+            let (width, height) =
+                crate::autotune::research::profile_applier::target_resolution(profile).unwrap();
+            let mut shown = ctx(Some(false), Some(0));
+            assert_eq!(shown.conformance(profile), ProfileConformance::Unproven);
+            (
+                shown.render_width,
+                shown.render_height,
+                shown.dynamic_resolution,
+            ) = (Some(width), Some(height), Some(false));
+            assert_eq!(shown.conformance(profile), ProfileConformance::Conforms);
             // The very run that hung the GPU: ray tracing on is not the raster profile.
             assert_eq!(
                 ctx(Some(true), Some(0)).conformance(profile),
@@ -486,6 +500,16 @@ mod stage_tests {
         child_study::{Profile, Stage},
     };
 
+    /// The same result with the resolution the profile asked for reported, as the real game does.
+    fn shown(mut context: NativeContext, profile: Profile) -> NativeContext {
+        let (width, height) =
+            crate::autotune::research::profile_applier::target_resolution(profile).unwrap();
+        context.render_width = Some(width);
+        context.render_height = Some(height);
+        context.dynamic_resolution = Some(false);
+        context
+    }
+
     fn ctx(rt: bool, fg: i64, upscaler: i64) -> NativeContext {
         NativeContext {
             game_version: Some("2.5".into()),
@@ -519,7 +543,7 @@ mod stage_tests {
         for profile in [Profile::Cpu, Profile::Gpu] {
             // Frame generation on is the study's own difference...
             assert_eq!(
-                ctx(false, 2, 0).conformance_in(profile, frame_generation),
+                shown(ctx(false, 2, 0), profile).conformance_in(profile, frame_generation),
                 ProfileConformance::Conforms
             );
             // ...but an upscaler on in that study is not, and neither is ray tracing.

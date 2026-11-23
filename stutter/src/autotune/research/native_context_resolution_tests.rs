@@ -61,7 +61,7 @@ fn the_rendered_resolution_and_dynamic_scaling_are_read_and_judged_against_the_p
         scaled.conformance_in(Profile::Gpu, Stage::Screen),
         ProfileConformance::Violates
     );
-    // A result that does not report it proves nothing about it: unproven, never assumed, and not a violation.
+    // A result that does not report it proves nothing about it: unproven, never assumed, not a violation, and not a conformance either.
     let silent = verify_frames(
             br#"{"Data":{"averageFps":71.0,"frameNumber":100,"gameVersion":"2.5","presetName":"P","gpuName":"G","upscalingType":0,"rayTracingEnabled":false,"frameGenerationType":0}}"#,
             &frames_csv(),
@@ -73,7 +73,7 @@ fn the_rendered_resolution_and_dynamic_scaling_are_read_and_judged_against_the_p
     );
     assert_eq!(
         silent.conformance_in(Profile::Cpu, Stage::Screen),
-        ProfileConformance::Conforms
+        ProfileConformance::Unproven
     );
     assert_eq!(
         silent.effective_resolution(Profile::Long),

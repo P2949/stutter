@@ -109,3 +109,19 @@ pub fn observations_from(value: Option<&Value>) -> Result<BTreeMap<String, Strin
 #[cfg(test)]
 #[path = "crosswalk_evidence_tests.rs"]
 mod tests;
+
+/// What the report reads of the observation record: looked for in the campaign's own directory (where the producer
+/// wrote it), with every row's evidence reopened. A record that cannot stand is marked, never read as no observations.
+pub fn observed_in(campaign_dir: &std::fs::File, uid: u32, campaign: &str) -> Value {
+    use super::newest_record::{Newest, newest_in};
+    match newest_in::<Value>(
+        campaign_dir,
+        super::crosswalk::OBSERVATIONS_FILE.trim_end_matches(".json"),
+        |_| 0,
+    ) {
+        Newest::Found(record) => verified(Some(&record), campaign_dir, uid, campaign)
+            .unwrap_or_else(|error| serde_json::json!({ "error": error })),
+        Newest::Invalid => serde_json::json!({ "error": INVALID }),
+        Newest::None => Value::Null,
+    }
+}

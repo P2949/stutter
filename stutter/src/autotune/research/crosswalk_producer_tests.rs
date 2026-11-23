@@ -106,3 +106,45 @@ fn a_single_attempt_short_of_the_floor_or_a_campaign_with_no_windows_observes_no
     };
     assert!(verified(Some(&record), &c.file, c.uid, &"cd".repeat(32)).is_err());
 }
+
+/// In a real campaign the study directory holds one subdirectory per campaign, and the producer writes the record
+/// there. The report must read it from that same directory: looking in the study directory above it finds nothing.
+#[test]
+fn the_report_reads_the_observation_record_from_the_campaign_directory_the_producer_wrote_it_in() {
+    let study = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(study.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let sub = study.path().join(&CAMPAIGN[..16]);
+    std::fs::create_dir(&sub).unwrap();
+    std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let inside = Campaign {
+        dir: tempfile::tempdir().unwrap(),
+        file: File::open(&sub).unwrap(),
+        uid: crate::syscall::geteuid(),
+    };
+    // Children's windows live under the campaign directory, as in production.
+    let children = sub.join("studies").join("0123456789abcdef");
+    std::fs::create_dir_all(&children).unwrap();
+    for path in [sub.join("studies"), children.clone()] {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let windows = children.join(WINDOWS_FILE);
+    std::fs::write(
+        &windows,
+        serde_json::to_vec(&vec![window(50, 50, 50), window(50, 50, 50)]).unwrap(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&windows, std::fs::Permissions::from_mode(0o600)).unwrap();
+    produce(&inside.file, inside.uid, CAMPAIGN).unwrap();
+    // The study directory above holds no record: the earlier lookup there could never find it.
+    assert!(matches!(
+        newest::<Value>(study.path(), "crosswalk-observations", |_| 0),
+        Newest::None
+    ));
+    let record = crate::autotune::research::crosswalk_evidence::observed_in(
+        &inside.file,
+        inside.uid,
+        CAMPAIGN,
+    );
+    let rows = record["rows"].as_array().expect("the record is found");
+    assert_eq!(rows.len(), 3);
+}

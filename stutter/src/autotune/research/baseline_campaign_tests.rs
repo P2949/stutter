@@ -19,6 +19,17 @@ use crate::autotune::research::{
 /// The built-in benchmark is a fixed fly-through of this many seconds.
 const SCENE_SECONDS: f64 = 64.25;
 
+thread_local! {
+    /// The profile the study now running applied, so the stand-in game reports the resolution that profile asks for.
+    pub(super) static PROFILE_NOW: std::cell::Cell<Option<crate::autotune::research::child_study::Profile>> =
+        const { std::cell::Cell::new(None) };
+}
+
+thread_local! {
+    /// Whether the stand-in game reports the rendered resolution in its summary (the real game does).
+    pub(super) static REPORT_RESOLUTION: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
 /// No settings file is touched; when `digest` is set the profile claims to have left every arm's file with it.
 pub(super) struct NoProfiles {
     /// The digest every arm's settings file is left with (`None`: no profile is applied).
@@ -29,8 +40,9 @@ pub(super) struct NoProfiles {
 impl ProfileHook for NoProfiles {
     fn apply(
         &mut self,
-        _: crate::autotune::research::child_study::Profile,
+        profile: crate::autotune::research::child_study::Profile,
     ) -> Result<bool, ProfileFailure> {
+        PROFILE_NOW.with(|now| now.set(Some(profile)));
         Ok(self.digest.is_some())
     }
     fn apply_study(
@@ -104,8 +116,18 @@ impl NativeHost {
         for dir in [&arm_dir, &run] {
             std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
+        // The game reports the resolution the applied profile asked for (as the real game does), never scaled.
+        let (width, height) = PROFILE_NOW
+            .with(std::cell::Cell::get)
+            .and_then(crate::autotune::research::profile_applier::target_resolution)
+            .unwrap_or((1920, 1080));
+        let resolution = if REPORT_RESOLUTION.with(std::cell::Cell::get) {
+            format!(r#","renderWidth":{width},"renderHeight":{height},"DRSEnabled":false"#)
+        } else {
+            String::new()
+        };
         let summary = format!(
-            r#"{{"RootType":"worldBenchmarkSummary","Data":{{"averageFps":{fps},"frameNumber":{frames},"gameVersion":"2.5","presetName":"P","gpuName":"G","upscalingType":0,"rayTracingEnabled":false,"frameGenerationType":0}}}}"#
+            r#"{{"RootType":"worldBenchmarkSummary","Data":{{"averageFps":{fps},"frameNumber":{frames},"gameVersion":"2.5","presetName":"P","gpuName":"G","upscalingType":0,"rayTracingEnabled":false,"frameGenerationType":0{resolution}}}}}"#
         );
         let mut csv = String::from("Frame index, Frame time (ms)\n");
         for index in 0..frames {

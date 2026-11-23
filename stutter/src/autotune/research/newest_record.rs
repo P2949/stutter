@@ -41,9 +41,30 @@ pub fn newest_with_bytes<T: serde::de::DeserializeOwned>(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Newest::None,
         Err(_) => return Newest::Invalid,
     };
+    newest_in_dir(&folder, prefix, stamp)
+}
+
+/// As `newest`, over a directory already opened (the campaign's own descriptor), so no path is resolved again.
+pub fn newest_in<T: serde::de::DeserializeOwned>(
+    folder: &File,
+    prefix: &str,
+    stamp: impl Fn(&T) -> u64,
+) -> Newest<T> {
+    match newest_in_dir(folder, prefix, stamp) {
+        Newest::None => Newest::None,
+        Newest::Invalid => Newest::Invalid,
+        Newest::Found((record, _)) => Newest::Found(record),
+    }
+}
+
+fn newest_in_dir<T: serde::de::DeserializeOwned>(
+    folder: &File,
+    prefix: &str,
+    stamp: impl Fn(&T) -> u64,
+) -> Newest<(T, Vec<u8>)> {
     let Ok(entries) = std::fs::read_dir(format!(
         "/proc/self/fd/{}",
-        std::os::fd::AsRawFd::as_raw_fd(&folder)
+        std::os::fd::AsRawFd::as_raw_fd(folder)
     )) else {
         return Newest::Invalid;
     };
