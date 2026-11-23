@@ -2,8 +2,10 @@
 //! during an attempt and that turn what it counted into exactly the documents `resident_observation` and
 //! `action_latency` verify. Nothing here measures anything: a collector holds only what it was given, derives the
 //! histogram and the counts from raw samples (never a stated percentile or a declared quality), and the output is
-//! checked by the same verifiers a campaign is, so producer and verifier cannot drift apart. Feeding a collector
-//! from the live game needs the game; the wiring into the runtime's event path is the one thing not done here.
+//! checked by the same verifiers a campaign is, so producer and verifier cannot drift apart. The collectors are fed from
+//! the runtime's own event path: `AutotuneRuntime::on_event` drives the resident observer (`resident_observer`), which
+//! builds the `ResidentCollector`, and `driver_attempts_resident` seals the latency pairs through
+//! `LatencyWindowBuilder`. Only the samples themselves need the live game.
 
 use serde_json::{Value, json};
 
