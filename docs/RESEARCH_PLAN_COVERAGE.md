@@ -42,3 +42,12 @@ fake game host and proves the controller-side wiring a live run depends on: the 
 telemetry exist, and the controller-journal tap installed by `build` delivers a durably written journal record to the
 archive each action study is sealed with. What stays physical: a running controller process built from this commit
 producing these records during a real game (the deployed controller predates them).
+
+### Event-driven window production and ioctl cross-check (2026-11-23)
+
+- `real_monitor_events_through_on_event_build_the_attempts_resident_window` (runtime/tests/planning.rs) drives
+  `MonitorEvent::Interval`, `GpuSample`, `Frame` and `CpuFreqSample` through `AutotuneRuntime::on_event` into an armed
+  resident observer and checks the resulting window (150 game events, 3 CPU/GPU/frequency samples, nothing invalid).
+- The five uinput request numbers and `sizeof(struct uinput_setup)` (92) in `syscall.rs` were compared with a C program
+  compiled against the kernel's own `linux/uinput.h` (6.18.7 headers): all equal (0x5501, 0x5502, 0x405c5503,
+  0x40045564, 0x40045565, 92). No device was opened. What is still unexercised is only the live call sequence.

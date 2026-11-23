@@ -230,6 +230,89 @@ mod research_action_gate {
         );
     }
 
+    /// Every kind of event reaches the resident observer through the runtime's one entry point, `on_event`, exactly as the
+    /// session delivers them: interval records, GPU samples, frames and CPU frequency events build one attempt's window.
+    #[test]
+    fn real_monitor_events_through_on_event_build_the_attempts_resident_window() {
+        use crate::{
+            autotune::research::{
+                action_child::ChildTarget,
+                resident_observer::{ResidentObserver, SharedResident},
+            },
+            metrics::LatencyHistogram,
+            recorder::{CpuFreqRecord, FrameEvent},
+            session_events::MonitorEvent,
+        };
+        let pid = std::process::id();
+        let identity = process_identity(pid).expect("a live process");
+        let mut runtime = runtime_for(pid, vec![]);
+        let resident: SharedResident = Arc::new(Mutex::new(ResidentObserver::default()));
+        runtime.set_research_resident(Some(resident.clone()));
+        resident
+            .lock()
+            .unwrap()
+            .arm(ChildTarget { ..identity }, Some(0), 100);
+        let mut histogram = LatencyHistogram::new();
+        for _ in 0..50 {
+            histogram.record(400_000);
+        }
+        for second in 1..=3u64 {
+            let game = IntervalRecord {
+                elapsed_ms: second * 1_000,
+                process_pid: Some(pid),
+                class: TaskClass::Game,
+                samples: 50,
+                max_ns: 400_000,
+                histogram: histogram.snapshot(),
+                ..Default::default()
+            };
+            runtime
+                .on_event(MonitorEvent::Interval {
+                    elapsed_ms: second * 1_000,
+                    records: vec![game],
+                    drop_counters: DropCountersSnapshot::default(),
+                })
+                .unwrap();
+            runtime
+                .on_event(MonitorEvent::GpuSample {
+                    sample: Box::default(),
+                })
+                .unwrap();
+            runtime
+                .on_event(MonitorEvent::Frame {
+                    event: Box::new(FrameEvent {
+                        elapsed_ms: second * 1_000,
+                        frametime_ms: 8.0,
+                    }),
+                })
+                .unwrap();
+            runtime
+                .on_event(MonitorEvent::CpuFreqSample {
+                    event: Box::new(CpuFreqRecord {
+                        elapsed_ms: second * 1_000,
+                        cpu: 0,
+                        freq_khz: 4_000_000,
+                        timestamp_ns: second * 1_000_000_000,
+                    }),
+                })
+                .unwrap();
+        }
+        let windows = resident.lock().unwrap().freeze(200);
+        assert_eq!(windows.len(), 1);
+        let window = &windows[0];
+        assert_eq!(
+            (
+                window.events(),
+                window.cpu_samples,
+                window.gpu_samples,
+                window.cpu_freq_samples,
+                window.invalid_intervals,
+                window.target_changed
+            ),
+            (150, 3, 3, 3, 0, false)
+        );
+    }
+
     #[test]
     fn the_runtime_reports_its_frames_and_frame_source_into_the_telemetry_observer() {
         use crate::{
