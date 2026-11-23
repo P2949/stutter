@@ -95,6 +95,102 @@ impl DriverStudyAttempts {
         Ok(windows)
     }
 
+    /// The paired runnable-latency record G5 stands on, derived from the windows the runtime counted: each planned
+    /// pair's off and on attempt as its canonical population (the part inside the attempt), the dropped events and any
+    /// target change, and the guard facts read from the production objective-signal builder. Written only when the real
+    /// verifier accepts it for every planned pair; anything less leaves no record and the action has no measurement.
+    pub(super) fn seal_action_latency(
+        &self,
+        study: &ChildStudy,
+        study_dir: &std::fs::File,
+        intent: &super::super::ResearchIntentV1,
+        windows: &[super::super::resident_observer::AttemptResident],
+        evidence: &std::collections::BTreeMap<u32, super::super::report::AttemptEvidenceV1>,
+    ) -> anyhow::Result<()> {
+        use super::super::{
+            action_latency,
+            child_verify_rules::processes_of,
+            evidence_producers::{
+                LatencyWindowBuilder, WindowGuards, action_latency_document, latency_pair,
+            },
+            treatment::{Treatment, treatments_of},
+        };
+        if !matches!(study.stage, Stage::Action(_)) || windows.is_empty() {
+            return Ok(());
+        }
+        let Some(schedule) = treatments_of(intent).ok().flatten() else {
+            return Ok(());
+        };
+        let processes = processes_of(evidence);
+        let window_json = |slot: u32| -> Option<serde_json::Value> {
+            let process = processes.iter().find(|p| p.slot == slot)?;
+            let window = windows.iter().find(|w| {
+                w.attempt == Some(slot)
+                    && w.target.pid == process.pid
+                    && w.target.start_ticks == process.start_ticks
+            })?;
+            let guards = window.guards?;
+            let mut builder = LatencyWindowBuilder::from_population(
+                window.started_unix.max(process.started_unix),
+                window.histogram.clone(),
+                window.max_ns,
+            )?;
+            builder.lost(window.lost_events.saturating_add(window.invalid_intervals));
+            if window.target_changed {
+                builder.target_changed();
+            }
+            Some(builder.finish(
+                window.ended_unix.min(process.completed_unix),
+                WindowGuards {
+                    foreground_p99_ms: guards.frame_p99_ms,
+                    foreground_samples: guards.frame_samples,
+                    foreground_over_5ms: guards.foreground_over_5ms,
+                    thermal_degraded: guards.thermal_degraded,
+                    thermal_throttle_count: guards.thermal_throttle_count,
+                    cpu_power_limited: guards.cpu_power_limited,
+                    gpu_power_limited: guards.gpu_power_limited,
+                },
+            ))
+        };
+        let mut pairs = Vec::new();
+        for block in 0..schedule.len() / 2 {
+            let (a, b) = (block as u32 * 2, block as u32 * 2 + 1);
+            let (off, on) = if schedule[a as usize] == Treatment::Off {
+                (a, b)
+            } else {
+                (b, a)
+            };
+            let (Some(off_process), Some(on_process)) = (
+                processes.iter().find(|p| p.slot == off),
+                processes.iter().find(|p| p.slot == on),
+            ) else {
+                continue;
+            };
+            let (Some(off_window), Some(on_window)) = (window_json(off), window_json(on)) else {
+                return Ok(());
+            };
+            pairs.push(latency_pair(
+                (off_process, off_window),
+                (on_process, on_window),
+            ));
+        }
+        let bytes = action_latency_document(pairs);
+        if action_latency::verify(&bytes, &schedule, &processes).is_err() {
+            return Ok(());
+        }
+        match write_new(study_dir, action_latency::FILE, &bytes) {
+            Ok(()) => Ok(()),
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// The sealed resident observation G3 stands on, derived from the windows the runtime counted and the facts the
     /// kernel and the frame source gave of each attempt: the cgroup the window opened with, the renderer binding the
     /// attempt's own telemetry receipt shows, and owners attributed by the game's own interval records. It is written

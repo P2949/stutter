@@ -145,6 +145,7 @@ impl AutotuneRuntime {
                 return self.evaluate_and_emit(None);
             }
             MonitorEvent::Frame { event } => {
+                self.observe_research_frame(&event);
                 self.controller.window.push_frame(*event);
             }
             MonitorEvent::IrqEvent { event } => {
@@ -154,11 +155,12 @@ impl AutotuneRuntime {
                 self.controller.window.push_block_io_event(*event);
             }
             MonitorEvent::GpuSample { sample } => {
-                self.observe_research_gpu_sample();
+                self.observe_research_gpu_sample(&sample);
                 self.controller.window.push_gpu_sample(*sample);
             }
             MonitorEvent::GpuEngineSample { .. } => {}
             MonitorEvent::CpuFreqSample { event } => {
+                self.observe_research_cpu_freq(&event);
                 self.controller.window.push_cpu_freq_event(*event);
             }
             MonitorEvent::ForegroundEvent { event } => {

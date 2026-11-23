@@ -428,6 +428,7 @@ impl DriverStudyAttempts {
         );
         self.feature_receipt(&study_dir, study)?;
         self.seal_resident_observation(&study_dir, &windows, &evidence)?;
+        self.seal_action_latency(study, &study_dir, driver.intent(), &windows, &evidence)?;
         let activation = self.feature_activation(study, u32::try_from(report.attempts_completed)?);
         let functional = self.feature_functional(study, &evidence);
         // The game's enum cannot establish the exact backend or functional fork-specific activation.

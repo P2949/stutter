@@ -140,13 +140,6 @@ impl LatencyWindowBuilder {
 
     /// A population the resident runtime already merged in the controller's canonical layout (its interval records'
     /// histograms summed). A layout that is not the canonical one is refused, never reinterpreted.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the latency record is assembled once the foreground and thermal guard facts are fed"
-        )
-    )]
     pub fn from_population(
         now_unix: u64,
         buckets: Vec<crate::metrics::LatencyHistogramBucket>,

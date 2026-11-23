@@ -9,12 +9,26 @@ use std::sync::{Arc, Mutex};
 
 use super::{action_child::ChildTarget, child_verify::AttemptProcess};
 use crate::{
-    autotune::objective::runnable_signal::is_primary_game_class,
+    autotune::{objective::runnable_signal::is_primary_game_class, rolling_window::RollingWindow},
     metrics::{IntervalRecord, LatencyHistogram, LatencyHistogramBucket},
+    recorder::{CpuFreqRecord, FrameEvent, GpuSample},
 };
 
 /// Shared between the runtime (which reports its events) and the funnel (which opens and closes attempts).
 pub type SharedResident = Arc<Mutex<ResidentObserver>>;
+
+/// The guard facts of one window, read from the production objective-signal builder over the same events the
+/// controller's own window holds: nothing here is a second definition of a frame tail or a throttle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GuardFacts {
+    pub frame_p99_ms: f64,
+    pub frame_samples: u64,
+    pub foreground_over_5ms: u64,
+    pub thermal_degraded: bool,
+    pub thermal_throttle_count: u64,
+    pub cpu_power_limited: bool,
+    pub gpu_power_limited: bool,
+}
 
 /// One attempt's finished window.
 #[derive(Clone, Debug)]
@@ -37,6 +51,8 @@ pub struct AttemptResident {
     pub cpu_samples: u64,
     pub gpu_samples: u64,
     pub psi_samples: u64,
+    /// `None` when any of the signals the guards need was not observed over the window.
+    pub guards: Option<GuardFacts>,
 }
 
 impl AttemptResident {
@@ -51,6 +67,8 @@ impl AttemptResident {
 #[derive(Debug)]
 struct Running {
     target: ChildTarget,
+    /// The controller's own rolling window type, fed the same events, so the guard facts are the production ones.
+    window: RollingWindow,
     cgroup: String,
     attempt: Option<u32>,
     started_unix: u64,
@@ -85,6 +103,7 @@ impl ResidentObserver {
         self.running = Some(Running {
             target,
             cgroup: cgroup_of(target.pid.as_u32()),
+            window: RollingWindow::new(std::time::Duration::from_secs(24 * 3_600)),
             attempt,
             started_unix: now_unix,
             buckets: LatencyHistogram::new().snapshot(),
@@ -104,6 +123,7 @@ impl ResidentObserver {
             return;
         };
         running.lost = running.lost.saturating_add(lost_events);
+        running.window.push_intervals(records.iter().cloned());
         let mut seen = false;
         for record in records.iter().filter(|r| is_primary_game_class(r.class)) {
             match record.process_pid {
@@ -143,22 +163,60 @@ impl ResidentObserver {
         }
     }
 
-    /// A GPU sample event while the attempt runs.
+    /// A GPU sample event while the attempt runs (counted only).
     pub fn observe_gpu_sample(&mut self) {
         if let Some(running) = self.running.as_mut() {
             running.gpu = running.gpu.saturating_add(1);
         }
     }
 
+    /// A GPU sample event: counted, and held for the thermal and power guards.
+    pub fn observe_gpu(&mut self, sample: &GpuSample) {
+        self.observe_gpu_sample();
+        if let Some(running) = self.running.as_mut() {
+            running.window.push_gpu_sample(sample.clone());
+        }
+    }
+
+    /// A frame event while the attempt runs, held for the foreground frame-tail guard.
+    pub fn observe_frame(&mut self, frame: &FrameEvent) {
+        if let Some(running) = self.running.as_mut() {
+            running.window.push_frame(frame.clone());
+        }
+    }
+
+    /// A CPU frequency event while the attempt runs, held for the power guard.
+    pub fn observe_cpu_freq(&mut self, event: &CpuFreqRecord) {
+        if let Some(running) = self.running.as_mut() {
+            running.window.push_cpu_freq_event(event.clone());
+        }
+    }
+
     /// The attempt ended (or its process is gone): keep its window.
     pub fn end_attempt(&mut self, now_unix: u64) {
         if let Some(running) = self.running.take() {
+            let members = std::collections::BTreeSet::from([running.target.pid.as_u32()]);
+            let signals = running
+                .window
+                .objective_signals_for_target(running.target.pid.as_u32(), &members);
+            let guards = (|| {
+                Some(GuardFacts {
+                    frame_p99_ms: signals.frame_p99_ms?,
+                    frame_samples: signals.frame_samples?,
+                    foreground_over_5ms: signals.foreground_over_5ms?,
+                    thermal_degraded: signals.thermal_degraded?,
+                    thermal_throttle_count: signals.thermal_throttle_count?,
+                    cpu_power_limited: signals.cpu_power_limited?,
+                    gpu_power_limited: signals.gpu_power_limited?,
+                })
+            })();
             self.finished.push(AttemptResident {
                 target: running.target,
                 cgroup: running.cgroup,
                 attempt: running.attempt,
                 started_unix: running.started_unix,
-                ended_unix: now_unix,
+                // Timestamps are whole seconds: a window that opened and closed inside one second still spans that second.
+                ended_unix: now_unix.max(running.started_unix.saturating_add(1)),
                 histogram: running.buckets,
                 max_ns: running.max_ns,
                 lost_events: running.lost,
@@ -167,6 +225,7 @@ impl ResidentObserver {
                 cpu_samples: running.cpu,
                 gpu_samples: running.gpu,
                 psi_samples: running.psi,
+                guards,
             });
         }
     }
@@ -182,6 +241,12 @@ impl ResidentObserver {
     pub fn acknowledge(&mut self, count: usize) {
         let count = count.min(self.finished.len());
         self.finished.drain(..count);
+    }
+
+    /// The process the open window is armed on.
+    #[cfg(test)]
+    pub fn target(&self) -> Option<ChildTarget> {
+        self.running.as_ref().map(|running| running.target)
     }
 
     pub fn is_observing(&self) -> bool {
@@ -214,6 +279,12 @@ pub fn window_record(window: &AttemptResident) -> serde_json::Value {
         "target_changed": window.target_changed,
         "cpu_samples": window.cpu_samples, "gpu_samples": window.gpu_samples,
         "psi_samples": window.psi_samples,
+        "guards": window.guards.map(|g| serde_json::json!({
+            "frame_p99_ms": g.frame_p99_ms, "frame_samples": g.frame_samples,
+            "foreground_over_5ms": g.foreground_over_5ms, "thermal_degraded": g.thermal_degraded,
+            "thermal_throttle_count": g.thermal_throttle_count, "cpu_power_limited": g.cpu_power_limited,
+            "gpu_power_limited": g.gpu_power_limited,
+        })),
     })
 }
 

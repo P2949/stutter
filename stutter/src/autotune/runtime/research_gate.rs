@@ -81,11 +81,29 @@ impl AutotuneRuntime {
     }
 
     /// Report a GPU sample event the runtime just handled.
-    pub(super) fn observe_research_gpu_sample(&self) {
+    pub(super) fn observe_research_gpu_sample(&self, sample: &crate::recorder::GpuSample) {
         if let Some(resident) = self.research_resident.as_ref()
             && let Ok(mut observer) = resident.lock()
         {
-            observer.observe_gpu_sample();
+            observer.observe_gpu(sample);
+        }
+    }
+
+    /// Report a frame event the runtime just handled (held for the foreground frame-tail guard).
+    pub(super) fn observe_research_frame(&self, frame: &crate::recorder::FrameEvent) {
+        if let Some(resident) = self.research_resident.as_ref()
+            && let Ok(mut observer) = resident.lock()
+        {
+            observer.observe_frame(frame);
+        }
+    }
+
+    /// Report a CPU frequency event the runtime just handled (held for the power guard).
+    pub(super) fn observe_research_cpu_freq(&self, event: &crate::recorder::CpuFreqRecord) {
+        if let Some(resident) = self.research_resident.as_ref()
+            && let Ok(mut observer) = resident.lock()
+        {
+            observer.observe_cpu_freq(event);
         }
     }
 

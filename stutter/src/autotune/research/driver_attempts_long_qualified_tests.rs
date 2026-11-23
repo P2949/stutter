@@ -321,3 +321,130 @@ fn the_sealed_resident_observation_is_derived_only_when_every_attempt_verifies()
     let processes = crate::autotune::research::child_verify_rules::processes_of(&evidence);
     resident_observation::verify(&std::fs::read(&sealed).unwrap(), &processes).unwrap();
 }
+
+/// The whole measurement chain from the runtime's own events: per-attempt populations, frames, GPU samples and CPU
+/// frequency events fed to the observer produce, at study end, the paired runnable-latency record G5 stands on,
+/// with the guard facts read from the production objective-signal builder and the production decision applied by the
+/// verifier. The action that shortened the tail in every pair decides Keep; with a guard fact missing there is no record.
+#[test]
+fn the_latency_record_is_derived_from_the_runtimes_own_events_and_decides_through_the_production_objective()
+ {
+    use crate::{
+        autotune::research::{
+            action_latency::{self, Decision},
+            child_verify_rules::processes_of,
+            resident_observer::SharedResident,
+            treatment::{Treatment, treatments_of},
+        },
+        metrics::{IntervalRecord, LatencyHistogram},
+        process_tree::TaskClass,
+        recorder::{CpuFreqRecord, FrameEvent, GpuSample},
+    };
+    let run = |with_cpu_freq: bool| {
+        let (root, runner, study, _gate, _parent) = build(&unit().definition_sha256);
+        let resident: SharedResident = Default::default();
+        let mut runner = runner.with_resident(resident.clone());
+        let path = root.path().join("studies").join(&study.study_sha256[..16]);
+        let mut schedule: Option<Vec<Treatment>> = None;
+        let mut elapsed = 0u64;
+        let mut outcome = None;
+        for _ in 0..20_000 {
+            if let Some(done) = runner.poll(&study, 100).unwrap() {
+                outcome = Some(done);
+                break;
+            }
+            if schedule.is_none() && path.join("intent.json").is_file() {
+                let intent: ResearchIntentV1 =
+                    serde_json::from_slice(&std::fs::read(path.join("intent.json")).unwrap())
+                        .unwrap();
+                schedule = treatments_of(&intent).unwrap();
+            }
+            // The runtime's events concern the process the observer is armed on (the attested one).
+            let (Some(process), Some(schedule)) =
+                (resident.lock().unwrap().target(), schedule.as_ref())
+            else {
+                continue;
+            };
+            // The action shortens the runnable tail from 20 ms to 1.5 ms in every attempt treated On.
+            let on = schedule[(process.pid.as_u32() - 5_000) as usize] == Treatment::On;
+            let tail = if on { 1_500_000 } else { 20_000_000 };
+            let mut histogram = LatencyHistogram::new();
+            for _ in 0..450 {
+                histogram.record(500_000);
+            }
+            for _ in 0..50 {
+                histogram.record(tail);
+            }
+            let mut guard = resident.lock().unwrap();
+            for _ in 0..4 {
+                elapsed += 1_000;
+                guard.observe_intervals(
+                    &[IntervalRecord {
+                        elapsed_ms: elapsed,
+                        process_pid: Some(process.pid.as_u32()),
+                        class: TaskClass::Game,
+                        samples: 500,
+                        max_ns: tail,
+                        histogram: histogram.snapshot(),
+                        ..Default::default()
+                    }],
+                    0,
+                );
+                for frame in 0..100 {
+                    guard.observe_frame(&FrameEvent {
+                        elapsed_ms: elapsed,
+                        frametime_ms: 12.0 + f64::from(frame % 3),
+                    });
+                }
+                guard.observe_gpu(&GpuSample {
+                    elapsed_ms: elapsed,
+                    gpu_busy_percent: Some(60),
+                    gpu_clock_mhz: Some(2_000),
+                    temp_millidegrees: Some(60_000),
+                    ..Default::default()
+                });
+                if with_cpu_freq {
+                    guard.observe_cpu_freq(&CpuFreqRecord {
+                        elapsed_ms: elapsed,
+                        cpu: 0,
+                        freq_khz: 4_000_000,
+                        timestamp_ns: 0,
+                    });
+                }
+            }
+        }
+        let outcome = outcome.expect("the study ended");
+        (root, study, path, outcome)
+    };
+    let (_root, _study, path, outcome) = run(true);
+    assert_eq!(outcome.completed, 8);
+    let record = path.join(action_latency::FILE);
+    assert!(
+        record.is_file(),
+        "every planned pair has its guarded population"
+    );
+    let intent: ResearchIntentV1 =
+        serde_json::from_slice(&std::fs::read(path.join("intent.json")).unwrap()).unwrap();
+    let evidence: std::collections::BTreeMap<
+        u32,
+        crate::autotune::research::report::AttemptEvidenceV1,
+    > = std::fs::read_dir(path.join("evidence"))
+        .unwrap()
+        .flatten()
+        .map(|entry| {
+            let item: crate::autotune::research::report::AttemptEvidenceV1 =
+                serde_json::from_slice(&std::fs::read(entry.path()).unwrap()).unwrap();
+            (item.slot_index, item)
+        })
+        .collect();
+    let result = action_latency::verify(
+        &std::fs::read(&record).unwrap(),
+        &treatments_of(&intent).unwrap().unwrap(),
+        &processes_of(&evidence),
+    )
+    .unwrap();
+    assert_eq!((result.pairs, result.decision), (4, Decision::Keep));
+    // Without the CPU frequency events the power guard was never observed: no guard facts, no record.
+    let (_root, _study, path, _outcome) = run(false);
+    assert!(!path.join(action_latency::FILE).exists());
+}

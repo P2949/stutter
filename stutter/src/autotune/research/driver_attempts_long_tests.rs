@@ -210,17 +210,18 @@ fn build_with<D: LongSessionDriver + Send + 'static>(
             root.path().join("studies").join(&study.study_sha256[..16]),
         ))
     });
-    let base = parent.issued_unix_seconds + 1;
+    // The controller's clock reads inside the sessions' interval, as a real one does while a route runs.
+    let base = 5_101;
     let mut calls = 0u64;
     let attempts = DriverStudyAttempts::new(
         File::open(root.path()).unwrap(),
         parent.clone(),
         Box::new(host),
         // A real route is polled every two seconds for twenty minutes, so the controller's own clock is read
-        // far more often than once per second of the study; it advances one second per 64 reads here.
+        // far more often than once per second of the study; it advances one second per 8 reads here.
         Box::new(move || {
             calls += 1;
-            base + calls / 64
+            base + calls / 8
         }),
         Box::new(|| Ok(())),
         Box::new(|_| std::path::PathBuf::from("/nonexistent")),

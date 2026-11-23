@@ -770,3 +770,16 @@ window inside the attempt. It is written only when the real `resident_observatio
 completed attempt; an unbound renderer, a missing or sparse window leaves no record (and a campaign without it has no
 G3). Still not derived: `action-latency.json`, which needs each window's foreground frame-tail, over-5-ms and
 thermal/power guard facts from the controller's window score.
+
+## The latency record is derived from the runtime's own events (eighteenth audit, G5)
+
+The resident observer now holds, per attempt, the controller's own `RollingWindow` fed the same events the controller's
+window gets (interval records, frame events, GPU samples, CPU frequency events). At the end of the attempt the guard
+facts (foreground frame tail and frame count, over-5-ms count, thermal and power flags) are read from the production
+`compute_objective_signals`, not redefined, and kept with the raw window (`None` when any signal the guards need was
+never observed). At study end `seal_action_latency` builds each planned pair's off and on population in the
+canonical layout (the part inside the attempt, with dropped events and any target change), and writes
+`action-latency.json` only when the real `action_latency::verify` accepts every planned pair; the production
+`compare_for_objective` then decides each pair. A missing guard fact (for example no CPU frequency events) leaves no
+record and the action has no measurement. A whole-second window that opened and closed inside one second still spans
+that second.
