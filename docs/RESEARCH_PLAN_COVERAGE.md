@@ -59,3 +59,24 @@ name order; refuses symlinks, nested directories, an empty or oversized save) an
 route, its script and that save into one definition digest, so two long runs are comparable only from the same save.
 Offline-tested on temporary directories. The operator still has to choose the save and the in-game conditions and
 authorize the resulting `LongWorkUnit`; the module is staged (dead in the production build) until then.
+
+## Eighteenth audit, finding by finding (2026-11-23)
+
+Each row names a test that was run by its exact name and passed. `dattempts` is `autotune::research::driver_attempts::tests`.
+
+| # | Finding | Test |
+|---|---|---|
+| 1 | G5 uses the production objective | `objective::runnable_replay_tests` (`replay_pair` over the production comparison) and `action_latency` tests |
+| 2 | Canonical histogram, bucket-resolution uncertainty | `action_latency` and `resident_observer` tests; `replay_pair` returns Inconclusive when the bucket resolution cannot show the improvement |
+| 3 | Offline plumbing before another live run | `runtime::tests::planning::real_monitor_events_through_on_event_build_the_attempts_resident_window`; the production-funnel wiring test |
+| 4 | Seal required and validated | `protected_state_tests::a_seal_that_is_corrupt_or_unwritable_never_stands_in_for_the_unchanged_state`, `finalization_neither_discards_the_seal_result_nor_completes_without_a_valid_seal` |
+| 5 | Crosswalk evidence reopens | `crosswalk_evidence::an_observation_stands_only_when_its_evidence_reopens_and_matches_the_campaign_and_dossier`, `a_malformed_or_repeated_record_is_an_integrity_failure_not_zero_observations` |
+| 6 | Effective resolution | `native_context_resolution_tests::the_rendered_resolution_and_dynamic_scaling_are_read_and_judged_against_the_profile` |
+| 7 | A feature can qualify on backend proof | `dattempts::feature::a_feature_study_qualifies_only_on_the_kernels_witness_of_its_backend`, `feature_proof::the_backend_must_be_present_on_every_on_attempt_and_absent_on_every_off_attempt`, `dattempts::baseline_action::qualified::a_feature_whose_backend_the_kernel_showed_on_every_treated_attempt_qualifies_through_the_whole_campaign` |
+| 8 | Time admission | `dattempts::frozen::the_admission_facts_are_the_active_seconds_left_and_the_least_one_attempt_can_take` |
+| 9 | No post-hoc budget repair | `dattempts::baseline_action::an_action_the_controller_never_applied_is_a_justified_abstention_through_the_whole_campaign` (shared clock) and `a_budget_record_that_understates_the_witnessed_sessions_is_refused_at_verification` (negative) |
+| 10 | Incremental stop | `driver_refusal_tests::a_refused_launch_is_sealed_only_once_its_stop_settles_across_ticks` |
+| 11 | Production graphics profiles | `profile_production_tests::the_production_profiles_set_each_arms_resolution_and_turn_the_upscaler_and_frame_generation_off` |
+| 12 | Independent controller and worker provenance | `evidence_archive::the_tap_keeps_the_last_record_the_journal_durably_wrote_for_each_transaction_and_nothing_else`, `the_worker_audit_is_read_line_by_line_and_only_its_own_events_for_the_action_inside_the_study_are_kept`, `dattempts::long::qualified::a_justified_abstention_stands_on_the_planner_observation_the_runtime_derived_from_its_decisions` |
+
+Known and unexplained: `a_real_apply_and_restore_on_a_stand_in_process_is_proven_against_procfs` failed once in a parallel run and passed in every later run; a pre-exec comm race was tested and ruled out. Its failure now prints the apply error.
