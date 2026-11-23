@@ -18,6 +18,8 @@ struct Fake {
     safe_delay: std::time::Duration,
     rename_on_launch: Option<(std::path::PathBuf, std::path::PathBuf)>,
     health_stop: bool,
+    /// What each bounded stop step answers, in order; empty means the blocking abort decides.
+    abort_steps: VecDeque<super::super::steam_host::StopStep>,
 }
 
 fn ev(slot_index: u32) -> AttemptEvidenceV1 {
@@ -81,6 +83,16 @@ impl AttemptHost for Fake {
         anyhow::ensure!(!self.abort_fails, "settlement unverified");
         Ok(())
     }
+    fn abort_step(&mut self) -> super::super::steam_host::StopStep {
+        if let Some(step) = self.abort_steps.pop_front() {
+            return step;
+        }
+        if self.abort().is_ok() {
+            super::super::steam_host::StopStep::Settled
+        } else {
+            super::super::steam_host::StopStep::Unsettled
+        }
+    }
 }
 
 fn fake() -> Fake {
@@ -99,6 +111,7 @@ fn fake() -> Fake {
         safe_delay: std::time::Duration::ZERO,
         rename_on_launch: None,
         health_stop: false,
+        abort_steps: VecDeque::new(),
     }
 }
 

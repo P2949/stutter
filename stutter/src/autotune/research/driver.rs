@@ -83,6 +83,16 @@ pub trait AttemptHost {
     fn launch(&mut self, slot: &AttemptSlot, context: &DispatchContextV1) -> anyhow::Result<()>;
     fn poll(&mut self) -> Progress;
     fn abort(&mut self) -> anyhow::Result<()>;
+    /// One bounded step of the same stop: `Settled` when nothing owned remains, `Pending` while the settlement window
+    /// is still open (the driver ticks again), `Unsettled` once it is not. The default is the blocking `abort`, for
+    /// hosts with nothing to wait for.
+    fn abort_step(&mut self) -> super::steam_host::StopStep {
+        if self.abort().is_ok() {
+            super::steam_host::StopStep::Settled
+        } else {
+            super::steam_host::StopStep::Unsettled
+        }
+    }
 }
 
 /// An independently verified claim keeps its process and worker settlement witnesses live until
@@ -146,7 +156,12 @@ pub struct Driver {
     unresolved_launch: Option<u32>,
     terminal_failure: Option<FailureClass>,
     cancel: bool,
+    /// An attempt whose stop is in progress (see `driver_abort`).
+    pending_abort: Option<abort::PendingAbort>,
 }
+
+#[path = "driver_abort.rs"]
+mod abort;
 
 /// Deterministic schedule: a pure function of the intent, so a verifier can regenerate it.
 pub fn build_schedule(intent: &ResearchIntentV1) -> anyhow::Result<Vec<AttemptSlot>> {
@@ -217,6 +232,7 @@ impl Driver {
             unresolved_launch: None,
             terminal_failure: None,
             cancel: false,
+            pending_abort: None,
         }
     }
 
@@ -446,6 +462,10 @@ impl Driver {
             self.fresh_journal_checked = true;
         }
         if let Some((slot, started, monotonic_start)) = self.active.clone() {
+            // A stop begun on an earlier tick continues before anything else is looked at.
+            if let Some(step) = self.continue_abort(host, now) {
+                return step;
+            }
             let progress = host.poll();
             // Observe urgent failures before cancellation or a budget boundary can mask them.
             let urgent = matches!(
@@ -474,8 +494,8 @@ impl Driver {
                 None
             };
             if let Some(code) = failure.filter(|_| !urgent) {
-                host.abort()?;
-                return self.seal(slot, AttemptOutcome::Failed { code: code.into() }, now);
+                let outcome = AttemptOutcome::Failed { code: code.into() };
+                return self.abort_then_seal(host, slot, outcome, None, now);
             }
             if !urgent
                 && now
@@ -483,14 +503,10 @@ impl Driver {
                     .saturating_add(1)
                     >= self.intent.deadline_unix_seconds
             {
-                host.abort()?;
-                return self.seal(
-                    slot,
-                    AttemptOutcome::Failed {
-                        code: "CampaignDeadline".into(),
-                    },
-                    now,
-                );
+                let outcome = AttemptOutcome::Failed {
+                    code: "CampaignDeadline".into(),
+                };
+                return self.abort_then_seal(host, slot, outcome, None, now);
             }
             if !urgent
                 && self.active_seconds.saturating_add(
@@ -499,14 +515,10 @@ impl Driver {
                         .saturating_add(1),
                 ) >= u64::from(self.intent.max_active_seconds)
             {
-                host.abort()?;
-                return self.seal(
-                    slot,
-                    AttemptOutcome::Failed {
-                        code: "ActiveBudgetExceeded".into(),
-                    },
-                    now,
-                );
+                let outcome = AttemptOutcome::Failed {
+                    code: "ActiveBudgetExceeded".into(),
+                };
+                return self.abort_then_seal(host, slot, outcome, None, now);
             }
             if !urgent
                 && now
@@ -514,14 +526,10 @@ impl Driver {
                     .max(monotonic_start.elapsed().as_secs())
                     >= u64::from(self.intent.max_attempt_seconds)
             {
-                host.abort()?;
-                return self.seal(
-                    slot,
-                    AttemptOutcome::Failed {
-                        code: "AttemptTimeout".into(),
-                    },
-                    now,
-                );
+                let outcome = AttemptOutcome::Failed {
+                    code: "AttemptTimeout".into(),
+                };
+                return self.abort_then_seal(host, slot, outcome, None, now);
             }
             return match progress {
                 Progress::Running => Ok(Step::Running(slot.index)),
@@ -558,17 +566,11 @@ impl Driver {
                             self.seal(slot, AttemptOutcome::Completed { evidence_sha256 }, now)
                         }
                         Err((class, code)) => {
-                            host.abort()?;
-                            let sealed = self.seal(
-                                slot,
-                                AttemptOutcome::ClassifiedFailure {
-                                    class,
-                                    code: code.into(),
-                                },
-                                now,
-                            )?;
-                            self.terminal_failure = Some(class);
-                            Ok(sealed)
+                            let outcome = AttemptOutcome::ClassifiedFailure {
+                                class,
+                                code: code.into(),
+                            };
+                            self.abort_then_seal(host, slot, outcome, Some(class), now)
                         }
                     }
                 }
@@ -577,13 +579,9 @@ impl Driver {
                         self.unresolved_launch = Some(slot.index);
                         return Ok(Step::OwnershipUnresolved("SettlementUnproven"));
                     }
-                    host.abort()?;
-                    let sealed =
-                        self.seal(slot, AttemptOutcome::ClassifiedFailure { class, code }, now)?;
-                    if class != FailureClass::Incompatible {
-                        self.terminal_failure = Some(class);
-                    }
-                    Ok(sealed)
+                    let outcome = AttemptOutcome::ClassifiedFailure { class, code };
+                    let terminal = (class != FailureClass::Incompatible).then_some(class);
+                    self.abort_then_seal(host, slot, outcome, terminal, now)
                 }
             };
         }

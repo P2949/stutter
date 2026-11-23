@@ -252,3 +252,67 @@ fn launch_refusal_timeout_and_cancel_seal_failed_without_replay() {
     assert_eq!(driver.tick(&mut host, now + 202).unwrap(), Step::Cancelled);
     assert_eq!(host.launches, 3);
 }
+
+/// A timeout, budget stop or cancellation no longer blocks the tick for the settlement window: the host is asked one
+/// bounded step per tick, the attempt stays active and the tick reports it running, and the outcome is sealed only
+/// when settlement is proven. An unproven settlement is an error, never a seal over a possibly running game.
+#[test]
+fn a_stop_waits_for_proven_settlement_one_step_per_tick_and_never_seals_over_an_unsettled_game() {
+    use crate::autotune::research::steam_host::StopStep::{Pending, Settled, Unsettled};
+    let (_dir, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.abort_steps = [Pending, Pending, Settled].into();
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    // The attempt timed out: the stop begins and is still settling; nothing is sealed yet.
+    assert_eq!(driver.tick(&mut host, now + 101).unwrap(), Step::Running(0));
+    assert!(driver.abort_pending());
+    assert_eq!(driver.tick(&mut host, now + 102).unwrap(), Step::Running(0));
+    assert!(driver.abort_pending());
+    // Proven settled: the outcome the stop began with is sealed.
+    let Step::Sealed(record) = driver.tick(&mut host, now + 103).unwrap() else {
+        panic!("a settled stop seals")
+    };
+    assert_eq!(
+        record.outcome,
+        AttemptOutcome::Failed {
+            code: "AttemptTimeout".into()
+        }
+    );
+    assert!(!driver.abort_pending());
+    assert_eq!(
+        host.launches, 1,
+        "a stop in progress never starts another launch"
+    );
+    // Never proven: an error on that tick, nothing sealed, and the stop is still owed.
+    let (_other, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.abort_steps = [Pending, Unsettled].into();
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    assert_eq!(driver.tick(&mut host, now + 101).unwrap(), Step::Running(0));
+    assert!(driver.tick(&mut host, now + 102).is_err());
+    assert!(
+        driver.abort_pending(),
+        "an unsettled game keeps the stop pending"
+    );
+    // A cancellation that waits for settlement (an explicit shutdown) ticks through the window to the seal.
+    let (_third, mut driver, intent) = setup(4);
+    let mut host = fake();
+    host.abort_steps = [Pending, Settled].into();
+    let now = intent.issued_unix_seconds + 1;
+    assert_eq!(driver.tick(&mut host, now).unwrap(), Step::Running(0));
+    driver.cancel();
+    let Step::Sealed(record) = driver
+        .tick_cancelled_to_settlement(&mut host, now + 1)
+        .unwrap()
+    else {
+        panic!("a cancelled attempt seals once settled")
+    };
+    assert_eq!(
+        record.outcome,
+        AttemptOutcome::Failed {
+            code: "Cancelled".into()
+        }
+    );
+}

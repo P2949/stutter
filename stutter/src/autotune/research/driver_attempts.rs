@@ -540,9 +540,7 @@ impl StudyAttempts for DriverStudyAttempts {
                 .take()
                 .unwrap_or_else(|| (self.clock)())
                 .max(driver.last_tick_seconds().unwrap_or(0));
-            match driver.tick_with_launch_fence(self.host.as_mut(), now, || {
-                anyhow::bail!("cancellation must not launch an attempt")
-            }) {
+            match driver.tick_cancelled_to_settlement(self.host.as_mut(), now) {
                 Ok(Step::Sealed(_)) | Ok(Step::Cancelled) | Ok(Step::Stopped(_))
                 | Ok(Step::Halted(_)) => {}
                 _ => return Err("SettlementUnproven"),

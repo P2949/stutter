@@ -454,3 +454,20 @@ fn a_settlement_that_cannot_be_proven_fails_the_attempt_as_unresolved_ownership(
         crate::autotune::research::driver::FailureClass::OwnershipUnresolved
     );
 }
+
+#[test]
+fn an_abort_is_stepped_one_settlement_window_step_per_call_and_ownership_is_released_only_when_proven()
+ {
+    let mut host = host(vec![GameState::Running]);
+    launch(&mut host);
+    host.port.pending = 2;
+    // Each step is one bounded look at the settlement witness, never a loop over the whole window.
+    assert_eq!(host.abort_step(), StopStep::Pending);
+    assert!(
+        host.current.is_some(),
+        "ownership is kept while the tree may still be running"
+    );
+    assert_eq!(host.abort_step(), StopStep::Pending);
+    assert_eq!(host.abort_step(), StopStep::Settled);
+    assert!(host.current.is_none());
+}

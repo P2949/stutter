@@ -198,6 +198,16 @@ impl<H: AttemptHost, D: LongSessionDriver> AttemptHost for LongAttemptHost<H, D>
         let process = self.inner.abort();
         session.and(process)
     }
+
+    fn abort_step(&mut self) -> super::steam_host::StopStep {
+        self.session = None;
+        let session = self.driver.abort();
+        let process = self.inner.abort_step();
+        if session.is_err() {
+            return super::steam_host::StopStep::Unsettled;
+        }
+        process
+    }
 }
 
 #[cfg(test)]

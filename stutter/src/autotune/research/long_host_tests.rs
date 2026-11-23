@@ -252,3 +252,15 @@ fn a_game_failure_wins_and_every_other_attempt_is_delegated_untouched() {
     assert!(matches!(plain.poll(), Progress::Running));
     assert_eq!(calls.lock().unwrap().driver_aborts, 0);
 }
+
+#[test]
+fn a_long_hosts_stop_step_is_the_inner_hosts_and_the_session_is_stopped_either_way() {
+    use super::super::steam_host::StopStep;
+    // The inner host settles: the step settles, and the session driver was stopped.
+    let (mut settled, calls) = host(Vec::new(), false);
+    assert_eq!(settled.abort_step(), StopStep::Settled);
+    assert_eq!(calls.lock().unwrap().inner_aborts, 1);
+    // The inner host cannot be proven settled: the step is unsettled, never settled by the session alone.
+    let (mut stuck, _) = host(Vec::new(), true);
+    assert_eq!(stuck.abort_step(), StopStep::Unsettled);
+}

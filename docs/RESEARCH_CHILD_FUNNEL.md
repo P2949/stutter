@@ -783,3 +783,16 @@ canonical layout (the part inside the attempt, with dropped events and any targe
 `compare_for_objective` then decides each pair. A missing guard fact (for example no CPU frequency events) leaves no
 record and the action has no measurement. A whole-second window that opened and closed inside one second still spans
 that second.
+
+## Non-blocking attempt stop (eighteenth audit)
+
+A timeout, active-budget stop, campaign deadline, failure or cancellation of a running attempt no longer calls the
+host's blocking `abort` (for Steam up to the 120 s settlement window) from inside the tick. `AttemptHost::abort_step`
+asks the host one bounded step (`Settled`, `Pending`, `Unsettled`; the default is the blocking abort for hosts with
+nothing to wait for); `SteamAttemptHost` answers with the port's own `stop_step` and `LongAttemptHost` with its inner
+host's. While settlement is pending the driver keeps the attempt active (its time still accrues), reports it running,
+starts no further launch, and seals the outcome it began with only once the witness proves the tree gone; an unproven
+settlement is an error, the stop stays owed, and nothing is ever sealed over a possibly running game. An explicit
+shutdown or cancellation (`tick_cancelled_to_settlement`) ticks through the window (bounded, 150 s) so it still returns
+proven or unproven. Still blocking by design: the launch-refusal abort (nothing started), the coordinator's error-path
+`abort_host`, and the flat driver's own shutdown.

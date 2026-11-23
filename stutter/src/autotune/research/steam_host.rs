@@ -354,6 +354,14 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         self.current = None;
         Ok(())
     }
+
+    fn abort_step(&mut self) -> StopStep {
+        let step = self.port.stop_step();
+        if step == StopStep::Settled {
+            self.current = None;
+        }
+        step
+    }
 }
 
 #[cfg(test)]
