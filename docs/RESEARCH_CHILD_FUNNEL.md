@@ -813,3 +813,18 @@ Which factors have no modelled backend, and why (checked against the installed P
 Vulkan implicit layer (GE ships `libVkLayer_KORTHOS_LowLatency.so`, the CachyOS tool directory here is only a stub);
 `AntiLag2`, `Hdr` and `FrameGeneration` have no environment control or file witness to prove from outside the process.
 A real run decides whether the modelled names are mapped; a wrong name fails closed.
+
+## Effective graphics in the bundle, and the isolated-seat gate (eighteenth audit)
+
+`research/effective_graphics.rs`: every verified child carries `effective_graphics` (completed attempts whose results
+confirmed the profile's rendered resolution with dynamic scaling off, contradicted it, did not report it, or are of a
+profile that asks for none), and `capability-matrix.json` carries the campaign totals with
+`all_resolutions_confirmed`, which is false while any attempt is unproven, so the bundle never implies a check that was
+not made.
+
+`research/isolated_seat.rs`: the gate any future route-input device sink must pass. `attest` turns the game process's
+own environment and the user's live session into an `IsolatedSeat` only when the game runs on a Wayland display, X
+display and session of its own and not on the live Hyprland instance (absent or shared is refused); `IsolatedSink` can
+only be built from an attested seat and a sink that names the very display it is bound to, so a sink bound to the live
+display is refused before a single event is written. No physical sink exists in this build (it keeps
+`UnavailableInput`); the gate and its release-every-key behaviour are exercised with fixtures that touch no device.

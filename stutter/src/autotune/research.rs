@@ -65,6 +65,7 @@ pub(crate) mod driver;
 #[cfg_attr(not(test), expect(dead_code, reason = "staged"))]
 pub(crate) mod driver_attempts;
 mod driver_failure;
+pub(crate) mod effective_graphics;
 pub(crate) mod entitlement;
 #[cfg_attr(
     not(test),
@@ -103,6 +104,14 @@ pub(crate) mod host_baseline;
 pub(crate) mod host_hardware;
 pub(crate) mod init_receipt;
 mod init_schedule;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged: the gate a future isolated device sink must pass; no physical sink is supplied"
+    )
+)]
+pub(crate) mod isolated_seat;
 #[cfg_attr(
     not(test),
     expect(

@@ -409,6 +409,7 @@ pub fn build(report: &Value, response: &Value) -> Vec<(&'static str, Vec<u8>)> {
             pretty(&json!({
                 "integration_coverage": integration_matrix(),
                 "feature_dispositions": feature_dispositions(),
+                "effective_graphics": super::effective_graphics::summarize(response),
                 "child_studies": response.get("child_studies"),
             })),
         ),

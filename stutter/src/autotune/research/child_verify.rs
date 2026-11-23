@@ -59,6 +59,9 @@ pub struct ChildVerification {
     /// child that measured nothing (initialization).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resident: Option<Result<(), &'static str>>,
+    /// What the child's results show of the profile's rendered resolution (confirmed, contradicted, unproven).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_graphics: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -400,6 +403,7 @@ pub fn verify_children(
         .map(|outcome| outcome.name().to_owned());
         let resident =
             (!processes.is_empty()).then(|| resident_status(&studies, &name, uid, &processes));
+        let graphics = super::effective_graphics::of_child(&studies, &name, uid, &dispositions);
         children.push(match result {
             Ok((raw, report, runtime)) => ChildVerification {
                 study: name,
@@ -413,6 +417,7 @@ pub fn verify_children(
                 replication,
                 telemetry_receipts: telemetry,
                 resident,
+                effective_graphics: graphics,
                 completed_attempts: completed,
                 completed_processes: processes,
             },
@@ -430,6 +435,7 @@ pub fn verify_children(
                 completed_attempts: Vec::new(),
                 completed_processes: Vec::new(),
                 resident: None,
+                effective_graphics: None,
             },
         });
     }

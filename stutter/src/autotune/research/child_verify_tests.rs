@@ -118,6 +118,7 @@ fn every_planned_holdout_needs_its_own_reconstructed_replication() {
         telemetry_receipts: None,
         completed_attempts: Vec::new(),
         completed_processes: Vec::new(),
+        effective_graphics: None,
         resident: None,
     };
     let mut result = ChildrenVerification {
@@ -439,6 +440,7 @@ mod telemetry {
                     completed_unix: 10_100,
                 })
                 .collect(),
+            effective_graphics: None,
             resident: None,
         }
     }
@@ -611,6 +613,7 @@ mod restoration {
             telemetry_receipts: None,
             completed_attempts: Vec::new(),
             completed_processes: Vec::new(),
+            effective_graphics: None,
             resident: None,
         }
     }
