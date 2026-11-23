@@ -19,6 +19,7 @@ struct Inner {
     calls: Arc<Mutex<Calls>>,
     poll: Option<Progress>,
     abort_fails: bool,
+    steps: VecDeque<crate::autotune::research::steam_host::StopStep>,
 }
 
 impl AttemptHost for Inner {
@@ -42,6 +43,16 @@ impl AttemptHost for Inner {
         self.calls.lock().unwrap().inner_aborts += 1;
         anyhow::ensure!(!self.abort_fails, "unsettled");
         Ok(())
+    }
+    fn abort_step(&mut self) -> crate::autotune::research::steam_host::StopStep {
+        if let Some(step) = self.steps.pop_front() {
+            return step;
+        }
+        if self.abort().is_ok() {
+            crate::autotune::research::steam_host::StopStep::Settled
+        } else {
+            crate::autotune::research::steam_host::StopStep::Unsettled
+        }
     }
 }
 
@@ -135,6 +146,7 @@ fn host(
                 calls: calls.clone(),
                 poll: None,
                 abort_fails,
+                steps: VecDeque::new(),
             },
             Scripted {
                 calls: calls.clone(),
@@ -208,6 +220,7 @@ fn without_a_driver_or_a_unit_a_long_attempt_is_refused_with_its_typed_reason() 
             calls: calls.clone(),
             poll: None,
             abort_fails: false,
+            steps: VecDeque::new(),
         },
         UnavailableDriver,
     );
@@ -263,4 +276,28 @@ fn a_long_hosts_stop_step_is_the_inner_hosts_and_the_session_is_stopped_either_w
     // The inner host cannot be proven settled: the step is unsettled, never settled by the session alone.
     let (mut stuck, _) = host(Vec::new(), true);
     assert_eq!(stuck.abort_step(), StopStep::Unsettled);
+}
+
+/// A finished session is reported only once the game tree is proven gone, one bounded step per poll: while the stop is
+/// pending the attempt stays running and nothing is attested.
+#[test]
+fn a_session_that_completes_is_finished_only_after_its_stop_settles_across_polls() {
+    use super::super::steam_host::StopStep;
+    let (mut host, calls) = host(
+        vec![LongProgress::Completed(Box::new(record(&"a".repeat(64))))],
+        false,
+    );
+    host.inner.steps = VecDeque::from([StopStep::Pending, StopStep::Pending, StopStep::Settled]);
+    host.launch(&slot(), &context(true, true)).unwrap();
+    assert!(matches!(host.poll(), Progress::Running));
+    assert!(matches!(host.poll(), Progress::Running));
+    let Progress::Finished { evidence } = host.poll() else {
+        panic!("the settled stop finishes the attempt");
+    };
+    assert!(evidence.long_session.unwrap().settled);
+    assert_eq!(
+        calls.lock().unwrap().inner_aborts,
+        0,
+        "the blocking stop is never used"
+    );
 }

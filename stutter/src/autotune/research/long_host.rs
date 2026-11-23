@@ -12,9 +12,10 @@ use super::{
     dispatch_context::{ArmSpec, DispatchContextV1},
     driver::{AttemptHost, FailureClass, Progress},
     driver_failure::LaunchFailure,
-    long_receipt::{LongProgress, LongSessionDriver, SessionProcess, verify},
+    long_receipt::{LongProgress, LongSessionDriver, LongSessionRecord, SessionProcess, verify},
     long_session::LongWorkUnit,
     report::AttemptEvidenceV1,
+    steam_host::StopStep,
 };
 
 pub struct LongAttemptHost<H: AttemptHost, D: LongSessionDriver> {
@@ -22,6 +23,19 @@ pub struct LongAttemptHost<H: AttemptHost, D: LongSessionDriver> {
     driver: D,
     /// The long attempt in flight: its unit and the window it was authorized for.
     session: Option<(LongWorkUnit, u32)>,
+    /// An outcome decided on an earlier poll whose game tree is still being stopped, one bounded step per poll.
+    settling: Option<Outcome>,
+}
+
+/// What the attempt reports once its game is proven gone.
+enum Outcome {
+    Fail(FailureClass, String),
+    Done {
+        record: Box<LongSessionRecord>,
+        unit: LongWorkUnit,
+        window: u32,
+        index: u32,
+    },
 }
 
 impl<H: AttemptHost, D: LongSessionDriver> LongAttemptHost<H, D> {
@@ -30,6 +44,7 @@ impl<H: AttemptHost, D: LongSessionDriver> LongAttemptHost<H, D> {
             inner,
             driver,
             session: None,
+            settling: None,
         }
     }
 
@@ -55,17 +70,60 @@ impl<H: AttemptHost, D: LongSessionDriver> LongAttemptHost<H, D> {
         session.and(process)
     }
 
-    fn failed(&mut self, class: FailureClass, code: &str) -> Progress {
+    /// Stop the session driver once, then the game tree one bounded step per poll: a slow settlement never blocks the
+    /// controller, and the outcome is reported only once the tree is proven gone.
+    fn begin_settling(&mut self, outcome: Outcome) -> Progress {
         self.session = None;
-        if self.settle().is_err() {
-            return Progress::Failed {
-                class: FailureClass::OwnershipUnresolved,
-                code: "SettlementUnverified".into(),
-            };
+        if self.driver.abort().is_err() {
+            return Self::unverified();
         }
+        self.settle_step(outcome)
+    }
+
+    fn settle_step(&mut self, outcome: Outcome) -> Progress {
+        match self.inner.abort_step() {
+            StopStep::Pending => {
+                self.settling = Some(outcome);
+                Progress::Running
+            }
+            StopStep::Unsettled => Self::unverified(),
+            StopStep::Settled => match outcome {
+                Outcome::Fail(class, code) => Progress::Failed { class, code },
+                Outcome::Done {
+                    record,
+                    unit,
+                    window,
+                    index,
+                } => {
+                    // Only a proven settlement lets the host attest the record as settled before it is verified.
+                    let mut record = record;
+                    record.settled = true;
+                    if let Err(code) = verify(&record, &unit, window) {
+                        return Progress::Failed {
+                            class: FailureClass::Integrity,
+                            code: code.into(),
+                        };
+                    }
+                    Progress::Finished {
+                        evidence: AttemptEvidenceV1 {
+                            thermal: None,
+                            schema_version: 1,
+                            slot_index: index,
+                            // No FPS exists: the record is the evidence, this only has to be a valid placeholder.
+                            average_fps: 1.0,
+                            native_completion: None,
+                            long_session: Some(record),
+                        },
+                    }
+                }
+            },
+        }
+    }
+
+    fn unverified() -> Progress {
         Progress::Failed {
-            class,
-            code: code.into(),
+            class: FailureClass::OwnershipUnresolved,
+            code: "SettlementUnverified".into(),
         }
     }
 }
@@ -137,6 +195,9 @@ impl<H: AttemptHost, D: LongSessionDriver> AttemptHost for LongAttemptHost<H, D>
     }
 
     fn poll(&mut self) -> Progress {
+        if let Some(outcome) = self.settling.take() {
+            return self.settle_step(outcome);
+        }
         let Some((unit, window)) = self.session.clone() else {
             return self.inner.poll();
         };
@@ -155,39 +216,23 @@ impl<H: AttemptHost, D: LongSessionDriver> AttemptHost for LongAttemptHost<H, D>
         self.driver.observe_process(sighted);
         match self.driver.poll() {
             LongProgress::Running => Progress::Running,
-            LongProgress::Failed(code) => self.failed(FailureClass::Incompatible, code),
+            LongProgress::Failed(code) => {
+                self.begin_settling(Outcome::Fail(FailureClass::Incompatible, code.into()))
+            }
             LongProgress::Completed(record) => {
                 let Some(index) = self.inner.attempt_index() else {
-                    return self.failed(FailureClass::Integrity, "NoLaunchedAttempt");
+                    return self.begin_settling(Outcome::Fail(
+                        FailureClass::Integrity,
+                        "NoLaunchedAttempt".into(),
+                    ));
                 };
-                self.session = None;
-                // A driver cannot know the game is gone: the host stops both halves, and only a proven
-                // settlement lets it attest the record as settled before the record is verified.
-                if self.settle().is_err() {
-                    return Progress::Failed {
-                        class: FailureClass::OwnershipUnresolved,
-                        code: "SettlementUnverified".into(),
-                    };
-                }
-                let mut record = record;
-                record.settled = true;
-                if let Err(code) = verify(&record, &unit, window) {
-                    return Progress::Failed {
-                        class: FailureClass::Integrity,
-                        code: code.into(),
-                    };
-                }
-                Progress::Finished {
-                    evidence: AttemptEvidenceV1 {
-                        thermal: None,
-                        schema_version: 1,
-                        slot_index: index,
-                        // No FPS exists: the record is the evidence, this only has to be a valid placeholder.
-                        average_fps: 1.0,
-                        native_completion: None,
-                        long_session: Some(record),
-                    },
-                }
+                // A driver cannot know the game is gone: the host stops both halves before it attests the record.
+                self.begin_settling(Outcome::Done {
+                    record,
+                    unit,
+                    window,
+                    index,
+                })
             }
         }
     }
