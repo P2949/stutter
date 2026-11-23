@@ -532,7 +532,7 @@ mod research_action_gate {
         let evidence = shared.lock().unwrap().evidence();
         let _ = child.kill();
         let _ = child.wait();
-        applied.unwrap();
+        applied.unwrap_or_else(|e| panic!("apply failed: {e:#}"));
         stopped.unwrap();
         assert_eq!(
             during, "0",
