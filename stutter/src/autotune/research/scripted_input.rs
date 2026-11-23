@@ -12,6 +12,9 @@ use super::route_driver::RouteInput;
 /// The gate a device sink must pass before it may reach the game (staged with this module: no sink exists).
 #[path = "isolated_seat.rs"]
 pub(crate) mod isolated_seat;
+/// The transport half of a sink: events to a helper inside the isolated session.
+#[path = "seat_socket_sink.rs"]
+pub(crate) mod seat_socket_sink;
 
 /// The keys a route may press (Linux `KEY_*` codes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

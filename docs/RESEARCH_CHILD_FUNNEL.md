@@ -849,3 +849,22 @@ Attempted for every remaining factor against the tools installed on the research
   own reported `frameGenerationType` stays the only evidence (`functional_probe`). Not modelled.
 - `AntiLag2` and `Hdr`: no source can switch them (`factor_env` reports no environment control, or that no qualified
   output exists), so they are legitimately excluded rather than unproven.
+
+## CP-LONG input: the offline portion is built (eighteenth audit)
+
+A key-injecting device must live inside the isolated seat's own session, so this build never opens one; everything on
+this side of that device is now real and tested without a device:
+
+- `scripted_input` (existing): the route script, timing, encoding and the guarantee no key is left held.
+- `isolated_seat`: the attestation that the game runs on a display and session of its own, and `IsolatedSink`, which refuses
+  any sink not bound to that display.
+- `seat_socket_sink`: the transport to a helper inside the isolated session. It connects only to a Unix socket that is a
+  real socket (not a link), owned by the expected user, writable by no one else, whose kernel-recorded peer (`SO_PEERCRED`)
+  is that user; it names the display the helper's device is bound to; it writes whole events with a bounded timeout and
+  reports a failed write (so the route fails instead of passing as clean). `decode` is the helper's side of the stream:
+  whole records, key presses and releases of the keys a route may use, each followed by its synchronization report, and
+  nothing else, so a helper that decodes with it can inject nothing a route could not have sent.
+
+What remains is not offline work: the helper process that owns the virtual keyboard inside a real isolated session
+(a nested compositor or equivalent) and the scene/save identity of that session. Both need a session of their own on the
+physical machine, which the GPU incident halt forbids starting.
