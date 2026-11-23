@@ -179,7 +179,7 @@ impl ProfileHook for RefreshingProfiles {
     }
 }
 
-fn build(
+pub(in crate::autotune::runtime) fn build(
     study_dir: &std::path::Path,
     worker_socket: Option<&std::path::Path>,
     intent: &ResearchIntentV1,

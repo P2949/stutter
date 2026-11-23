@@ -120,6 +120,9 @@ fn setup_with_builder(script: Script, max_attempts: u32, funnel: Option<FunnelBu
     }
 }
 
+#[path = "research_funnel_production_tests.rs"]
+mod production;
+
 #[test]
 fn failed_profile_rollback_retains_the_real_coordinator_lease_and_mutation_slot() {
     let mut s = setup_with_builder(

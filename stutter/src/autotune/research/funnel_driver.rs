@@ -262,6 +262,14 @@ impl FunnelDriver {
         self.resident.clone()
     }
 
+    /// The controller journal archive the attempts hand to each action study (tests only).
+    #[cfg(test)]
+    pub(crate) fn provenance_archive(
+        &self,
+    ) -> Option<super::evidence_archive::SharedJournalArchive> {
+        self.executor.attempts.provenance_archive()
+    }
+
     pub fn telemetry(&self) -> Option<SharedTelemetry> {
         self.telemetry.clone()
     }

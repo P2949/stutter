@@ -119,6 +119,13 @@ impl DriverStudyAttempts {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn provenance_archive(
+        &self,
+    ) -> Option<super::super::evidence_archive::SharedJournalArchive> {
+        self.provenance.as_ref().map(|(archive, _)| archive.clone())
+    }
+
     /// Archive the controller's and the worker's own records of an action beside its study.
     pub fn with_provenance(
         mut self,

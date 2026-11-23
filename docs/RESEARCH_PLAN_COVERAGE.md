@@ -34,3 +34,11 @@ Two facts that decide what can still be done without the operator:
 * `/dev/uinput` is accessible to this user, and a uinput device is kernel-wide: creating one here would register a
   keyboard on the live seat. `uinput_injector` therefore writes nothing unless the device's own udev record puts it on an
   isolated seat other than `seat0`; its one kernel-touching function is never called by this build.
+
+## Production wiring check (2026-11-23)
+
+`runtime/research_funnel_production_tests.rs` calls the resident session's real `build` (not a test builder) with a
+fake game host and proves the controller-side wiring a live run depends on: the shared resident observer and
+telemetry exist, and the controller-journal tap installed by `build` delivers a durably written journal record to the
+archive each action study is sealed with. What stays physical: a running controller process built from this commit
+producing these records during a real game (the deployed controller predates them).
