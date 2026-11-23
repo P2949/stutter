@@ -689,6 +689,7 @@ impl StudyAttempts for DriverStudyAttempts {
 
 #[path = "driver_attempts_persistence.rs"]
 mod persistence;
+pub(crate) use persistence::TimeFacts;
 
 #[cfg(test)]
 #[path = "driver_attempts_tests.rs"]

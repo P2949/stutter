@@ -348,6 +348,17 @@ impl DriverStudyAttempts {
     }
 }
 
+/// What the active-time admission is decided from: the active seconds left, and the least and the most one attempt of
+/// each kind can take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TimeFacts {
+    pub remaining: u64,
+    pub short_min: u64,
+    pub long_min: u64,
+    pub short_max: u64,
+    pub long_max: u64,
+}
+
 /// A floor on how long one short benchmark attempt can take (launch, the fixed scene, settlement): a study whose
 /// even this minimum cannot fit the remaining active time is certain to overrun.
 pub(crate) const MIN_SHORT_ATTEMPT_SECONDS: u64 = 60;
@@ -356,18 +367,22 @@ impl DriverStudyAttempts {
     /// What the active-time admission needs, as plain numbers: the active seconds left in the campaign (its
     /// authorization less what the recorded children spent) and the least one attempt of the short and the long
     /// kind can take. A long attempt takes at least the authorized work unit's own length.
-    pub(crate) fn time_facts(&self) -> (u64, u64, u64) {
-        let spent = open_dir(&self.campaign, STUDIES_DIR)
-            .ok()
-            .and_then(|studies| {
+    pub(crate) fn time_facts(&self) -> Result<TimeFacts, &'static str> {
+        // No studies directory yet is a campaign that has spent nothing; any other failure to read what was spent is
+        // unknown, and unknown spend is never treated as none.
+        let spent = match open_dir(&self.campaign, STUDIES_DIR) {
+            Ok(studies) => {
                 super::super::campaign_budget::spent(
                     &studies,
                     self.parent.uid,
                     u64::from(self.parent.max_active_seconds),
                 )
-                .ok()
-            })
-            .map_or(0, |spent| spent.active_seconds);
+                .map_err(|_| "BudgetEvidenceUnreadable")?
+                .active_seconds
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(_) => return Err("BudgetEvidenceUnreadable"),
+        };
         let remaining = u64::from(self.parent.max_active_seconds).saturating_sub(spent);
         let long_min = self.parent.long_work_unit.as_ref().map_or(
             u64::from(
@@ -377,6 +392,17 @@ impl DriverStudyAttempts {
             ),
             |unit| u64::from(unit.duration_seconds),
         );
-        (remaining, MIN_SHORT_ATTEMPT_SECONDS, long_min)
+        Ok(TimeFacts {
+            remaining,
+            short_min: MIN_SHORT_ATTEMPT_SECONDS,
+            long_min,
+            short_max: u64::from(self.parent.max_attempt_seconds),
+            long_max: u64::from(
+                self.parent
+                    .long_attempt_seconds
+                    .unwrap_or(self.parent.max_attempt_seconds),
+            )
+            .max(long_min),
+        })
     }
 }

@@ -422,3 +422,43 @@ pub fn deferred_for_time<'a>(
     }
     deferred
 }
+
+/// Whether a study can be afforded in the active time left. Only the first answer refuses work: a study whose least
+/// possible time already exceeds what is left is decided, not started. `Uncertain` runs (the real clock and the
+/// budget stop still enforce the limit) and `Guaranteed` says even the slowest attempts fit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimeFeasibility {
+    Impossible,
+    Uncertain,
+    Guaranteed,
+}
+
+impl ChildStudy {
+    /// The fewest attempts the study can end with. A pilot runs three attempts for each arm that survives screening,
+    /// and the number that survive is not known until its inputs are frozen, so its least is one arm.
+    pub fn least_attempts(&self) -> u32 {
+        match self.stage {
+            Stage::Pilot => PILOT_RUNS_PER_ARM,
+            _ => self.min_attempts,
+        }
+    }
+}
+
+pub(crate) fn time_feasibility(
+    study: &ChildStudy,
+    facts: super::driver_attempts::TimeFacts,
+) -> TimeFeasibility {
+    let long = study.profile == Profile::Long;
+    let (least, most) = if long {
+        (facts.long_min, facts.long_max)
+    } else {
+        (facts.short_min, facts.short_max)
+    };
+    if u64::from(study.least_attempts()).saturating_mul(least) > facts.remaining {
+        TimeFeasibility::Impossible
+    } else if u64::from(study.min_attempts).saturating_mul(most) <= facts.remaining {
+        TimeFeasibility::Guaranteed
+    } else {
+        TimeFeasibility::Uncertain
+    }
+}

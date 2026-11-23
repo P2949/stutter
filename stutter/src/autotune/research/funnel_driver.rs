@@ -327,18 +327,18 @@ impl FunnelDriver {
         let blocked = self.executor.attempts.host_mut().health_blocked();
         // A study whose least possible time already exceeds the active seconds left is decided, not started: it
         // would only run into the campaign's budget stop. The ceiling (the attempt limit) is not used to refuse work.
-        let (remaining, short_min, long_min) = self.executor.attempts.time_facts();
+        let facts = match self.executor.attempts.time_facts() {
+            Ok(facts) => facts,
+            // The campaign's own spend cannot be read: stop visibly rather than plan against a guess of zero.
+            Err(code) => return Ok(Step::Halted(code)),
+        };
         let (blocker, selection) = (self.blocker, self.selection.as_ref());
         let combined = |study: &ChildStudy| {
-            let per_attempt = if study.profile == super::child_study::Profile::Long {
-                long_min
-            } else {
-                short_min
-            };
             blocker(study)
                 .or_else(|| selection.and_then(|select| select(study)))
                 .or_else(|| {
-                    (u64::from(study.min_attempts).saturating_mul(per_attempt) > remaining)
+                    (super::child_study::time_feasibility(study, facts)
+                        == super::child_study::TimeFeasibility::Impossible)
                         .then_some("DeferredActiveTime")
                 })
         };

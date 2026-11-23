@@ -693,3 +693,17 @@ distinct integrity failure `CrosswalkObservationsInvalid` in the bundle, never a
 Finalization: the protected-state seal result is kept, an existing seal is accepted only when well formed, a qualified
 campaign without a valid seal is blocked rather than completed, and terminal verification requires a valid seal for
 Completed.
+
+## Time admission, budget clock and production profiles (eighteenth audit)
+
+- `time_facts()` returns the active seconds left plus the least and the most one short and one long attempt can take,
+  or `BudgetEvidenceUnreadable` (the funnel halts on it) instead of planning against a guess of zero spend. A child
+  whose own spend record is unreadable is still charged the whole authorization.
+- `child_study::time_feasibility` answers `Impossible` (even the least attempts cannot fit), `Guaranteed` (even the
+  slowest fit) or `Uncertain`; only `Impossible` defers a study (`DeferredActiveTime`). A pilot's least is one
+  surviving arm (three attempts), not the six that two arms need.
+- The synthetic action campaign runs on one clock shared with the route, so the production accounting records the
+  twenty-minute attempts itself; budget tampering is a separate negative test.
+- The real `cpu_profile`/`gpu_profile` run through the file hook over realistic per-arm settings: resolution, upscaler
+  and frame generation resolved against observed indices, unobserved values and partial failure refuse the whole
+  study with every arm's bytes untouched, restoration is byte for byte. Effective rendered resolution stays unproven.

@@ -76,7 +76,8 @@ fn a_selection_that_changed_between_profile_application_and_launch_fails_the_stu
 fn the_admission_facts_are_the_active_seconds_left_and_the_least_one_attempt_can_take() {
     let calls = Arc::new(AtomicU32::new(0));
     let (_root, runner, _study) = runner(calls, u32::MAX);
-    let (remaining, short_min, long_min) = runner.time_facts();
+    let facts = runner.time_facts().unwrap();
+    let (remaining, short_min, long_min) = (facts.remaining, facts.short_min, facts.long_min);
     // Nothing spent yet: the whole authorization is left; a short attempt has a floor, and with no work unit a
     // long attempt is bounded below by the intent's own attempt limit.
     assert_eq!(remaining, u64::from(runner.parent.max_active_seconds));
@@ -85,4 +86,65 @@ fn the_admission_facts_are_the_active_seconds_left_and_the_least_one_attempt_can
         crate::autotune::research::driver_attempts::persistence::MIN_SHORT_ATTEMPT_SECONDS
     );
     assert_eq!(long_min, u64::from(runner.parent.max_attempt_seconds));
+}
+
+#[test]
+fn unreadable_spend_is_not_zero_and_a_study_is_refused_only_when_it_is_certain_not_to_fit() {
+    use crate::autotune::research::{
+        child_study::{Profile, Stage, TimeFeasibility, plan, time_feasibility},
+        driver_attempts::TimeFacts,
+    };
+    let calls = Arc::new(AtomicU32::new(0));
+    let (root, runner, _study) = runner(calls, u32::MAX);
+    // A child whose spend record cannot be read is charged the whole authorization, never nothing.
+    let studies = root.path().join("studies");
+    std::fs::create_dir_all(studies.join("0123456789abcdef")).unwrap();
+    std::fs::write(studies.join("0123456789abcdef").join("budget.json"), b"{").unwrap();
+    assert_eq!(runner.time_facts().unwrap().remaining, 0);
+    // And a campaign whose spend cannot be read at all is an error the funnel halts on, not zero spent.
+    std::fs::remove_dir_all(&studies).unwrap();
+    std::fs::write(&studies, b"not a directory").unwrap();
+    assert_eq!(runner.time_facts(), Err("BudgetEvidenceUnreadable"));
+    // The three answers over one plan.
+    let facts = |remaining| TimeFacts {
+        remaining,
+        short_min: 60,
+        long_min: 1_200,
+        short_max: 600,
+        long_max: 1_800,
+    };
+    let parent = super::parent();
+    let studies = plan(&parent).unwrap();
+    let pilot = studies.iter().find(|s| s.stage == Stage::Pilot).unwrap();
+    assert!(pilot.least_attempts() < pilot.min_attempts);
+    // A pilot that ends with one surviving arm needs three attempts: it is not refused for want of six.
+    let three = u64::from(pilot.least_attempts()) * 60;
+    assert_ne!(
+        time_feasibility(pilot, facts(three)),
+        TimeFeasibility::Impossible
+    );
+    assert_eq!(
+        time_feasibility(pilot, facts(three - 1)),
+        TimeFeasibility::Impossible
+    );
+    assert_eq!(
+        time_feasibility(pilot, facts(u64::MAX / 2)),
+        TimeFeasibility::Guaranteed
+    );
+    assert_eq!(
+        time_feasibility(pilot, facts(u64::from(pilot.min_attempts) * 600 - 1)),
+        TimeFeasibility::Uncertain
+    );
+    // A long study can never take less than its twenty-minute unit per attempt.
+    if let Some(long) = studies.iter().find(|s| s.profile == Profile::Long) {
+        let needed = u64::from(long.min_attempts) * 1_200;
+        assert_eq!(
+            time_feasibility(long, facts(needed - 1)),
+            TimeFeasibility::Impossible
+        );
+        assert_ne!(
+            time_feasibility(long, facts(needed)),
+            TimeFeasibility::Impossible
+        );
+    }
 }
