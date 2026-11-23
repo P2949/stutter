@@ -63,13 +63,6 @@ impl<H: AttemptHost, D: LongSessionDriver> LongAttemptHost<H, D> {
         .flatten()
     }
 
-    /// Stop both halves; the attempt is settled only when each proves it.
-    fn settle(&mut self) -> anyhow::Result<()> {
-        let session = self.driver.abort();
-        let process = self.inner.abort();
-        session.and(process)
-    }
-
     /// Stop the session driver once, then the game tree one bounded step per poll: a slow settlement never blocks the
     /// controller, and the outcome is reported only once the tree is proven gone.
     fn begin_settling(&mut self, outcome: Outcome) -> Progress {
@@ -181,8 +174,9 @@ impl<H: AttemptHost, D: LongSessionDriver> AttemptHost for LongAttemptHost<H, D>
         self.inner.launch(slot, context)?;
         if let Some((unit, window)) = long {
             if let Err(code) = self.driver.start(&unit) {
-                // The game was launched; stop it and prove it gone before reporting the refusal.
-                self.settle()?;
+                // The game was launched. The refusal is reported at once and the driver's failure path stops the game
+                // through `abort_step`, one bounded step per tick, so a slow settlement never blocks this call.
+                let _ = self.driver.abort();
                 return Err(LaunchFailure {
                     class: FailureClass::Environment,
                     code,

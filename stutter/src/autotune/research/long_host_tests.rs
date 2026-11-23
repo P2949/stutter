@@ -229,6 +229,12 @@ fn without_a_driver_or_a_unit_a_long_attempt_is_refused_with_its_typed_reason() 
         error.downcast_ref::<LaunchFailure>().unwrap().code,
         "BlockedNoLongSessionDriver"
     );
+    // The refusal is immediate; the launched game is stopped by the driver's stepwise failure path.
+    assert_eq!(calls.lock().unwrap().inner_aborts, 0);
+    assert_eq!(
+        none.abort_step(),
+        crate::autotune::research::steam_host::StopStep::Settled
+    );
     assert_eq!(
         calls.lock().unwrap().inner_aborts,
         1,
