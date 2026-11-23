@@ -11,6 +11,114 @@ use super::{
 };
 
 impl DriverStudyAttempts {
+    /// Archive the controller's own journal records and the privileged worker's own audit events of the action this
+    /// study ran, beside the study, in the formats the replay joins to the gate's receipts. Write-once; an action
+    /// study that applied nothing has nothing to archive.
+    pub(super) fn archive_provenance(
+        &self,
+        study: &ChildStudy,
+        study_dir: &std::fs::File,
+        evidence: &std::collections::BTreeMap<u32, super::super::report::AttemptEvidenceV1>,
+    ) -> anyhow::Result<()> {
+        use super::super::{controller_provenance, evidence_archive, worker_provenance};
+        let (Some((archive, audit_path)), Stage::Action(action)) = (&self.provenance, study.stage)
+        else {
+            return Ok(());
+        };
+        let processes = super::super::child_verify_rules::processes_of(evidence);
+        let records = archive
+            .lock()
+            .map_err(|_| anyhow::anyhow!("the controller journal archive is poisoned"))?
+            .for_processes(&processes);
+        let audit = evidence_archive::worker_audit_for(audit_path, action, &processes);
+        for (name, bytes) in [
+            (controller_provenance::FILE, serde_json::to_vec(&records)?),
+            (worker_provenance::FILE, serde_json::to_vec(&audit)?),
+        ] {
+            if records.is_empty() {
+                break;
+            }
+            match write_new(study_dir, name, &bytes) {
+                Ok(()) => {}
+                Err(error)
+                    if error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    /// The planner's own observation that justifies an abstention: for every completed attempt, how often the planner
+    /// evaluated the game process and that it never offered the authorized action. Derived from the runtime's decision
+    /// stream and written only when the real verifier accepts it for every completed attempt.
+    pub(super) fn seal_planner_observation(
+        &self,
+        study: &ChildStudy,
+        study_dir: &std::fs::File,
+        windows: &[super::super::resident_observer::AttemptResident],
+        evidence: &std::collections::BTreeMap<u32, super::super::report::AttemptEvidenceV1>,
+    ) -> anyhow::Result<()> {
+        use super::super::{ResearchAction, planner_observation};
+        let Stage::Action(action) = study.stage else {
+            return Ok(());
+        };
+        let processes = super::super::child_verify_rules::processes_of(evidence);
+        let mut attempts = Vec::new();
+        for process in &processes {
+            let Some(window) = windows.iter().find(|w| {
+                w.attempt == Some(process.slot)
+                    && w.target.pid == process.pid
+                    && w.target.start_ticks == process.start_ticks
+            }) else {
+                return Ok(());
+            };
+            let candidates = match action {
+                ResearchAction::CpuAffinityProfile => window.affinity_candidates,
+                ResearchAction::CgroupPlacement => window.cgroup_candidates,
+            };
+            let direct =
+                window.cpu_samples > 0 && window.lost_events == 0 && window.invalid_intervals == 0;
+            attempts.push(serde_json::json!({
+                "slot": process.slot,
+                "process": { "pid": process.pid, "start_ticks": process.start_ticks, "uid": process.uid },
+                "start_unix": window.started_unix.max(process.started_unix),
+                "end_unix": window.ended_unix.min(process.completed_unix),
+                "evaluations": window.evaluations, "candidates": candidates,
+                "lost": window.lost_events.saturating_add(window.invalid_intervals),
+                "source_quality": if direct { "direct" } else { "derived" },
+            }));
+        }
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "schema": 1, "action": format!("{action:?}"), "attempts": attempts,
+        }))?;
+        if planner_observation::verify(&bytes, action, &processes).is_err() {
+            return Ok(());
+        }
+        match write_new(study_dir, planner_observation::FILE, &bytes) {
+            Ok(()) => Ok(()),
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) =>
+            {
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Archive the controller's and the worker's own records of an action beside its study.
+    pub fn with_provenance(
+        mut self,
+        archive: super::super::evidence_archive::SharedJournalArchive,
+        worker_audit: std::path::PathBuf,
+    ) -> Self {
+        self.provenance = Some((archive, worker_audit));
+        self
+    }
+
     /// Merge the kernel's witness of the attempt's game process into what was seen so far (read at most every few
     /// seconds), with the hashes of the tool's own two builds when the factor is told apart by content.
     pub(super) fn merge_witness(

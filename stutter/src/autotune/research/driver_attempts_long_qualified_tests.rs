@@ -448,3 +448,152 @@ fn the_latency_record_is_derived_from_the_runtimes_own_events_and_decides_throug
     let (_root, _study, path, _outcome) = run(false);
     assert!(!path.join(action_latency::FILE).exists());
 }
+
+/// The runtime's own archivers produce the controller's and the worker's accounts: the controller's journal writes
+/// (through the real durable writer) are tapped, the worker's audit file is read, and at study end both are archived
+/// beside the study, so the study qualifies and replays without any hand-written copy. Without a worker audit that
+/// shows the action, the same study does not qualify.
+#[test]
+fn the_runtimes_archivers_make_the_controllers_and_the_workers_accounts_that_the_replay_joins() {
+    use std::io::Write;
+
+    use crate::autotune::{
+        controller_journal::write_controller_journal_record,
+        research::evidence_archive::{JournalArchive, SharedJournalArchive, install_journal_tap},
+    };
+    let _turn = crate::autotune::research::evidence_archive::TAP_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let run = |worker_shows_the_action: bool| {
+        let (root, runner, study, gate, _parent) = build(&unit().definition_sha256);
+        let archive: SharedJournalArchive =
+            std::sync::Arc::new(std::sync::Mutex::new(JournalArchive::default()));
+        install_journal_tap(&archive);
+        let scratch = tempfile::tempdir().unwrap();
+        let (journal_path, audit_path) = (
+            scratch.path().join("controller_journal.json"),
+            scratch.path().join("actions.jsonl"),
+        );
+        std::fs::File::create(&audit_path).unwrap();
+        let mut runner = runner.with_provenance(archive, audit_path.clone());
+        let (journal_for_hook, audit_for_hook) = (journal_path.clone(), audit_path.clone());
+        ON_ACT.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |target, at| {
+                // The controller walks the transaction to reverted through its real durable journal writer.
+                let record = crate::autotune::research::evidence_producers::controller_journal_record(
+                    &format!("exp-{:?}", target.pid),
+                    "cpu-affinity-profile:game-main",
+                    (target.pid.as_u32(), target.start_ticks),
+                    (at, at + 1),
+                );
+                let record: crate::autotune::controller_journal::ControllerJournalRecord =
+                    serde_json::from_value(record).unwrap_or_else(|_| {
+                        let mut value = crate::autotune::research::evidence_producers::controller_journal_record(
+                            "x", "cpu-affinity-profile:game-main", (1, 1), (1, 2));
+                        value["boot_id"] = serde_json::json!(stutter_core::boot::current_boot_id().unwrap());
+                        serde_json::from_value(value).unwrap()
+                    });
+                let mut value = serde_json::to_value(&record).unwrap();
+                value["boot_id"] = serde_json::json!(stutter_core::boot::current_boot_id().unwrap());
+                write_controller_journal_record(&journal_for_hook, &serde_json::from_value(value).unwrap()).unwrap();
+                if worker_shows_the_action {
+                    // The worker appends its own decisions to its audit log.
+                    let mut file = std::fs::OpenOptions::new().append(true).open(&audit_for_hook).unwrap();
+                    for operation in ["apply_action", "rollback_action"] {
+                        writeln!(
+                            file,
+                            "{}",
+                            crate::autotune::research::evidence_producers::worker_audit_event(
+                                "cpu-affinity-profile:game-main", operation, at + 1, 12,
+                            )
+                        )
+                        .unwrap();
+                    }
+                }
+            }));
+        });
+        FIXED_SESSIONS.set(true);
+        let outcome = run_acting(&mut runner, &study, &gate);
+        ON_ACT.with(|hook| *hook.borrow_mut() = None);
+        crate::autotune::controller_journal::set_journal_tap(None);
+        let path = root.path().join("studies").join(&study.study_sha256[..16]);
+        (outcome, path, root)
+    };
+    // The archivers wrote both accounts, and the replay (the same function the live outcome uses) joins them.
+    let (outcome, path, _root) = run(true);
+    assert_eq!(outcome.stage_evidence, Some(true));
+    for file in ["controller-journal.json", "worker-audit.json"] {
+        assert!(path.join(file).is_file(), "{file} was archived");
+    }
+    let journal: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path.join("controller-journal.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        journal.as_array().unwrap().len(),
+        4,
+        "one final record per treated attempt"
+    );
+    // A worker audit that never shows the action leaves the study without its corroboration.
+    let (outcome, _path, _root) = run(false);
+    assert_eq!(outcome.stage_evidence, Some(false));
+}
+
+/// The abstention's planner observation comes from the runtime's own decision stream: with the planner evaluating the
+/// game process and never offering the action, the study is a justified abstention with no hand-written file; with the
+/// action offered but never applied, or with the planner never watching, it is not.
+#[test]
+fn a_justified_abstention_stands_on_the_planner_observation_the_runtime_derived_from_its_decisions()
+{
+    use crate::autotune::research::resident_observer::SharedResident;
+    let run = |offer: Option<&'static str>, watch: bool| {
+        let (root, runner, study, _gate, _parent) = build(&unit().definition_sha256);
+        let resident: SharedResident = Default::default();
+        let mut runner = runner.with_resident(resident.clone());
+        let outcome = 'run: {
+            for _ in 0..20_000 {
+                if let Some(outcome) = runner.poll(&study, 100).unwrap() {
+                    break 'run outcome;
+                }
+                let mut guard = resident.lock().unwrap();
+                if let (true, Some(target)) = (watch, guard.target()) {
+                    let planner = offer
+                        .map(crate::autotune::research::resident_observer::tests::offering)
+                        .unwrap_or_default();
+                    // The scheduler events the runtime also handles for the game, so the window is a direct observation.
+                    let mut histogram = crate::metrics::LatencyHistogram::new();
+                    for _ in 0..10 {
+                        histogram.record(500_000);
+                    }
+                    guard.observe_intervals(
+                        &[crate::metrics::IntervalRecord {
+                            process_pid: Some(target.pid.as_u32()),
+                            class: crate::process_tree::TaskClass::Game,
+                            samples: 10,
+                            max_ns: 500_000,
+                            histogram: histogram.snapshot(),
+                            ..Default::default()
+                        }],
+                        0,
+                    );
+                    for _ in 0..20 {
+                        guard.observe_decision(Some(target.pid.as_u32()), Some(&planner));
+                    }
+                }
+            }
+            panic!("the study never ended");
+        };
+        (outcome, root)
+    };
+    let (outcome, _root) = run(None, true);
+    assert!(outcome.action_not_indicated);
+    let (offered, _root) = run(Some("cpu_affinity_profile"), true);
+    assert!(
+        !offered.action_not_indicated,
+        "the planner offered the action"
+    );
+    let (unwatched, _root) = run(None, false);
+    assert!(
+        !unwatched.action_not_indicated,
+        "the planner was never seen evaluating the game"
+    );
+}

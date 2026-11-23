@@ -38,6 +38,15 @@ fn unit() -> LongWorkUnit {
     }
 }
 
+/// What a test does on each action in place of the hand-written archives.
+type ActHook = Option<Box<dyn FnMut(ChildTarget, u64)>>;
+
+thread_local! {
+    /// When set, what the controller and the worker do on each action replaces the hand-written archives (a test then
+    /// lets the runtime's own archivers produce them): called with the process acted on and the second it was acted at.
+    static ON_ACT: std::cell::RefCell<ActHook> = const { std::cell::RefCell::new(None) };
+}
+
 thread_local! {
     /// Whether every session sits at the same fixed interval (then each attempt's action is shown at its own second
     /// inside it, so no two receipts share a window); a route that keeps its own clock sets this false.
@@ -286,6 +295,16 @@ fn run_acting(
             tokens.store(0, std::sync::atomic::Ordering::SeqCst);
             gate.observe_runtime(false, 0);
             acted.insert(pid);
+            if ON_ACT.with(|hook| {
+                if let Some(hook) = hook.borrow_mut().as_mut() {
+                    hook(target, ACTED_AT.get());
+                    true
+                } else {
+                    false
+                }
+            }) {
+                continue;
+            }
             // The controller's own journal of that transaction, archived beside the study.
             journal.push(
                 crate::autotune::research::evidence_producers::controller_journal_record(

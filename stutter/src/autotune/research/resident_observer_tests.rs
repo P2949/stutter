@@ -200,3 +200,50 @@ fn the_cgroup_is_read_from_the_kernels_view_of_the_attested_process() {
     );
     assert!(observer.freeze(40).remove(1).cgroup.is_empty());
 }
+
+pub(crate) fn offering(kind: &str) -> crate::autotune::planner::PlannerSummary {
+    crate::autotune::planner::PlannerSummary {
+        eligible_candidates: vec![crate::autotune::planner::PlannerEvaluationSummary {
+            candidate_name: "game-main".to_owned(),
+            action_kind: kind.to_owned(),
+            provider: "profile".to_owned(),
+            objective: crate::autotune::objective::ObjectiveKind::StutterScore,
+            safety_class: crate::actions::SafetyClass::ReversibleLowRisk,
+            effect_scope: crate::daemon_policy::ActionEffectScope::LocalProcessTree,
+            confidence: 0.9,
+            eligible: true,
+            rank: Some(1),
+            deny_reasons: Vec::new(),
+            deny_reason_codes: Vec::new(),
+            deny_messages: Vec::new(),
+            dry_run_affected_tasks: Some(3),
+            manual_only_reason: None,
+            evidence: Vec::new(),
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn the_planners_decisions_about_the_attested_process_are_counted_with_the_authorized_actions_it_offered()
+ {
+    let mut observer = ResidentObserver::default();
+    // Before anything is attested, and about another process, nothing is counted.
+    observer.observe_decision(Some(4242), None);
+    observer.arm(target(), Some(0), 1_000);
+    observer.observe_decision(Some(9), Some(&offering("cpu_affinity_profile")));
+    observer.observe_decision(Some(4242), None);
+    observer.observe_decision(Some(4242), Some(&Default::default()));
+    observer.observe_decision(Some(4242), Some(&offering("cpu_affinity_profile")));
+    observer.observe_decision(Some(4242), Some(&offering("cgroup_placement")));
+    observer.observe_decision(Some(4242), Some(&offering("nice_priority")));
+    let window = observer.freeze(1_100).remove(0);
+    assert_eq!(
+        (
+            window.evaluations,
+            window.affinity_candidates,
+            window.cgroup_candidates
+        ),
+        (5, 1, 1)
+    );
+}

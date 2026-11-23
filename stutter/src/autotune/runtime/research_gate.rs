@@ -80,6 +80,15 @@ impl AutotuneRuntime {
         }
     }
 
+    /// Report the planning decision the runtime just emitted (the planner's own account of what it offered).
+    pub(super) fn observe_research_decision(&self, entry: &super::AutotuneDecisionStreamEntry) {
+        if let Some(resident) = self.research_resident.as_ref()
+            && let Ok(mut observer) = resident.lock()
+        {
+            observer.observe_decision(entry.target_root_pid, entry.planner.as_ref());
+        }
+    }
+
     /// Report a GPU sample event the runtime just handled.
     pub(super) fn observe_research_gpu_sample(&self, sample: &crate::recorder::GpuSample) {
         if let Some(resident) = self.research_resident.as_ref()

@@ -361,6 +361,19 @@ pub fn journal_process_identity(
     identity
 }
 
+/// Watches every record the controller journal durably writes (read-only: it cannot change or veto a write).
+pub type JournalTap = std::sync::Arc<dyn Fn(&ControllerJournalRecord) + Send + Sync>;
+
+static JOURNAL_TAP: std::sync::Mutex<Option<JournalTap>> = std::sync::Mutex::new(None);
+
+/// Install (or remove) the tap. The research campaign uses it to keep the controller's own account of each
+/// transaction beside the study it belongs to.
+pub fn set_journal_tap(tap: Option<JournalTap>) {
+    if let Ok(mut slot) = JOURNAL_TAP.lock() {
+        *slot = tap;
+    }
+}
+
 pub fn write_controller_journal_record(
     path: &Path,
     record: &ControllerJournalRecord,
@@ -411,6 +424,12 @@ pub fn write_controller_journal_record(
     })?;
 
     sync_parent_directory(path)?;
+
+    // Only after the record is durable: the tap sees exactly what the controller can later be held to.
+    let tap = JOURNAL_TAP.lock().ok().and_then(|slot| slot.clone());
+    if let Some(tap) = tap {
+        tap(record);
+    }
 
     Ok(())
 }

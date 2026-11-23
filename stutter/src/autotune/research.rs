@@ -50,6 +50,7 @@ pub(crate) mod controller_provenance;
 )]
 pub(crate) mod crosswalk;
 pub(crate) mod crosswalk_evidence;
+pub(crate) mod crosswalk_producer;
 #[expect(
     dead_code,
     reason = "P2's unprivileged verifier remains inactive until the owned Steam launcher is qualified"
@@ -67,6 +68,7 @@ pub(crate) mod driver_attempts;
 mod driver_failure;
 pub(crate) mod effective_graphics;
 pub(crate) mod entitlement;
+pub(crate) mod evidence_archive;
 #[cfg_attr(
     not(test),
     expect(

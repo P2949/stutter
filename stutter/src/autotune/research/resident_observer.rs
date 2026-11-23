@@ -50,7 +50,14 @@ pub struct AttemptResident {
     pub target_changed: bool,
     pub cpu_samples: u64,
     pub gpu_samples: u64,
+    /// CPU frequency events the runtime saw while the attempt ran.
+    pub cpu_freq_samples: u64,
     pub psi_samples: u64,
+    /// Planning passes that considered this process, and those that offered an authorized action: the planner's own
+    /// account, from the decision stream the runtime already emits.
+    pub evaluations: u64,
+    pub affinity_candidates: u64,
+    pub cgroup_candidates: u64,
     /// `None` when any of the signals the guards need was not observed over the window.
     pub guards: Option<GuardFacts>,
 }
@@ -79,7 +86,11 @@ struct Running {
     target_changed: bool,
     cpu: u64,
     gpu: u64,
+    cpu_freq: u64,
     psi: u64,
+    evaluations: u64,
+    affinity_candidates: u64,
+    cgroup_candidates: u64,
 }
 
 #[derive(Debug, Default)]
@@ -113,7 +124,11 @@ impl ResidentObserver {
             target_changed: false,
             cpu: 0,
             gpu: 0,
+            cpu_freq: 0,
             psi: 0,
+            evaluations: 0,
+            affinity_candidates: 0,
+            cgroup_candidates: 0,
         });
     }
 
@@ -163,6 +178,41 @@ impl ResidentObserver {
         }
     }
 
+    /// A planning decision the runtime just emitted about `target_root_pid`: one evaluation of the process, and which
+    /// authorized actions it offered (eligible, or the one it selected).
+    pub fn observe_decision(
+        &mut self,
+        target_root_pid: Option<u32>,
+        planner: Option<&crate::autotune::planner::PlannerSummary>,
+    ) {
+        let Some(running) = self.running.as_mut() else {
+            return;
+        };
+        if target_root_pid != Some(running.target.pid.as_u32()) {
+            return;
+        }
+        running.evaluations = running.evaluations.saturating_add(1);
+        let Some(planner) = planner else {
+            return;
+        };
+        let offered = |kind: &str| {
+            planner
+                .eligible_candidates
+                .iter()
+                .any(|c| c.action_kind == kind)
+                || planner
+                    .selected
+                    .as_ref()
+                    .is_some_and(|s| s.action_kind == kind)
+        };
+        if offered("cpu_affinity_profile") {
+            running.affinity_candidates = running.affinity_candidates.saturating_add(1);
+        }
+        if offered("cgroup_placement") {
+            running.cgroup_candidates = running.cgroup_candidates.saturating_add(1);
+        }
+    }
+
     /// A GPU sample event while the attempt runs (counted only).
     pub fn observe_gpu_sample(&mut self) {
         if let Some(running) = self.running.as_mut() {
@@ -188,6 +238,7 @@ impl ResidentObserver {
     /// A CPU frequency event while the attempt runs, held for the power guard.
     pub fn observe_cpu_freq(&mut self, event: &CpuFreqRecord) {
         if let Some(running) = self.running.as_mut() {
+            running.cpu_freq = running.cpu_freq.saturating_add(1);
             running.window.push_cpu_freq_event(event.clone());
         }
     }
@@ -224,7 +275,11 @@ impl ResidentObserver {
                 target_changed: running.target_changed,
                 cpu_samples: running.cpu,
                 gpu_samples: running.gpu,
+                cpu_freq_samples: running.cpu_freq,
                 psi_samples: running.psi,
+                evaluations: running.evaluations,
+                affinity_candidates: running.affinity_candidates,
+                cgroup_candidates: running.cgroup_candidates,
                 guards,
             });
         }
@@ -277,8 +332,9 @@ pub fn window_record(window: &AttemptResident) -> serde_json::Value {
         "histogram": window.histogram, "max_ns": window.max_ns,
         "lost_events": window.lost_events, "invalid_intervals": window.invalid_intervals,
         "target_changed": window.target_changed,
-        "cpu_samples": window.cpu_samples, "gpu_samples": window.gpu_samples,
-        "psi_samples": window.psi_samples,
+        "cpu_samples": window.cpu_samples, "gpu_samples": window.gpu_samples, "cpu_freq_samples": window.cpu_freq_samples,
+        "psi_samples": window.psi_samples, "evaluations": window.evaluations,
+        "affinity_candidates": window.affinity_candidates, "cgroup_candidates": window.cgroup_candidates,
         "guards": window.guards.map(|g| serde_json::json!({
             "frame_p99_ms": g.frame_p99_ms, "frame_samples": g.frame_samples,
             "foreground_over_5ms": g.foreground_over_5ms, "thermal_degraded": g.thermal_degraded,
@@ -326,4 +382,4 @@ pub fn resident_entry(
 
 #[cfg(test)]
 #[path = "resident_observer_tests.rs"]
-mod tests;
+pub(crate) mod tests;

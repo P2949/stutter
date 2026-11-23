@@ -368,6 +368,12 @@ impl ResearchCoordinator {
                         .map_or(0, |elapsed| elapsed.as_secs()),
                 )
             });
+            // The crosswalk's observations, derived from the children's own sealed raw windows before the report reads them.
+            if let Err(error) =
+                crate::autotune::research::crosswalk_producer::produce(&dir, uid, &intent_for_seal)
+            {
+                log::warn!("crosswalk observations were not produced: {error:#}");
+            }
             let seal_digest = crate::autotune::research::protected_state::seal_digest(
                 &dir,
                 uid,

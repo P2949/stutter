@@ -69,6 +69,11 @@ pub struct DriverStudyAttempts {
     telemetry: Option<super::telemetry_observer::SharedTelemetry>,
     /// The resident observer and the latest time seen (closes the open window); absent: none.
     resident: Option<(super::resident_observer::SharedResident, u64)>,
+    /// Where the controller's and the worker's own records of an action come from (absent: none archived).
+    provenance: Option<(
+        super::evidence_archive::SharedJournalArchive,
+        std::path::PathBuf,
+    )>,
     armed_for: Option<String>,
     /// The game process the gate is currently scoped to.
     armed_target: Option<super::action_child::ChildTarget>,
@@ -132,6 +137,7 @@ impl DriverStudyAttempts {
             gate: None,
             telemetry: None,
             resident: None,
+            provenance: None,
             armed_for: None,
             armed_target: None,
             treatment_study: false,
@@ -412,6 +418,8 @@ impl DriverStudyAttempts {
         self.feature_receipt(&study_dir, study)?;
         self.seal_resident_observation(&study_dir, &windows, &evidence)?;
         self.seal_action_latency(study, &study_dir, driver.intent(), &windows, &evidence)?;
+        self.seal_planner_observation(study, &study_dir, &windows, &evidence)?;
+        self.archive_provenance(study, &study_dir, &evidence)?;
         let activation = self.feature_activation(study, u32::try_from(report.attempts_completed)?);
         let functional = self.feature_functional(study, &evidence);
         // The game's enum cannot establish the exact backend or functional fork-specific activation.

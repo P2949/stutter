@@ -204,6 +204,11 @@ fn build(
     ));
     let telemetry: SharedTelemetry = Default::default();
     let resident: crate::autotune::research::resident_observer::SharedResident = Default::default();
+    // The controller journal's own records of each action, kept as it writes them, and the worker's audit file they are
+    // joined to, archived beside each action study.
+    let journal_archive: crate::autotune::research::evidence_archive::SharedJournalArchive =
+        Default::default();
+    crate::autotune::research::evidence_archive::install_journal_tap(&journal_archive);
     let rules = RuleRegistry::default();
     let results = study_dir.to_path_buf();
     // The driver rejects a clock that moves backward, so the clock is clamped to never do so.
@@ -223,7 +228,8 @@ fn build(
     )
     .with_action_gate(gate.clone())
     .with_telemetry(telemetry.clone())
-    .with_resident(resident.clone());
+    .with_resident(resident.clone())
+    .with_provenance(journal_archive, crate::audit::default_audit_log_path());
     if let Some(socket) = worker_socket.map(std::path::Path::to_path_buf) {
         attempts = attempts.with_claim_verifier_factory(Box::new(move || {
             super::drive::production_claim_verifier(socket.clone())

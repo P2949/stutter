@@ -889,3 +889,27 @@ treated On) to a qualified study through `verify_children`, and a removed proof 
   `softpipe`, `swrast`) violates every profile, whatever else it shows.
 - CP-FSR-GE "requested DLL actually loaded (hash/version)": a library backend (`amdxcffx64.dll`) is hashed in the kernel's
   witness of each attempt, so the build actually loaded is on record beside the proof of its presence.
+
+## The resident runtime now produces the provenance and observation records (eighteenth audit)
+
+Built, so no verifier waits on a hand-written file:
+
+- `controller-journal.json`: a read-only tap on the controller journal's durable writes (`set_journal_tap`; it cannot change
+  or veto a write) keeps the last record per transaction as it is written (`evidence_archive::JournalArchive`), because the
+  journal itself holds only its latest record. At study end the records for the study's game processes are archived beside
+  the action study.
+- `worker-audit.json`: the worker's append-only audit file is read line by line (a torn line is skipped, never repaired) and
+  only its own `daemon_privilege` events for the authorized action's id inside the study's attempts are archived. The audit
+  path is `audit::default_audit_log_path()`; if the root worker is configured to write elsewhere, that path is what a
+  deployment must hand `with_provenance`.
+- `planner-observation.json`: the observer counts, from the decision stream the runtime already emits, how often the planner
+  evaluated the attested process and which authorized actions it offered; the abstention record is derived from it and
+  written only when the real verifier accepts it.
+- `crosswalk-observations.json` and `crosswalk-evidence-<sha>.json`: at finalization, from the children's sealed raw windows,
+  the dossiers whose signal the runtime itself feeds (5.22 PSI, 5.13 GPU samples, 5.17 CPU frequency events) and every attempt
+  of every child really received at or above the sample floor, each with an immutable content-named artifact the report
+  reopens. No dossier is upgraded from a plan.
+- `resident-windows.json` (raw), `resident-observation.json`, `action-latency.json`, `feature-proof.json`: as before.
+
+Still outside any offline build: that these are fed by a running controller on the real host (the tap is installed by the
+funnel builder; the audit path of a root worker is configured by the deployment).
