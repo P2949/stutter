@@ -15,7 +15,7 @@
 
 use std::collections::BTreeMap;
 
-use super::scripted_input::EventSink;
+use super::EventSink;
 
 /// The user's live interactive session, whose displays and id an isolated seat must not share.
 #[derive(Clone, Debug, PartialEq, Eq)]

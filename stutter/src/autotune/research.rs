@@ -108,14 +108,6 @@ mod init_schedule;
     not(test),
     expect(
         dead_code,
-        reason = "staged: the gate a future isolated device sink must pass; no physical sink is supplied"
-    )
-)]
-pub(crate) mod isolated_seat;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
         reason = "consumed by the resident capture once a live game source is qualified"
     )
 )]
