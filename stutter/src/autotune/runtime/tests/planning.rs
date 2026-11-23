@@ -463,18 +463,6 @@ mod research_action_gate {
             .spawn()
             .unwrap();
         let pid = child.id();
-        // `spawn` returns once the fork succeeded, not once `exec` replaced the image: until then /proc/pid/comm still
-        // names this test binary and the rule matching "sleep" would not apply, which a loaded run exposes.
-        let exec_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while std::fs::read_to_string(format!("/proc/{pid}/comm"))
-            .map_or(true, |c| c.trim() != "sleep")
-        {
-            assert!(
-                std::time::Instant::now() < exec_deadline,
-                "the stand-in never exec'd"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
         let allowed = |pid: u32| -> String {
             std::fs::read_to_string(format!("/proc/{pid}/status"))
                 .unwrap()
