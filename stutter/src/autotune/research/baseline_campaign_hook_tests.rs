@@ -94,6 +94,8 @@ fn six_arm_campaign() -> Six {
         warms_prefix: true,
         initialization_launches: 0,
         screens_before_init: 0,
+        processes: false,
+        scheduled: None,
     };
     let results_root = results.path().to_path_buf();
     let mut now = parent.issued_unix_seconds + 1;

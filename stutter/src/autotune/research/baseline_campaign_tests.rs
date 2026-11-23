@@ -72,6 +72,10 @@ pub(super) struct NativeHost {
     pub(super) warms_prefix: bool,
     pub(super) initialization_launches: u32,
     pub(super) screens_before_init: u32,
+    /// Whether every launch is its own game process the host can name (as a real launch is).
+    pub(super) processes: bool,
+    /// The treatment of each attempt of the running within-source study, as the driver gave the host.
+    pub(super) scheduled: Option<Vec<crate::autotune::research::Treatment>>,
     pub(super) results: PathBuf,
     pub(super) intent: ResearchIntentV1,
     pub(super) current: Option<AttemptSlot>,
@@ -185,6 +189,21 @@ impl AttemptHost for NativeHost {
     fn attempt_index(&mut self) -> Option<u32> {
         self.current.as_ref().map(|slot| slot.index)
     }
+    fn game_process(&mut self) -> Option<crate::autotune::research::action_child::ChildTarget> {
+        self.processes
+            .then(|| crate::autotune::research::action_child::ChildTarget {
+                pid: stutter_core::ids::Pid::new(6_000 + self.launches.saturating_sub(1)),
+                start_ticks: 200 + u64::from(self.launches.saturating_sub(1)),
+                uid: crate::syscall::geteuid(),
+            })
+    }
+    fn set_treatments(&mut self, treatments: Option<Vec<crate::autotune::research::Treatment>>) {
+        self.scheduled = treatments;
+    }
+    fn attempt_treatment(&mut self) -> Option<crate::autotune::research::Treatment> {
+        let index = self.current.as_ref()?.index as usize;
+        self.scheduled.as_ref()?.get(index).copied()
+    }
     fn safe_window(&mut self) -> bool {
         true
     }
@@ -276,6 +295,8 @@ fn composed(
         warms_prefix,
         initialization_launches: 0,
         screens_before_init: 0,
+        processes: false,
+        scheduled: None,
     };
     let results_root = results.path().to_path_buf();
     let mut now = parent.issued_unix_seconds + 1;

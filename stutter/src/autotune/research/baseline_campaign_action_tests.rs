@@ -1,6 +1,7 @@
 //! The production-composed synthetic campaign with an authorized action: the funnel runs the screens, pilots,
 //! confirmations and holdouts over real native files, then the action study over the long-session host. The
-//! controller never applies the action (nothing to act on), so the study is a justified abstention. Its record is
+//! controller either never applies the action (a justified abstention) or applies it in every treated attempt with a
+//! sealed measurement (a qualified action, or a worse one). Each record is
 //! replayed by `verify_children` (the abstention replay, the budget, the raw archive of the other children), the
 //! overall verdict resolves it, and G5 needs the owned-pressure control beside it.
 
@@ -35,8 +36,127 @@ struct Route {
     polls: u32,
     started: u64,
     clock: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    sighted: Option<SessionProcess>,
+    /// The controller that applies the action in every attempt the schedule treats, when the campaign has one.
+    acting: Option<Acting>,
 }
+
+/// The normal controller and the resident collectors of a campaign whose action is applied: it applies the action once
+/// in each attempt the gate allows, restores it, and seals the measurement its collectors counted.
+struct Acting {
+    gate: crate::autotune::research::action_gate::SharedActionGate,
+    tokens: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    acted_at: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    campaign: std::path::PathBuf,
+    /// Each finished session in order: the process it ran as and its interval.
+    history: Vec<(SessionProcess, u64, u64)>,
+    /// How much faster the candidate's tail is than the baseline's in the sealed measurement.
+    on_tail_ns: u64,
+}
+
+impl Acting {
+    fn act(&mut self, process: SessionProcess, now: u64) {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.acted_at.store(now, SeqCst);
+        let target = crate::autotune::research::action_child::ChildTarget {
+            pid: process.pid,
+            start_ticks: process.start_ticks,
+            uid: process.uid,
+        };
+        let mut gate = self.gate.lock().unwrap();
+        if gate.permit(Some(ResearchAction::CpuAffinityProfile), target, now) {
+            self.tokens.store(1, SeqCst);
+            gate.observe_holdings(
+                true,
+                0,
+                vec![crate::autotune::research::action_gate::Holding {
+                    experiment_id: stutter_core::ids::ExperimentId::new("exp-1"),
+                    action: Some(ResearchAction::CpuAffinityProfile),
+                    pid: Some(process.pid),
+                }],
+            );
+            self.tokens.store(0, SeqCst);
+            gate.observe_runtime(false, 0);
+        }
+    }
+
+    /// The latency record the collectors counted over the study's eight sessions, sealed beside the running study.
+    fn seal_measurement(&self) {
+        use crate::autotune::research::{
+            action_latency,
+            child_verify::AttemptProcess,
+            evidence_producers::{
+                LatencyWindowBuilder, WindowGuards, action_latency_document, latency_pair,
+            },
+            treatment::{Treatment, treatments_of},
+        };
+        let studies = self.campaign.join("studies");
+        let dir = std::fs::read_dir(&studies)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.join("intent.json").is_file() && !path.join("report.json").is_file())
+            .expect("the running study");
+        let intent: ResearchIntentV1 =
+            serde_json::from_slice(&std::fs::read(dir.join("intent.json")).unwrap()).unwrap();
+        let schedule = treatments_of(&intent).unwrap().unwrap();
+        let process = |slot: usize| {
+            let (session, started, ended) = &self.history[slot];
+            AttemptProcess {
+                slot: slot as u32,
+                pid: session.pid,
+                start_ticks: session.start_ticks,
+                uid: session.uid,
+                started_unix: *started,
+                completed_unix: *ended,
+            }
+        };
+        let window = |slot: usize, tail_ns: u64| {
+            let (_, started, ended) = &self.history[slot];
+            let mut builder = LatencyWindowBuilder::new(started + 10);
+            for _ in 0..1_900 {
+                builder.event(500_000);
+            }
+            for _ in 0..100 {
+                builder.event(tail_ns);
+            }
+            builder.finish(
+                ended - 10,
+                WindowGuards {
+                    foreground_p99_ms: 12.0,
+                    foreground_samples: 1_000,
+                    foreground_over_5ms: 10,
+                    thermal_degraded: false,
+                    thermal_throttle_count: 0,
+                    cpu_power_limited: false,
+                    gpu_power_limited: false,
+                },
+            )
+        };
+        let pairs = (0..schedule.len() / 2)
+            .map(|block| {
+                let (a, b) = (block * 2, block * 2 + 1);
+                let (off, on) = if schedule[a] == Treatment::Off {
+                    (a, b)
+                } else {
+                    (b, a)
+                };
+                latency_pair(
+                    (&process(off), window(off, 20_000_000)),
+                    (&process(on), window(on, self.on_tail_ns)),
+                )
+            })
+            .collect();
+        let file = dir.join(action_latency::FILE);
+        std::fs::write(&file, action_latency_document(pairs)).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+}
+
 impl LongSessionDriver for Route {
+    fn observe_process(&mut self, process: Option<SessionProcess>) {
+        self.sighted = process;
+    }
     fn start(&mut self, _: &LongWorkUnit) -> Result<(), &'static str> {
         self.polls = 0;
         self.started = self.clock.load(std::sync::atomic::Ordering::SeqCst);
@@ -45,6 +165,9 @@ impl LongSessionDriver for Route {
     fn poll(&mut self) -> LongProgress {
         self.polls += 1;
         if self.polls < 2 {
+            if let (Some(acting), Some(process)) = (self.acting.as_mut(), self.sighted) {
+                acting.act(process, self.started + 10);
+            }
             // The route runs for twenty minutes; the controller reads the clock again only on its next look.
             self.clock.fetch_add(
                 u64::from(unit().duration_seconds),
@@ -56,16 +179,23 @@ impl LongSessionDriver for Route {
             self.started,
             self.started + u64::from(unit().duration_seconds),
         );
+        let process = self.sighted.unwrap_or(SessionProcess {
+            pid: stutter_core::ids::Pid::new(4242),
+            start_ticks: 99,
+            uid: crate::syscall::geteuid(),
+        });
+        if let Some(acting) = self.acting.as_mut() {
+            acting.history.push((process, started, ended));
+            if acting.history.len() == 8 {
+                acting.seal_measurement();
+            }
+        }
         LongProgress::Completed(Box::new(LongSessionRecord {
             unit_id: unit().id,
             definition_sha256: unit().definition_sha256,
             started_unix: started,
             ended_unix: ended,
-            process: SessionProcess {
-                pid: stutter_core::ids::Pid::new(4242),
-                start_ticks: 99,
-                uid: crate::syscall::geteuid(),
-            },
+            process,
             phases: vec![Phase {
                 name: "route".into(),
                 started_unix: started,
@@ -89,6 +219,16 @@ struct Campaign {
 }
 
 fn campaign_with_an_action() -> Campaign {
+    build_campaign(None)
+}
+
+/// The same campaign whose controller applies the action in every attempt the gate allows, with the candidate's
+/// runnable tail at `on_tail_ns` against the baseline's 20 ms in the measurement the collectors seal.
+fn campaign_that_acts(on_tail_ns: u64) -> Campaign {
+    build_campaign(Some(on_tail_ns))
+}
+
+fn build_campaign(acting: Option<u64>) -> Campaign {
     let root = tempfile::tempdir().unwrap();
     std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let results = tempfile::tempdir().unwrap();
@@ -116,17 +256,38 @@ fn campaign_with_an_action() -> Campaign {
         warms_prefix: true,
         initialization_launches: 0,
         screens_before_init: 0,
+        processes: acting.is_some(),
+        scheduled: None,
     };
+    let tokens = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let acted_at = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (held, at) = (tokens.clone(), acted_at.clone());
+    let uid = crate::syscall::geteuid();
     let gate: crate::autotune::research::action_gate::SharedActionGate =
         std::sync::Arc::new(std::sync::Mutex::new(
-            ActionGate::unarmed(Box::new(|| Some(0))).with_state_probe(Box::new(|_| {
+            ActionGate::unarmed(Box::new(move || {
+                Some(held.load(std::sync::atomic::Ordering::SeqCst))
+            }))
+            .with_clock(Box::new(move || {
+                at.load(std::sync::atomic::Ordering::SeqCst) + 1
+            }))
+            .with_state_probe(Box::new(move |pid| {
                 Some(KernelState {
                     cpus_allowed: "0-15".into(),
                     cgroup: "0::/app.slice".into(),
-                    ..Default::default()
+                    tasks: [(pid, "0-15".to_owned())].into(),
+                    identity: Some((u64::from(pid) - 5_800, uid)),
                 })
             })),
         ));
+    let acting = acting.map(|on_tail_ns| Acting {
+        gate: gate.clone(),
+        tokens,
+        acted_at,
+        campaign: root.path().to_path_buf(),
+        history: Vec::new(),
+        on_tail_ns,
+    });
     let results_root = results.path().to_path_buf();
     let clock = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(
         parent.issued_unix_seconds + 1,
@@ -141,6 +302,8 @@ fn campaign_with_an_action() -> Campaign {
                 polls: 0,
                 started: 0,
                 clock,
+                sighted: None,
+                acting,
             },
         )),
         Box::new(move || shared.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1),
@@ -308,4 +471,154 @@ fn a_budget_record_that_understates_the_witnessed_sessions_is_refused_at_verific
         "{:?}",
         verified.budget_problem
     );
+}
+
+fn study_with(run_of: &Campaign, file: &str) -> std::path::PathBuf {
+    let path = std::fs::read_link(format!(
+        "/proc/self/fd/{}",
+        std::os::fd::AsRawFd::as_raw_fd(&run_of.campaign)
+    ))
+    .unwrap();
+    std::fs::read_dir(path.join("studies"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.join(file).is_file())
+        .expect("the action study")
+}
+
+fn verify_all(run_of: &Campaign) -> crate::autotune::research::child_verify::ChildrenVerification {
+    let results = run_of.results.path().to_path_buf();
+    crate::autotune::research::child_verify::verify_children(
+        &run_of.campaign,
+        crate::syscall::geteuid(),
+        &run_of.parent,
+        &move |source| results.join(source.dir_name()),
+    )
+    .unwrap()
+}
+
+fn rewrite(path: &std::path::Path, bytes: &[u8]) {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(path, bytes).unwrap();
+}
+
+/// The controller applies the action in every attempt the schedule treats On, each on its own game process, and the
+/// collectors seal the paired runnable-latency measurement before the study ends: the whole production-composed
+/// campaign qualifies the action and independent verification replays the receipts, the measurement and the budget.
+#[test]
+fn an_applied_action_with_its_sealed_measurement_qualifies_through_the_whole_campaign_and_verifies()
+{
+    let mut run_of = campaign_that_acts(1_500_000);
+    run(&mut run_of);
+    let dispositions = run_of.driver.dispositions();
+    let action = dispositions
+        .iter()
+        .find(|d| matches!(d.stage, Stage::Action(_)))
+        .expect("the action study is planned");
+    assert_eq!(
+        (action.result, action.reason.as_str()),
+        (Some(StudyResult::Qualified), ""),
+        "{dispositions:?}"
+    );
+    let verified = verify_all(&run_of);
+    assert!(
+        verified.children.iter().all(|c| c.problem.is_none()),
+        "{:?}",
+        verified.children
+    );
+    assert!(verified.all_verified(), "{:?}", verified.budget_problem);
+    assert!(verified.actions_restored(&dispositions));
+    let dir = study_with(&run_of, "action-receipts.json");
+    let receipts: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("action-receipts.json")).unwrap()).unwrap();
+    assert_eq!(
+        receipts.as_array().unwrap().len(),
+        4,
+        "one per treated attempt"
+    );
+}
+
+/// Altering what the verifier replays is caught: the sealed measurement removed, a receipt's restoration changed, and
+/// a receipt dropped (a partly applied action) each contradict the claimed qualification.
+#[test]
+fn a_qualified_action_campaign_is_refused_when_its_measurement_or_receipts_are_altered() {
+    for tamper in 0..3 {
+        let mut run_of = campaign_that_acts(1_500_000);
+        run(&mut run_of);
+        let dispositions = run_of.driver.dispositions();
+        let dir = study_with(&run_of, "action-receipts.json");
+        let receipts_path = dir.join("action-receipts.json");
+        let mut receipts: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&receipts_path).unwrap()).unwrap();
+        match tamper {
+            0 => std::fs::remove_file(dir.join(crate::autotune::research::action_latency::FILE))
+                .unwrap(),
+            1 => {
+                receipts[0]["restored"]["cpus_allowed"] = "0-3".into();
+                rewrite(&receipts_path, &serde_json::to_vec(&receipts).unwrap());
+            }
+            _ => {
+                receipts.as_array_mut().unwrap().pop();
+                rewrite(&receipts_path, &serde_json::to_vec(&receipts).unwrap());
+            }
+        }
+        let verified = verify_all(&run_of);
+        assert!(
+            verified.children.iter().any(|c| c.problem.is_some())
+                || !verified.actions_restored(&dispositions),
+            "tamper {tamper} was not caught"
+        );
+    }
+}
+
+/// An action that made the runnable tail worse is a valid, applied and restored measurement: the study is a
+/// qualified one, and what the production decision says of it is Revert, never a benefit.
+#[test]
+fn an_action_that_made_the_tail_worse_is_a_valid_study_whose_decision_is_revert() {
+    use crate::autotune::research::{
+        action_latency::{self, Decision},
+        child_verify_rules::processes_of,
+        treatment::treatments_of,
+    };
+    let mut run_of = campaign_that_acts(40_000_000);
+    run(&mut run_of);
+    let dispositions = run_of.driver.dispositions();
+    let action = dispositions
+        .iter()
+        .find(|d| matches!(d.stage, Stage::Action(_)))
+        .unwrap();
+    assert_eq!(
+        action.result,
+        Some(StudyResult::Qualified),
+        "{dispositions:?}"
+    );
+    assert!(
+        verify_all(&run_of)
+            .children
+            .iter()
+            .all(|c| c.problem.is_none())
+    );
+    let dir = study_with(&run_of, action_latency::FILE);
+    let intent: ResearchIntentV1 =
+        serde_json::from_slice(&std::fs::read(dir.join("intent.json")).unwrap()).unwrap();
+    let evidence: std::collections::BTreeMap<
+        u32,
+        crate::autotune::research::report::AttemptEvidenceV1,
+    > = std::fs::read_dir(dir.join("evidence"))
+        .unwrap()
+        .flatten()
+        .map(|entry| {
+            let item: crate::autotune::research::report::AttemptEvidenceV1 =
+                serde_json::from_slice(&std::fs::read(entry.path()).unwrap()).unwrap();
+            (item.slot_index, item)
+        })
+        .collect();
+    let result = action_latency::verify(
+        &std::fs::read(dir.join(action_latency::FILE)).unwrap(),
+        &treatments_of(&intent).unwrap().unwrap(),
+        &processes_of(&evidence),
+    )
+    .unwrap();
+    assert_eq!(result.decision, Decision::Revert);
 }
