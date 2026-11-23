@@ -30,6 +30,14 @@ pub struct NativeContext {
     pub upscaling_type: Option<i64>,
     pub ray_tracing_enabled: Option<bool>,
     pub frame_generation_type: Option<i64>,
+    /// The resolution the game says it rendered at, and whether dynamic resolution scaling was on (it changes the
+    /// effective internal resolution). Absent for results sealed before these were read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_height: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic_resolution: Option<bool>,
     pub frame_count: u64,
     /// Tail statistics of the verified frame times; absent for results recorded before they existed
     /// and for runs too short for a tail.
@@ -49,11 +57,19 @@ impl NativeContext {
     /// Whether this sealed context is what the native files say now. A result sealed before tail
     /// statistics existed has none and is compared without them; one sealed with them must match them.
     pub fn matches_replay(&self, replayed: &Self) -> bool {
-        if self.frame_stats.is_some() {
-            return self == replayed;
-        }
         let mut without = replayed.clone();
-        without.frame_stats = None;
+        if self.frame_stats.is_none() {
+            without.frame_stats = None;
+        }
+        // Results sealed before the rendered resolution was read are compared without it.
+        if self.render_width.is_none()
+            && self.render_height.is_none()
+            && self.dynamic_resolution.is_none()
+        {
+            without.render_width = None;
+            without.render_height = None;
+            without.dynamic_resolution = None;
+        }
         *self == without
     }
 
@@ -165,9 +181,35 @@ pub fn verify_frames(summary: &[u8], frames_csv: &[u8]) -> anyhow::Result<Native
         frame_generation_type: data
             .get("frameGenerationType")
             .and_then(serde_json::Value::as_i64),
+        render_width: data
+            .get("renderWidth")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| (1..=16_384).contains(value)),
+        render_height: data
+            .get("renderHeight")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| (1..=16_384).contains(value)),
+        dynamic_resolution: data.get("DRSEnabled").and_then(serde_json::Value::as_bool),
         frame_count: count,
         frame_stats: super::frame_stats::FrameStats::of(&times),
     })
+}
+
+/// What a result shows of the rendered resolution a study profile asked for. The game reports the resolution it rendered
+/// at and whether dynamic resolution scaling (which changes the internal resolution) was on; a result that does not
+/// report them proves nothing about it, and is `Unproven`, never assumed to match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectiveResolution {
+    /// The reported resolution is the profile's and dynamic scaling was off.
+    Confirmed,
+    /// The game rendered at another resolution or scaled dynamically.
+    Contradicted,
+    /// The result does not report it.
+    Unproven,
+    /// The profile asks for no resolution.
+    NotSpecified,
 }
 
 /// Whether a result's reported graphics context matches the frozen study profile it was meant to
@@ -181,6 +223,34 @@ pub enum ProfileConformance {
     Unproven,
     /// The profile constrains no reported graphics field (the long action profile).
     NotSpecified,
+}
+
+impl NativeContext {
+    /// The effective rendered resolution against the one the profile asked for.
+    pub fn effective_resolution(
+        &self,
+        profile: super::child_study::Profile,
+    ) -> EffectiveResolution {
+        let Some(expected) = super::profile_applier::target_resolution(profile) else {
+            return EffectiveResolution::NotSpecified;
+        };
+        if self.dynamic_resolution == Some(true) {
+            return EffectiveResolution::Contradicted;
+        }
+        match (
+            self.render_width,
+            self.render_height,
+            self.dynamic_resolution,
+        ) {
+            (Some(width), Some(height), Some(false)) if (width, height) == expected => {
+                EffectiveResolution::Confirmed
+            }
+            (Some(width), Some(height), _) if (width, height) != expected => {
+                EffectiveResolution::Contradicted
+            }
+            _ => EffectiveResolution::Unproven,
+        }
+    }
 }
 
 impl NativeContext {
@@ -220,6 +290,7 @@ impl NativeContext {
                 let ray_tracing = self.ray_tracing_enabled;
                 let off = |value: Option<i64>| value.is_some_and(|value| value != 0);
                 if ray_tracing == Some(true)
+                    || self.effective_resolution(profile) == EffectiveResolution::Contradicted
                     || (!free_frame_generation && off(self.frame_generation_type))
                     || (!free_upscaler && off(self.upscaling_type))
                 {
@@ -346,6 +417,9 @@ mod tests {
             upscaling_type: Some(0),
             ray_tracing_enabled: rt,
             frame_generation_type: fg,
+            render_width: None,
+            render_height: None,
+            dynamic_resolution: None,
             frame_count: 10,
             frame_stats: None,
         };
@@ -400,6 +474,9 @@ mod stage_tests {
             upscaling_type: Some(upscaler),
             ray_tracing_enabled: Some(rt),
             frame_generation_type: Some(fg),
+            render_width: None,
+            render_height: None,
+            dynamic_resolution: None,
             frame_count: 10,
             frame_stats: None,
         }
@@ -468,6 +545,9 @@ mod scene_tests {
             upscaling_type: None,
             ray_tracing_enabled: None,
             frame_generation_type: None,
+            render_width: None,
+            render_height: None,
+            dynamic_resolution: None,
             frame_count: frames,
             frame_stats: None,
         };
@@ -505,6 +585,9 @@ mod replay_tests {
             upscaling_type: Some(0),
             ray_tracing_enabled: Some(false),
             frame_generation_type: Some(0),
+            render_width: None,
+            render_height: None,
+            dynamic_resolution: None,
             frame_count: 2000,
             frame_stats: stats,
         }
@@ -531,3 +614,7 @@ mod replay_tests {
         assert!(!other.matches_replay(&replayed), "other fields still bind");
     }
 }
+
+#[cfg(test)]
+#[path = "native_context_resolution_tests.rs"]
+mod resolution_tests;

@@ -64,6 +64,26 @@ pub fn ray_tracing_off() -> ProfileSpec {
 /// The provisional CPU-sensitive profile: 1080p raster, ray tracing off. Its resolution entry is a
 /// list option whose index has not been observed, so applying it is `BlockedProfileMapping` until
 /// that index is observed from a real file.
+/// The rendered resolution a study profile asks for, read from the very edit that sets it (`None` for a profile that
+/// sets none).
+pub fn target_resolution(profile: super::child_study::Profile) -> Option<(u32, u32)> {
+    use super::child_study::Profile;
+    let spec = match profile {
+        Profile::Cpu => cpu_profile(),
+        Profile::Gpu => gpu_profile(),
+        Profile::Long => return None,
+    };
+    spec.edits
+        .iter()
+        .find_map(|edit| match (&edit.to, edit.group, edit.name) {
+            (Setting::Choice { value, .. }, "/video/display", "Resolution") => {
+                let (width, height) = value.split_once('x')?;
+                Some((width.parse().ok()?, height.parse().ok()?))
+            }
+            _ => None,
+        })
+}
+
 pub fn cpu_profile() -> ProfileSpec {
     let mut spec = ray_tracing_off();
     spec.name = "cpu_1080p_raster";

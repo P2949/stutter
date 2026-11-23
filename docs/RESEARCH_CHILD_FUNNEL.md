@@ -796,3 +796,14 @@ settlement is an error, the stop stays owed, and nothing is ever sealed over a p
 shutdown or cancellation (`tick_cancelled_to_settlement`) ticks through the window (bounded, 150 s) so it still returns
 proven or unproven. Still blocking by design: the launch-refusal abort (nothing started), the coordinator's error-path
 `abort_host`, and the flat driver's own shutdown.
+
+## Effective rendered resolution (eighteenth audit)
+
+The native summary does report the resolution the game rendered at (`renderWidth`, `renderHeight`) and whether dynamic
+resolution scaling was on (`DRSEnabled`); an earlier note that it did not was wrong. `NativeContext` now reads them (bounded;
+older sealed contexts replay without them). `target_resolution(profile)` reads the resolution a study profile asks for from
+the very edit that sets it (CPU 1920x1080, GPU 3440x1440). `effective_resolution(profile)` is `Confirmed` (the reported
+resolution is the profile's and dynamic scaling was off), `Contradicted` (another resolution, or dynamic scaling on, which
+changes the internal resolution whatever the output says), `Unproven` (the result does not report it) or `NotSpecified`
+(the long profile). A contradiction is a profile violation (`ProfileConformance::Violates`); a silent result is typed
+`Unproven` and is never assumed to match.

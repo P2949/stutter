@@ -18,6 +18,9 @@ fn a_changed_or_missing_game_reported_context_is_not_a_consistent_comparison() {
         upscaling_type: Some(2),
         ray_tracing_enabled: Some(true),
         frame_generation_type: Some(0),
+        render_width: None,
+        render_height: None,
+        dynamic_resolution: None,
         frame_count: 100,
         frame_stats: None,
     };
