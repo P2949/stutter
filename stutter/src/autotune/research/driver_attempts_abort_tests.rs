@@ -76,4 +76,12 @@ fn an_abort_with_no_running_attempt_still_asks_the_host_and_never_reports_an_unp
     let (_root, mut stuck, _study, _) = attempts(host);
     assert!(!stuck.has_running());
     assert_eq!(stuck.abort(), Err("SettlementUnproven"));
+    // The same two branches through `abort_outcome`, which the executor calls when an attempt errors.
+    use crate::autotune::research::study_executor::StudyAttempts as _;
+    let (_root, mut idle, study, _) = attempts(Host::finishing());
+    assert_eq!(idle.abort_outcome(&study), Ok(None));
+    let mut host = Host::finishing();
+    host.abort_fails = true;
+    let (_root, mut stuck, study, _) = attempts(host);
+    assert_eq!(stuck.abort_outcome(&study), Err("SettlementUnproven"));
 }
