@@ -83,7 +83,7 @@ pub struct DriverStudyAttempts {
     /// The kernel's witness of each attempt's game process, merged over the attempt.
     feature_witness: BTreeMap<u32, super::feature_proof::AttemptWitness>,
     /// Reads the kernel's witness of a process (replaceable in tests).
-    witness_of: Box<dyn Fn(u32) -> Option<super::feature_proof::Witness> + Send>,
+    witness_of: super::feature_proof::WitnessReader,
 }
 
 fn dir_name(study: &ChildStudy) -> &str {
@@ -208,22 +208,7 @@ impl DriverStudyAttempts {
         // The backend's modules load after the process appears: the witness is merged over the whole attempt, read at
         // most every few seconds, so a backend that shows at any point counts and one that never shows does not.
         let key = (target.pid, target.start_ticks, target.uid);
-        let stale = self
-            .feature_witness
-            .get(&index)
-            .is_none_or(|seen| now >= seen.3 + 5);
-        if stale && let Some(witness) = (self.witness_of)(u32::from(target.pid)) {
-            let seen = self.feature_witness.entry(index).or_insert((
-                treatment,
-                key,
-                Default::default(),
-                now,
-            ));
-            seen.2.modules.extend(witness.modules);
-            seen.2.devices.extend(witness.devices);
-            seen.2.ancestors.extend(witness.ancestors);
-            seen.3 = now;
-        }
+        self.merge_witness(factor, index, treatment, key, now);
         if self.feature_observed.contains_key(&index) {
             return;
         }

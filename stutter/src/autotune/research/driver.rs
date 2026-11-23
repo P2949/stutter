@@ -86,6 +86,11 @@ pub trait AttemptHost {
     /// One bounded step of the same stop: `Settled` when nothing owned remains, `Pending` while the settlement window
     /// is still open (the driver ticks again), `Unsettled` once it is not. The default is the blocking `abort`, for
     /// hosts with nothing to wait for.
+    /// SHA-256 of a file of the tool this attempt runs, by path relative to the tool directory (`None` when the host
+    /// has no tool directory or the file cannot be read).
+    fn tool_file_sha256(&mut self, _relative: &str) -> Option<String> {
+        None
+    }
     fn abort_step(&mut self) -> super::steam_host::StopStep {
         if self.abort().is_ok() {
             super::steam_host::StopStep::Settled

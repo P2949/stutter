@@ -355,6 +355,19 @@ impl<P: SteamPort> AttemptHost for SteamAttemptHost<P> {
         Ok(())
     }
 
+    fn tool_file_sha256(&mut self, relative: &str) -> Option<String> {
+        // A tool-relative path only: nothing that climbs out of the tool directory is read.
+        if relative.starts_with('/') || relative.split('/').any(|part| part == "..") {
+            return None;
+        }
+        let path = self.tool_dir.as_ref()?.join(relative);
+        let meta = std::fs::metadata(&path).ok()?;
+        (meta.is_file() && meta.len() <= 64 * 1024 * 1024)
+            .then(|| std::fs::read(&path).ok())
+            .flatten()
+            .map(|bytes| stutter_core::hash::sha256_hex(&bytes))
+    }
+
     fn abort_step(&mut self) -> StopStep {
         let step = self.port.stop_step();
         if step == StopStep::Settled {

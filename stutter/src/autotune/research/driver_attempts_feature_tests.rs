@@ -346,7 +346,7 @@ fn a_feature_study_qualifies_only_on_the_kernels_witness_of_its_backend() {
             }
             Some(bytes)
         }))
-        .with_witness_reader(Box::new(move |pid| {
+        .with_witness_reader(Box::new(move |pid, _watch| {
             let on = witness_schedule.lock().unwrap()[(pid - 7_000) as usize] == Treatment::On;
             let mut witness = Witness::default();
             if (on && backend_on) || (!on && backend_off) {
@@ -418,4 +418,131 @@ fn a_feature_study_qualifies_only_on_the_kernels_witness_of_its_backend() {
     assert!(!run(ResearchFactor::NtSync, true, true).1);
     // A factor whose backend is not modelled never qualifies, whatever the process shows.
     assert!(!run(ResearchFactor::Hdr, true, false).1);
+}
+
+/// A factor told apart by the content of a mapped build (the CachyOS low-latency vkd3d) is proven through the whole
+/// driver: the host's two tool-build hashes, the kernel's witness of each attempt's mapped file, and the verifier.
+#[test]
+fn a_factor_told_apart_by_content_is_proven_through_the_driver_from_the_hosts_tool_builds() {
+    use crate::autotune::research::{
+        ResearchFactor, Treatment,
+        action_child::ChildTarget,
+        child_study::Stage,
+        feature_proof::{self, Witness},
+    };
+    let (on_hash, off_hash) = ("a".repeat(64), "b".repeat(64));
+    let (on_path, off_path) = feature_proof::tool_builds(ResearchFactor::Vkd3dLowLatency).unwrap();
+    let run = |host_knows_builds: bool, mapped_on_off: (&'static str, &'static str)| {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut parent = parent();
+        parent.factors = vec![ResearchFactor::Vkd3dLowLatency];
+        parent.tools.push(crate::autotune::research::ResearchTool {
+            source: ProtonSource::CachyOs,
+            identity_sha256: "c".repeat(64),
+        });
+        let feature = plan(&parent)
+            .unwrap()
+            .into_iter()
+            .find(|s| matches!(s.stage, Stage::Feature(_)))
+            .unwrap();
+        let mut host = Host::finishing();
+        host.processes = (0..64)
+            .map(|n| ChildTarget {
+                pid: stutter_core::ids::Pid::new(7_000 + n),
+                start_ticks: 300 + u64::from(n),
+                uid: crate::syscall::geteuid(),
+            })
+            .collect();
+        host.schedule_out = Some(Default::default());
+        if host_knows_builds {
+            host.tool_files.insert(on_path.to_owned(), on_hash.clone());
+            host.tool_files
+                .insert(off_path.to_owned(), off_hash.clone());
+        }
+        let schedule = host.schedule_out.clone().unwrap();
+        let mut now = parent.issued_unix_seconds + 1;
+        let (mapped_on, mapped_off) = (
+            if mapped_on_off.0 == "on" {
+                on_hash.clone()
+            } else {
+                off_hash.clone()
+            },
+            if mapped_on_off.1 == "on" {
+                on_hash.clone()
+            } else {
+                off_hash.clone()
+            },
+        );
+        let mut runner = DriverStudyAttempts::new(
+            File::open(root.path()).unwrap(),
+            parent.clone(),
+            Box::new(host),
+            Box::new(move || {
+                now += 10;
+                now
+            }),
+            Box::new(|| Ok(())),
+            Box::new(|_| std::path::PathBuf::from("/nonexistent")),
+            Box::new(|_study| {
+                Ok(StudyInputs {
+                    arms: vec![ProtonSource::CachyOs],
+                    rule: None,
+                })
+            }),
+        )
+        // The environment is only an observation here; the proof stands on the witness.
+        .with_environ_reader(Box::new(|_| Some(b"HOME=/h\0".to_vec())))
+        .with_witness_reader(Box::new(move |pid, watch| {
+            assert_eq!(
+                watch,
+                ["d3d12core.dll"],
+                "the content-compared name is the one watched"
+            );
+            let on = schedule.lock().unwrap()[(pid - 7_000) as usize] == Treatment::On;
+            let mut witness = Witness::default();
+            witness.mapped.insert(
+                "d3d12core.dll".to_owned(),
+                [if on {
+                    mapped_on.clone()
+                } else {
+                    mapped_off.clone()
+                }]
+                .into(),
+            );
+            Some(witness)
+        }));
+        run_to_end(&mut runner, &feature);
+        let path = root
+            .path()
+            .join("studies")
+            .join(&feature.study_sha256[..16]);
+        let bytes = std::fs::read(path.join(feature_proof::FILE)).unwrap();
+        let schedule: Vec<Treatment> = (0..8)
+            .map(|n| {
+                if n % 2 == 0 {
+                    Treatment::Off
+                } else {
+                    Treatment::On
+                }
+            })
+            .collect();
+        let _ = schedule;
+        (bytes, feature, path)
+    };
+    // The record names each attempt's mapped build beside the tool's own two builds.
+    let (bytes, _, _) = run(true, ("on", "off"));
+    let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let first = &record["attempts"][0]["witness"];
+    assert_eq!(first["tool_on_sha256"], on_hash);
+    assert_eq!(first["tool_off_sha256"], off_hash);
+    assert!(first["mapped"]["d3d12core.dll"].is_array());
+    // A host that cannot say what the two builds are leaves them unrecorded, and the proof then fails closed.
+    let (bytes, _, _) = run(false, ("on", "off"));
+    let record: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        record["attempts"][0]["witness"]
+            .get("tool_on_sha256")
+            .is_none()
+    );
 }

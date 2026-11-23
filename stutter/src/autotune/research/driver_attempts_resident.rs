@@ -11,6 +11,50 @@ use super::{
 };
 
 impl DriverStudyAttempts {
+    /// Merge the kernel's witness of the attempt's game process into what was seen so far (read at most every few
+    /// seconds), with the hashes of the tool's own two builds when the factor is told apart by content.
+    pub(super) fn merge_witness(
+        &mut self,
+        factor: super::super::ResearchFactor,
+        index: u32,
+        treatment: super::super::Treatment,
+        key: super::super::feature_proof::AttemptProcessKey,
+        now: u64,
+    ) {
+        let stale = self
+            .feature_witness
+            .get(&index)
+            .is_none_or(|seen| now >= seen.3 + 5);
+        let watch = super::super::feature_proof::watched(factor);
+        let Some(witness) = stale
+            .then(|| (self.witness_of)(u32::from(key.0), &watch))
+            .flatten()
+        else {
+            return;
+        };
+        let builds = super::super::feature_proof::tool_builds(factor).map(|(on, off)| {
+            (
+                self.host.tool_file_sha256(on),
+                self.host.tool_file_sha256(off),
+            )
+        });
+        let seen =
+            self.feature_witness
+                .entry(index)
+                .or_insert((treatment, key, Default::default(), now));
+        seen.2.modules.extend(witness.modules);
+        seen.2.devices.extend(witness.devices);
+        seen.2.ancestors.extend(witness.ancestors);
+        for (name, hashes) in witness.mapped {
+            seen.2.mapped.entry(name).or_default().extend(hashes);
+        }
+        if let Some((on, off)) = builds {
+            seen.2.tool_on_sha256 = on;
+            seen.2.tool_off_sha256 = off;
+        }
+        seen.3 = now;
+    }
+
     /// Share the resident observer with the runtime: each attempt's observed window is kept beside its study.
     pub fn with_resident(
         mut self,

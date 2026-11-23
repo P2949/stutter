@@ -32,6 +32,8 @@ struct Host {
     switch_process: Option<(u32, crate::autotune::research::action_child::ChildTarget)>,
     /// One game process per launch (the Nth launch is the Nth), when a test needs distinct attempts.
     processes: Vec<crate::autotune::research::action_child::ChildTarget>,
+    /// The hash of each tool file by relative path, as the host would read it from its tool directory.
+    tool_files: std::collections::BTreeMap<String, String>,
     /// Every factor set the driver enabled before a study, shared so a test can read it back.
     seen_factors:
         std::sync::Arc<std::sync::Mutex<Vec<Vec<crate::autotune::research::ResearchFactor>>>>,
@@ -58,11 +60,15 @@ impl Host {
             prefix_refusal: None,
             switch_process: None,
             processes: Vec::new(),
+            tool_files: Default::default(),
         }
     }
 }
 
 impl AttemptHost for Host {
+    fn tool_file_sha256(&mut self, relative: &str) -> Option<String> {
+        self.tool_files.get(relative).cloned()
+    }
     fn game_process(&mut self) -> Option<crate::autotune::research::action_child::ChildTarget> {
         if !self.processes.is_empty() {
             return self

@@ -48,7 +48,7 @@ impl DriverStudyAttempts {
     #[cfg(test)]
     pub(super) fn with_witness_reader(
         mut self,
-        reader: Box<dyn Fn(u32) -> Option<super::super::feature_proof::Witness> + Send>,
+        reader: super::super::feature_proof::WitnessReader,
     ) -> Self {
         self.witness_of = reader;
         self

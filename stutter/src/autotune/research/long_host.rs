@@ -199,6 +199,10 @@ impl<H: AttemptHost, D: LongSessionDriver> AttemptHost for LongAttemptHost<H, D>
         session.and(process)
     }
 
+    fn tool_file_sha256(&mut self, relative: &str) -> Option<String> {
+        self.inner.tool_file_sha256(relative)
+    }
+
     fn abort_step(&mut self) -> super::steam_host::StopStep {
         self.session = None;
         let session = self.driver.abort();

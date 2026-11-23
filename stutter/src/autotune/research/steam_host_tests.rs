@@ -471,3 +471,31 @@ fn an_abort_is_stepped_one_settlement_window_step_per_call_and_ownership_is_rele
     assert_eq!(host.abort_step(), StopStep::Settled);
     assert!(host.current.is_none());
 }
+
+#[test]
+fn a_tool_file_is_hashed_from_the_tool_directory_and_nothing_outside_it_is_read() {
+    let tool = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tool.path().join("files/lib")).unwrap();
+    std::fs::write(tool.path().join("files/lib/d3d12core.dll"), b"build").unwrap();
+    std::fs::write(
+        tool.path().parent().unwrap().join("outside-the-tool"),
+        b"secret",
+    )
+    .ok();
+    let mut host = host(Vec::new());
+    // No tool directory yet: nothing to hash.
+    assert_eq!(host.tool_file_sha256("files/lib/d3d12core.dll"), None);
+    host.tool_dir = Some(tool.path().to_path_buf());
+    assert_eq!(
+        host.tool_file_sha256("files/lib/d3d12core.dll"),
+        Some(stutter_core::hash::sha256_hex(b"build"))
+    );
+    assert_eq!(host.tool_file_sha256("files/lib/absent.dll"), None);
+    for escape in [
+        "../outside-the-tool",
+        "/etc/hostname",
+        "files/../../outside-the-tool",
+    ] {
+        assert_eq!(host.tool_file_sha256(escape), None, "{escape}");
+    }
+}

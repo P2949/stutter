@@ -828,3 +828,24 @@ display and session of its own and not on the live Hyprland instance (absent or 
 only be built from an attested seat and a sink that names the very display it is bound to, so a sink bound to the live
 display is refused before a single event is written. No physical sink exists in this build (it keeps
 `UnavailableInput`); the gate and its release-every-key behaviour are exercised with fixtures that touch no device.
+
+## Two more backend models, and the evidence for the four that stay unmodelled (eighteenth audit)
+
+Attempted for every remaining factor against the tools installed on the research host:
+
+- `AudioBackend` (CachyOS, `PROTON_USE_PIPEWIRE=0`): the tool's `proton` script drops the default `pipewire` configuration
+  and sets `WINE_AUDIO_DRIVER=pulse,alsa`; the tool ships both `winepulse` and `winepipewire`. Modelled: the pulse driver
+  (`winepulse.so` or `.drv`) is mapped on every On attempt and on no Off attempt.
+- `Vkd3dLowLatency` (CachyOS): the tool ships two different `d3d12core.dll` builds (`vkd3d-low-latency` 78e63ad2…,
+  `vkd3d-proton` b73d1c10…) and copies one into the prefix, under one file name. Modelled by content: the witness hashes
+  the mapped `d3d12core.dll`, the host hashes the tool directory's two builds (`AttemptHost::tool_file_sha256`, relative
+  paths only), and the proof needs the On attempts to map the low-latency build and the Off attempts the standard one, the
+  two builds known, distinct and the same on every attempt. The tool hashes are the host's own reading of the tool
+  directory at attempt time; they are not recomputable at replay without the directory.
+- `InputBackend` (EM, `PROTON_USE_SDL=1`): the script only sets `PROTON_DISABLE_HIDRAW` and `PROTON_NO_STEAMINPUT`, read by
+  `winebus` in a services process, and both input buses coexist, so the baseline cannot be shown free of SDL: a game
+  environment echo would be activation, not backend. Not modelled.
+- `FrameGeneration` (EM, `MLFG_UPGRADE=1`): the string appears nowhere in the EM tool: no artifact to witness. The game's
+  own reported `frameGenerationType` stays the only evidence (`functional_probe`). Not modelled.
+- `AntiLag2` and `Hdr`: no source can switch them (`factor_env` reports no environment control, or that no qualified
+  output exists), so they are legitimately excluded rather than unproven.
