@@ -163,6 +163,35 @@ impl DriverStudyAttempts {
         (Some(qualified), abstained)
     }
 
+    /// The gate's stage evidence, checked against what independent verification will replay. The live gate proved an
+    /// action was applied and restored; whether it was applied on every attempt the schedule treated, each attributed
+    /// to its own process, is decided by the very function the replay uses, so a partly applied action is never
+    /// live-qualified and then contradicted at verification.
+    pub(super) fn action_stage_evidence(
+        &self,
+        study: &ChildStudy,
+        completed: u32,
+        study_dir: &std::fs::File,
+        intent: &super::super::ResearchIntentV1,
+        evidence: &std::collections::BTreeMap<u32, super::super::report::AttemptEvidenceV1>,
+    ) -> (Option<bool>, bool) {
+        let (gate, abstained) = self.stage_evidence(study, completed);
+        let checked = match (study.stage, gate) {
+            (Stage::Action(action), Some(true)) => {
+                Some(super::super::child_judgement::action_replay(
+                    study_dir,
+                    self.parent.uid,
+                    self.parent.uid,
+                    action,
+                    intent,
+                    evidence,
+                ))
+            }
+            (_, other) => other,
+        };
+        (checked, abstained)
+    }
+
     /// A small JSON record beside the study, write-once; an existing one must be byte-identical.
     fn write_study_record(
         &self,

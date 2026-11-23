@@ -446,10 +446,15 @@ impl DriverStudyAttempts {
             Stage::Feature(_) => Some(false),
             Stage::Init => self.init_receipt(&study_dir)?,
             _ => {
-                let (evidence, abstained) =
-                    self.stage_evidence(study, u32::try_from(report.attempts_completed)?);
+                let (checked, abstained) = self.action_stage_evidence(
+                    study,
+                    u32::try_from(report.attempts_completed)?,
+                    &study_dir,
+                    driver.intent(),
+                    &evidence,
+                );
                 action_not_indicated = abstained;
-                evidence
+                checked
             }
         };
         Ok(AttemptsOutcome {

@@ -2,8 +2,6 @@
 //! sealed session record instead of a native benchmark result, the study qualifies on the gate's proven
 //! restoration, and independent verification replays the session record against the intent's unit.
 
-use std::collections::VecDeque;
-
 use super::*;
 use crate::autotune::research::{
     ResearchAction,
@@ -40,22 +38,76 @@ fn unit() -> LongWorkUnit {
     }
 }
 
-/// Plays the route to completion on the second poll of every session, as the unit says it must.
+thread_local! {
+    /// The unix second the controller is shown applying the action at: inside every session's window (a route
+    /// that keeps its own clock advances it).
+    static ACTED_AT: std::cell::Cell<u64> = const { std::cell::Cell::new(5_100) };
+}
+
+/// The game process of the Nth attempt: every launch is a new process.
+fn attempt_process(slot: u32) -> ChildTarget {
+    ChildTarget {
+        pid: stutter_core::ids::Pid::new(5_000 + slot),
+        start_ticks: 100 + u64::from(slot),
+        uid: crate::syscall::geteuid(),
+    }
+}
+
+thread_local! {
+    /// What the test needs of the one study it runs: the process the host last attested and the worker tokens the
+    /// gate's probe reads.
+    static RIG: std::cell::RefCell<Option<(Sighted, std::sync::Arc<std::sync::atomic::AtomicU32>)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+type Sighted = std::sync::Arc<std::sync::Mutex<Option<SessionProcess>>>;
+
+/// Records the process the host attested to the route, and delegates everything else.
+struct Observing<D>(D, Sighted);
+
+impl<D: LongSessionDriver> LongSessionDriver for Observing<D> {
+    fn observe_process(&mut self, process: Option<SessionProcess>) {
+        *self.1.lock().unwrap() = process;
+        self.0.observe_process(process);
+    }
+    fn start(&mut self, unit: &LongWorkUnit) -> Result<(), &'static str> {
+        self.0.start(unit)
+    }
+    fn poll(&mut self) -> LongProgress {
+        self.0.poll()
+    }
+    fn abort(&mut self) -> anyhow::Result<()> {
+        self.0.abort()
+    }
+}
+
+/// Plays the route to completion on the second poll of every session, as the unit says it must, as whichever
+/// game process the host sighted for that attempt.
 struct Route {
     definition: String,
-    states: VecDeque<LongProgress>,
+    sighted: Option<SessionProcess>,
+    polls: u32,
 }
 
 impl LongSessionDriver for Route {
+    fn observe_process(&mut self, process: Option<SessionProcess>) {
+        self.sighted = process;
+    }
     fn start(&mut self, _: &LongWorkUnit) -> Result<(), &'static str> {
-        self.states = VecDeque::from([
-            LongProgress::Running,
-            LongProgress::Completed(Box::new(session(&self.definition))),
-        ]);
+        self.polls = 0;
         Ok(())
     }
     fn poll(&mut self) -> LongProgress {
-        self.states.pop_front().unwrap_or(LongProgress::Running)
+        self.polls += 1;
+        if self.polls < 2 {
+            return LongProgress::Running;
+        }
+        // The record names the process the host sighted on this very attempt.
+        let mut record = session(&self.definition);
+        if let Some(process) = self.sighted {
+            record.process = process;
+        }
+        LongProgress::Completed(Box::new(record))
     }
     fn abort(&mut self) -> anyhow::Result<()> {
         Ok(())
@@ -96,7 +148,8 @@ fn build(
 ) {
     build_with(Route {
         definition: definition.to_owned(),
-        states: VecDeque::new(),
+        sighted: None,
+        polls: 0,
     })
 }
 
@@ -115,6 +168,9 @@ fn build_with<D: LongSessionDriver + Send + 'static>(
     parent.actions = vec![ResearchAction::CpuAffinityProfile];
     parent.max_active_seconds = 3600;
     parent.max_evidence_bytes = 1024 * 1024;
+    // The sessions sit at unix 5000 and later, as twenty-minute routes do.
+    parent.issued_unix_seconds = 4_000;
+    parent.deadline_unix_seconds = 4_000 + 40_000;
     parent.long_attempt_seconds = Some(1800);
     parent.long_work_unit = Some(unit());
     parent.validate().unwrap();
@@ -123,20 +179,31 @@ fn build_with<D: LongSessionDriver + Send + 'static>(
         .into_iter()
         .find(|s| matches!(s.stage, Stage::Action(_)))
         .unwrap();
+    let tokens = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    ACTED_AT.set(5_100);
+    let held = tokens.clone();
     let gate: Shared = std::sync::Arc::new(std::sync::Mutex::new(
-        ActionGate::unarmed(Box::new(|| Some(0))).with_state_probe(Box::new(|_| {
+        ActionGate::unarmed(Box::new(move || {
+            Some(held.load(std::sync::atomic::Ordering::SeqCst))
+        }))
+        .with_clock(Box::new(|| ACTED_AT.get() + 1))
+        .with_state_probe(Box::new(|pid| {
             Some(KernelState {
                 cpus_allowed: "0-15".into(),
                 cgroup: "0::/app.slice".into(),
-                tasks: [(4242, "0-15".to_owned())].into(),
-                identity: Some((99, crate::syscall::geteuid())),
+                tasks: [(pid, "0-15".to_owned())].into(),
+                identity: Some((u64::from(pid) - 4_900, crate::syscall::geteuid())),
             })
         })),
     ));
+    // Every attempt is its own game process, and the host follows the study's own schedule.
+    let sighted = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let driver = Observing(driver, sighted.clone());
     let mut inner = Host::finishing();
-    inner.process = Some(game());
-    inner.treatment = Some(crate::autotune::research::Treatment::On);
+    inner.processes = (0..64).map(attempt_process).collect();
+    inner.schedule_out = Some(Default::default());
     let host = LongAttemptHost::new(inner, driver);
+    RIG.with(|rig| *rig.borrow_mut() = Some((sighted, tokens)));
     let base = parent.issued_unix_seconds + 1;
     let mut calls = 0u64;
     let attempts = DriverStudyAttempts::new(
@@ -157,32 +224,59 @@ fn build_with<D: LongSessionDriver + Send + 'static>(
     (root, attempts, study, gate, parent)
 }
 
-fn holding() -> Vec<Holding> {
-    vec![Holding {
-        experiment_id: stutter_core::ids::ExperimentId::new("exp-1"),
-        action: Some(ResearchAction::CpuAffinityProfile),
-        pid: Some(game().pid),
-    }]
-}
-
-/// The normal controller applies the action once and restores it, as the gate observes.
-fn act(gate: &Shared, parent: &ResearchIntentV1) {
-    let now = parent.issued_unix_seconds + 5;
-    assert!(
-        gate.lock()
-            .unwrap()
-            .permit(Some(ResearchAction::CpuAffinityProfile), game(), now)
-    );
-    gate.lock().unwrap().observe_holdings(true, 0, holding());
-    gate.lock().unwrap().observe_runtime(false, 0);
+/// Runs the study to its end while the normal controller applies the action once in every attempt the host sights
+/// (the gate refuses the ones the schedule leaves untreated) and restores it, as the gate observes.
+fn run_acting(
+    runner: &mut DriverStudyAttempts,
+    study: &ChildStudy,
+    gate: &Shared,
+) -> AttemptsOutcome {
+    let (sighted, tokens) = RIG.with(|rig| rig.borrow().clone().expect("a built study"));
+    let mut acted = std::collections::BTreeSet::new();
+    for _ in 0..20_000 {
+        if let Some(outcome) = runner.poll(study, 100).unwrap() {
+            return outcome;
+        }
+        let Some(process) = *sighted.lock().unwrap() else {
+            continue;
+        };
+        let pid = process.pid;
+        if acted.contains(&pid) {
+            continue;
+        }
+        let target = ChildTarget {
+            pid,
+            start_ticks: process.start_ticks,
+            uid: process.uid,
+        };
+        let mut gate = gate.lock().unwrap();
+        if gate.permit(
+            Some(ResearchAction::CpuAffinityProfile),
+            target,
+            ACTED_AT.get(),
+        ) {
+            tokens.store(1, std::sync::atomic::Ordering::SeqCst);
+            gate.observe_holdings(
+                true,
+                0,
+                vec![Holding {
+                    experiment_id: stutter_core::ids::ExperimentId::new("exp-1"),
+                    action: Some(ResearchAction::CpuAffinityProfile),
+                    pid: Some(pid),
+                }],
+            );
+            tokens.store(0, std::sync::atomic::Ordering::SeqCst);
+            gate.observe_runtime(false, 0);
+            acted.insert(pid);
+        }
+    }
+    panic!("the study never ended")
 }
 
 #[test]
 fn a_long_action_study_qualifies_on_its_session_record_and_the_gates_proven_restoration() {
     let (root, mut runner, study, gate, parent) = build(&unit().definition_sha256);
-    assert_eq!(runner.poll(&study, 100).unwrap(), None);
-    act(&gate, &parent);
-    let outcome = run_to_end(&mut runner, &study);
+    let outcome = run_acting(&mut runner, &study, &gate);
     // The session record stands in for the native result everywhere the judgement looks.
     assert!(outcome.raw_verified && outcome.runtime_matched && outcome.context_consistent);
     assert_eq!(outcome.stage_evidence, Some(true));
@@ -215,10 +309,8 @@ fn a_long_action_study_qualifies_on_its_session_record_and_the_gates_proven_rest
 
 #[test]
 fn a_session_that_played_another_unit_cannot_qualify_the_study() {
-    let (_root, mut runner, study, gate, parent) = build(&"b".repeat(64));
-    assert_eq!(runner.poll(&study, 100).unwrap(), None);
-    act(&gate, &parent);
-    let outcome = run_to_end(&mut runner, &study);
+    let (_root, mut runner, study, gate, _parent) = build(&"b".repeat(64));
+    let outcome = run_acting(&mut runner, &study, &gate);
     assert_ne!(
         judge(&study, &outcome).result,
         StudyResult::Qualified,
@@ -245,7 +337,7 @@ fn the_real_route_driver_plays_the_unit_through_the_host_and_the_study_qualifies
     use crate::autotune::research::route_driver::{RouteDriver, RouteStep};
     let phases = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
     // Time moves 2 s per look at the clock, the most the driver allows between polls.
-    let mut now = 50_000u64;
+    let mut now = 5_000u64;
     let route = [("loading", 120), ("travel", 600), ("combat", 480)]
         .into_iter()
         .map(|(phase, seconds)| RouteStep {
@@ -258,13 +350,12 @@ fn the_real_route_driver_plays_the_unit_through_the_host_and_the_study_qualifies
         route,
         Box::new(move || {
             now += 2;
+            ACTED_AT.set(now);
             now
         }),
     );
     let (root, mut runner, study, gate, parent) = build_with(driver);
-    assert_eq!(runner.poll(&study, 100).unwrap(), None);
-    act(&gate, &parent);
-    let outcome = run_to_end(&mut runner, &study);
+    let outcome = run_acting(&mut runner, &study, &gate);
     assert!(outcome.raw_verified && outcome.runtime_matched);
     assert_eq!(outcome.stage_evidence, Some(true));
     let run = judge(&study, &outcome);
@@ -301,10 +392,8 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
     use crate::autotune::research::{
         child_judgement::action_replay, report::AttemptEvidenceV1, treatment::treatments_of,
     };
-    let (root, mut runner, study, gate, parent) = build(&unit().definition_sha256);
-    assert_eq!(runner.poll(&study, 100).unwrap(), None);
-    act(&gate, &parent);
-    let outcome = run_to_end(&mut runner, &study);
+    let (root, mut runner, study, gate, _parent) = build(&unit().definition_sha256);
+    let outcome = run_acting(&mut runner, &study, &gate);
     assert_eq!(judge(&study, &outcome).result, StudyResult::Unqualified);
     let path = root.path().join("studies").join(&study.study_sha256[..16]);
     let dir = std::fs::File::open(&path).unwrap();
@@ -502,10 +591,8 @@ fn a_study_in_which_the_action_was_never_applied_is_a_replayable_justified_abste
 /// A long session's sealed placeholder FPS is never analysed as a measurement.
 #[test]
 fn a_long_action_study_reports_no_numeric_result_from_its_placeholder_fps() {
-    let (root, mut runner, study, gate, parent) = build(&unit().definition_sha256);
-    assert_eq!(runner.poll(&study, 100).unwrap(), None);
-    act(&gate, &parent);
-    run_to_end(&mut runner, &study);
+    let (root, mut runner, study, gate, _parent) = build(&unit().definition_sha256);
+    run_acting(&mut runner, &study, &gate);
     let path = root.path().join("studies").join(&study.study_sha256[..16]);
     let report: serde_json::Value =
         serde_json::from_slice(&std::fs::read(path.join("report.json")).unwrap()).unwrap();
@@ -516,3 +603,6 @@ fn a_long_action_study_reports_no_numeric_result_from_its_placeholder_fps() {
     assert_eq!(result["status"], "ActionMetricUnavailable", "{report}");
     assert!(result["numeric_verdict"].is_null() && result["mean_effect_percent"].is_null());
 }
+
+#[path = "driver_attempts_long_qualified_tests.rs"]
+mod qualified;

@@ -30,6 +30,8 @@ struct Host {
     prefix_refusal: Option<&'static str>,
     /// After this many launches the sighted game process is the given one (a new launch, a new process).
     switch_process: Option<(u32, crate::autotune::research::action_child::ChildTarget)>,
+    /// One game process per launch (the Nth launch is the Nth), when a test needs distinct attempts.
+    processes: Vec<crate::autotune::research::action_child::ChildTarget>,
     /// Every factor set the driver enabled before a study, shared so a test can read it back.
     seen_factors:
         std::sync::Arc<std::sync::Mutex<Vec<Vec<crate::autotune::research::ResearchFactor>>>>,
@@ -55,12 +57,19 @@ impl Host {
             schedule_out: None,
             prefix_refusal: None,
             switch_process: None,
+            processes: Vec::new(),
         }
     }
 }
 
 impl AttemptHost for Host {
     fn game_process(&mut self) -> Option<crate::autotune::research::action_child::ChildTarget> {
+        if !self.processes.is_empty() {
+            return self
+                .processes
+                .get((self.launches as usize).saturating_sub(1))
+                .copied();
+        }
         match self.switch_process {
             Some((after, target)) if self.launches >= after => Some(target),
             _ => self.process,
