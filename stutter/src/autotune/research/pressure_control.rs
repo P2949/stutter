@@ -23,6 +23,16 @@ pub(crate) mod owned_load;
 /// The raw record of the control and the receipt rebuilt from it.
 #[path = "pressure_evidence.rs"]
 pub(crate) mod pressure_evidence;
+/// The control's order of events, halt checks and cleanup, apart from the world it runs in.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged: a real stage (the stand-in target and the runtime's own measurement) is supplied when the incident clears"
+    )
+)]
+#[path = "pressure_runner.rs"]
+pub(crate) mod pressure_runner;
 
 pub use owned_load::LoadRecord;
 pub use pressure_evidence::{EVIDENCE_FILE, PressureControlEvidence, reconstruct};
