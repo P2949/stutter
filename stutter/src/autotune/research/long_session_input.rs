@@ -191,6 +191,23 @@ pub fn driver_from(path: &Path, uid: u32) -> Result<RouteDriver<SessionInput>, &
     .with_save_dir(loaded.save_dir))
 }
 
+/// What the operator needs to authorize a long work unit for this session file: the definition the unit must carry (route,
+/// script and the save as it is now) and the duration, with the phases it covers. Read-only: it hashes the files and sends
+/// nothing to anything.
+pub fn authorization(path: &Path, uid: u32) -> Result<serde_json::Value, &'static str> {
+    let driver = driver_from(path, uid)?;
+    let definition = driver.definition().map_err(|_| "BlockedSaveUnreadable")?;
+    Ok(serde_json::json!({
+        "definition_sha256": definition,
+        "duration_seconds": driver.total_seconds(),
+        "phases": driver
+            .phases()
+            .iter()
+            .map(|step| serde_json::json!({ "phase": step.phase, "seconds": step.seconds }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
 /// The route's input: bound to the attested game when the session starts, and refusing everything before then.
 pub struct SessionInput {
     script: Vec<PhaseScript>,

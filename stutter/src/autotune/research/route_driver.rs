@@ -115,7 +115,7 @@ impl<I: RouteInput> RouteDriver<I> {
 
     /// As `definition_sha256`, with the save the session starts from bound in when the driver has one (an unreadable save
     /// has no definition).
-    fn definition(&self) -> Result<String, &'static str> {
+    pub(crate) fn definition(&self) -> Result<String, &'static str> {
         let route = definition_sha256_of(&self.route, &self.input.script_sha256());
         let Some(dir) = &self.save_dir else {
             return Ok(route);
@@ -145,8 +145,14 @@ impl<I: RouteInput> RouteDriver<I> {
         }
     }
 
-    fn total(&self) -> u64 {
+    /// The route's length in seconds: the duration a work unit for it must carry.
+    pub(crate) fn total_seconds(&self) -> u64 {
         self.route.iter().map(|step| u64::from(step.seconds)).sum()
+    }
+
+    /// The route's phases in order, for the operator who authorizes a unit for it.
+    pub(crate) fn phases(&self) -> &[RouteStep] {
+        &self.route
     }
 
     fn fail(&mut self, code: &'static str) -> LongProgress {
@@ -175,7 +181,7 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
             return Err("BlockedRouteDoesNotMatchTheUnit");
         }
         // The route must be exactly the unit's authorized length, never a shorter one passed off as it.
-        if self.route.is_empty() || self.total() != u64::from(unit.duration_seconds) {
+        if self.route.is_empty() || self.total_seconds() != u64::from(unit.duration_seconds) {
             return Err("BlockedRouteDoesNotMatchTheUnit");
         }
         self.state = Some(Running {

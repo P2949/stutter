@@ -343,3 +343,35 @@ fn a_missing_helper_or_a_game_that_is_no_longer_the_attested_process_fails_the_s
     let _ = child.kill();
     let _ = child.wait();
 }
+
+#[test]
+fn the_authorization_the_operator_reads_is_exactly_the_definition_and_duration_a_unit_must_carry() {
+    let rig = Rig::new();
+    let clock = Arc::new(AtomicU64::new(100));
+    let config = rig.config(|_| {});
+    let authorization = authorization(&config, uid()).unwrap();
+    let unit = unit_for(&driver_on(&config, &clock));
+    assert_eq!(authorization["definition_sha256"], unit.definition_sha256);
+    assert_eq!(authorization["duration_seconds"], 3);
+    assert_eq!(
+        authorization["phases"],
+        serde_json::json!([{ "phase": "travel", "seconds": 2 }, { "phase": "fight", "seconds": 1 }])
+    );
+    // The save as it is now: changing it changes the definition the operator is told to authorize.
+    std::fs::write(rig.save().join("manual.dat"), b"another save").unwrap();
+    assert_ne!(
+        super::authorization(&config, uid()).unwrap()["definition_sha256"],
+        unit.definition_sha256
+    );
+    // A save that cannot be read, or a file that is not valid, is a typed refusal, never a digest.
+    std::fs::remove_dir_all(rig.save()).unwrap();
+    assert_eq!(
+        super::authorization(&config, uid()).err(),
+        Some("BlockedSaveUnreadable")
+    );
+    let bad = rig.config(|v| v["route"] = serde_json::json!([]));
+    assert_eq!(
+        super::authorization(&bad, uid()).err(),
+        Some("LongSessionConfigInvalid")
+    );
+}

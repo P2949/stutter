@@ -39,6 +39,10 @@ pub enum ResearchClientAction {
         intent: PathBuf,
         study_root: PathBuf,
     },
+    /// Print the definition digest and duration a long work unit must carry for a session file. Read-only and local.
+    SessionDefinition {
+        session_file: PathBuf,
+    },
     /// Read what the Stutter units actually run (binary path and hash, active state) and compare it
     /// with the expected pin; write the receipt into the study directory. Read-only and local.
     DeployReceipt {
@@ -194,6 +198,9 @@ fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchReq
         ResearchClientAction::FreezeColdArms { .. } => {
             anyhow::bail!("freeze-cold-arms does not use the resident socket")
         }
+        ResearchClientAction::SessionDefinition { .. } => {
+            anyhow::bail!("session-definition does not use the resident socket")
+        }
         ResearchClientAction::Submit(path) => {
             let parent = path
                 .parent()
@@ -316,6 +323,16 @@ pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     }
     if let ResearchClientAction::FreezeColdArms { intent, study_root } = &input.action {
         return freeze_cold_arms(intent, study_root, uid);
+    }
+    if let ResearchClientAction::SessionDefinition { session_file } = &input.action {
+        let authorization =
+            crate::autotune::research::route_driver::long_session_input::authorization(
+                session_file,
+                uid,
+            )
+            .map_err(|code| anyhow::anyhow!(code))?;
+        println!("{}", serde_json::to_string_pretty(&authorization)?);
+        return Ok(());
     }
     if let ResearchClientAction::DeployReceipt {
         study_root,

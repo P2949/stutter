@@ -62,6 +62,13 @@ enum ResearchCommand {
         #[arg(long)]
         study_root: PathBuf,
     },
+    /// Print the definition digest and duration a long work unit must carry for a session file (the route, the key script
+    /// and the save as it is now). Read-only and local; sends nothing to the game.
+    SessionDefinition {
+        /// The private session file (the one STUTTER_RESEARCH_LONG_SESSION names).
+        #[arg(long)]
+        session_file: PathBuf,
+    },
     /// Record what the Stutter units actually run (binary hash, active state) against an expected
     /// pin, as a receipt in the study directory. Read-only and local.
     DeployReceipt {
@@ -119,6 +126,9 @@ impl From<ResearchArgs> for ResearchClientInput {
             },
             ResearchCommand::FreezeColdArms { intent, study_root } => {
                 ResearchClientAction::FreezeColdArms { intent, study_root }
+            }
+            ResearchCommand::SessionDefinition { session_file } => {
+                ResearchClientAction::SessionDefinition { session_file }
             }
             ResearchCommand::DeployReceipt {
                 study_root,
@@ -263,5 +273,31 @@ mod health_check_tests {
         ] {
             assert!(crate::cli::parse_app_command_from(missing).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod session_definition_tests {
+    use crate::commands::{input::AppCommand, research::ResearchClientAction};
+
+    #[test]
+    fn the_session_definition_is_local_and_needs_the_session_file() {
+        let parsed = crate::cli::parse_app_command_from([
+            "stutter",
+            "research",
+            "session-definition",
+            "--session-file",
+            "/home/u/long-session.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            parsed,
+            AppCommand::Research(input)
+                if matches!(input.action, ResearchClientAction::SessionDefinition { .. })
+        ));
+        assert!(
+            crate::cli::parse_app_command_from(["stutter", "research", "session-definition"])
+                .is_err()
+        );
     }
 }
