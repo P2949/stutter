@@ -24,7 +24,14 @@ fn the_request_numbers_are_the_kernels_for_a_64_bit_little_endian_host() {
     let iow = |nr: u64, size: u64| (1 << 30) | (size << 16) | io(nr);
     assert_eq!(
         crate::syscall::uinput_requests(),
-        [io(1), io(2), iow(3, 92), iow(100, 4), iow(101, 4)]
+        [
+            io(1),
+            io(2),
+            iow(3, 92),
+            iow(100, 4),
+            iow(101, 4),
+            (2 << 30) | (64 << 16) | io(44)
+        ]
     );
 }
 
@@ -34,21 +41,49 @@ fn a_device_with_no_seat_or_on_another_seat_is_never_written_to() {
     assert_eq!(udev_seat("E:ID_INPUT=1\nE:ID_INPUT_KEY=1\n"), "seat0");
     assert_eq!(udev_seat("E:ID_INPUT=1\nE:ID_SEAT=seat7\n"), "seat7");
     // The seat is the attested session's own (seat7): a device must be on exactly that one.
-    let refused =
-        |record: &str| DeviceInjector::new(Vec::<u8>::new(), &seat_for_test(), record).err();
+    let refused = |record: &str| {
+        DeviceInjector::new(Vec::<u8>::new(), &seat_for_test(), record, "input23").err()
+    };
+    let path = "E:DEVPATH=/devices/virtual/input/input23\n";
     assert_eq!(
-        refused("E:ID_INPUT=1\n"),
+        refused(&format!("{path}E:ID_INPUT=1\n")),
         Some("DeviceNotOnTheIsolatedSeat")
     );
     assert_eq!(
-        refused("E:ID_SEAT=seat0\n"),
+        refused(&format!("{path}E:ID_SEAT=seat0\n")),
         Some("DeviceNotOnTheIsolatedSeat")
     );
     assert_eq!(
-        refused("E:ID_SEAT=seat8\n"),
+        refused(&format!("{path}E:ID_SEAT=seat8\n")),
         Some("DeviceNotOnTheIsolatedSeat")
     );
-    assert!(DeviceInjector::new(Vec::<u8>::new(), &seat_for_test(), "E:ID_SEAT=seat7\n").is_ok());
+    let own = "E:DEVPATH=/devices/virtual/input/input23\nE:ID_SEAT=seat7\n";
+    assert!(DeviceInjector::new(Vec::<u8>::new(), &seat_for_test(), own, "input23").is_ok());
+    // The event node of the same device carries the same path prefix and is accepted too.
+    let event = "E:DEVPATH=/devices/virtual/input/input23/event5\nE:ID_SEAT=seat7\n";
+    assert!(DeviceInjector::new(Vec::<u8>::new(), &seat_for_test(), event, "input23").is_ok());
+    // Another device's record, even with the right seat, is not the created device's: a different input number, a path that
+    // only contains the text, no path at all, or a sysname that is not the kernel's form.
+    for (record, sysname) in [
+        (
+            "E:DEVPATH=/devices/virtual/input/input24\nE:ID_SEAT=seat7\n",
+            "input23",
+        ),
+        (
+            "E:DEVPATH=/devices/virtual/input/xinput23\nE:ID_SEAT=seat7\n",
+            "input23",
+        ),
+        ("E:ID_SEAT=seat7\n", "input23"),
+        (own, "input"),
+        (own, "../input23"),
+        (own, ""),
+    ] {
+        assert_eq!(
+            DeviceInjector::new(Vec::<u8>::new(), &seat_for_test(), record, sysname).err(),
+            Some("RecordNotTheCreatedDevices"),
+            "{record:?} {sysname:?}"
+        );
+    }
 }
 
 /// The seat comes from the game's own session, so no caller can name a seat of its choosing, and a game on `seat0` (or on
@@ -96,8 +131,13 @@ fn a_device_on_the_isolated_seat_receives_whole_events_through_the_helper() {
             Ok(())
         }
     }
-    let injector =
-        DeviceInjector::new(Shared(written.clone()), &seat(), "E:ID_SEAT=seat7\n").unwrap();
+    let injector = DeviceInjector::new(
+        Shared(written.clone()),
+        &seat(),
+        "E:DEVPATH=/devices/virtual/input/input23\nE:ID_SEAT=seat7\n",
+        "input23",
+    )
+    .unwrap();
     let mut helper = SeatHelper::new(injector, &seat());
     let mut route = Vec::new();
     route.extend_from_slice(&encode_key(Key::W, true));
@@ -126,4 +166,17 @@ fn creating_a_device_on_a_node_that_is_not_there_fails_without_touching_anything
         UinputDevice::create(std::path::Path::new("/nonexistent/uinput"), &seat()).err(),
         Some("UinputUnavailable")
     );
+}
+
+/// The kernel names the device it created (`UI_GET_SYSNAME`); on a descriptor that is not a uinput device the request is
+/// refused and the name is unavailable, never guessed.
+#[test]
+fn the_created_devices_name_comes_from_the_kernel_and_is_unavailable_on_anything_else() {
+    let not_uinput = std::os::fd::OwnedFd::from(std::fs::File::open("/dev/null").unwrap());
+    assert_eq!(
+        crate::syscall::uinput_sysname(&not_uinput),
+        Err("UinputSysnameUnavailable")
+    );
+    let device = UinputDevice { fd: not_uinput };
+    assert_eq!(device.sysname(), Err("UinputSysnameUnavailable"));
 }

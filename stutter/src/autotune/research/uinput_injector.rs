@@ -31,6 +31,20 @@ impl UinputDevice {
     }
 }
 
+impl UinputDevice {
+    /// The kernel's own name (`inputN`) for this very device: what a udev record must name to be this device's.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "staged: the helper inside the isolated session asks for the name of the device it creates"
+        )
+    )]
+    pub fn sysname(&self) -> Result<String, &'static str> {
+        crate::syscall::uinput_sysname(&self.fd)
+    }
+}
+
 impl Write for UinputDevice {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         let mut file = std::fs::File::from(self.fd.try_clone()?);
@@ -55,6 +69,21 @@ pub fn udev_seat(record: &str) -> String {
         .map_or_else(|| "seat0".to_owned(), |seat| seat.trim().to_owned())
 }
 
+/// Whether the name is the kernel's `inputN` form.
+fn is_input_name(name: &str) -> bool {
+    name.strip_prefix("input")
+        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether the record's kernel path (`E:DEVPATH=`) has `sysname` as one of its components: the input device itself or one of
+/// its children (the `eventN` node), never a device whose path merely contains the text.
+fn udev_devpath_names(record: &str, sysname: &str) -> bool {
+    record
+        .lines()
+        .find_map(|line| line.strip_prefix("E:DEVPATH="))
+        .is_some_and(|path| path.trim().split('/').any(|part| part == sysname))
+}
+
 /// Writes key events to a device proven attached to the isolated seat.
 pub struct DeviceInjector<W: Write> {
     writer: W,
@@ -63,10 +92,20 @@ pub struct DeviceInjector<W: Write> {
 impl<W: Write> DeviceInjector<W> {
     /// `record` is the device\'s own udev record. The seat it must be on is the attested seat's own (the game session's
     /// logind seat), never a name the caller supplies, and that seat is never `seat0` (the live session's).
-    pub fn new(writer: W, seat: &IsolatedSeat, record: &str) -> Result<Self, &'static str> {
+    pub fn new(
+        writer: W,
+        seat: &IsolatedSeat,
+        record: &str,
+        sysname: &str,
+    ) -> Result<Self, &'static str> {
         let name = seat.seat();
         if name.is_empty() || name == "seat0" {
             return Err("IsolatedSeatNameIsTheLiveSeat");
+        }
+        // The record must be the created device's own: its kernel path names the `inputN` the kernel gave the device
+        // (`UI_GET_SYSNAME`), so another device's record, with a seat that happens to be right, is refused.
+        if !is_input_name(sysname) || !udev_devpath_names(record, sysname) {
+            return Err("RecordNotTheCreatedDevices");
         }
         if udev_seat(record) != name {
             return Err("DeviceNotOnTheIsolatedSeat");

@@ -488,6 +488,8 @@ const UI_DEV_DESTROY: libc::c_ulong = 0x5502;
 const UI_DEV_SETUP: libc::c_ulong = 0x405c_5503;
 const UI_SET_EVBIT: libc::c_ulong = 0x4004_5564;
 const UI_SET_KEYBIT: libc::c_ulong = 0x4004_5565;
+/// `UI_GET_SYSNAME(64)`: `_IOR('U', 44, char[64])`, the kernel's own name for the device just created (`inputN`).
+const UI_GET_SYSNAME_64: libc::c_ulong = 0x8040_552c;
 
 /// `struct uinput_setup`: an `input_id`, an 80-byte name and `ff_effects_max`.
 #[repr(C)]
@@ -504,13 +506,14 @@ const _: () = assert!(mem::size_of::<UinputSetup>() == 92);
 
 /// The request numbers, for a test to check against the kernel's encoding.
 #[cfg(test)]
-pub const fn uinput_requests() -> [libc::c_ulong; 5] {
+pub const fn uinput_requests() -> [libc::c_ulong; 6] {
     [
         UI_DEV_CREATE,
         UI_DEV_DESTROY,
         UI_DEV_SETUP,
         UI_SET_EVBIT,
         UI_SET_KEYBIT,
+        UI_GET_SYSNAME_64,
     ]
 }
 
@@ -554,6 +557,30 @@ pub fn uinput_keyboard(
     // SAFETY: the request takes no argument.
     ok &= unsafe { libc::ioctl(raw, UI_DEV_CREATE) } == 0;
     if ok { Ok(fd) } else { Err("UinputSetupFailed") }
+}
+
+/// The kernel's own name (`inputN`) for the device `uinput_keyboard` created, so a udev record can be tied to exactly that
+/// device and no other.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged: the helper inside the isolated session asks for the name of the device it creates"
+    )
+)]
+pub fn uinput_sysname(fd: &std::os::fd::OwnedFd) -> Result<String, &'static str> {
+    use std::os::fd::AsRawFd;
+    let mut name = [0u8; 64];
+    // SAFETY: `name` is a live 64-byte buffer, exactly the size the request encodes, and the descriptor is live.
+    let status = unsafe { libc::ioctl(fd.as_raw_fd(), UI_GET_SYSNAME_64, name.as_mut_ptr()) };
+    if status != 0 {
+        return Err("UinputSysnameUnavailable");
+    }
+    let end = name
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(name.len());
+    String::from_utf8(name[..end].to_vec()).map_err(|_| "UinputSysnameUnavailable")
 }
 
 /// Destroy a device `uinput_keyboard` created (also what closing the descriptor does).
