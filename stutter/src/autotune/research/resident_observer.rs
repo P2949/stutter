@@ -276,6 +276,33 @@ impl ResidentObserver {
         }
     }
 
+    /// One reading of the tools' own D-Bus owner state while the attempt runs: counted for a tool when its bus gave a definite
+    /// answer (running, or not running), never when the bus or the property could not be read.
+    pub fn observe_owner_states(&mut self, states: &crate::integrations::exact::ExactOwnerStates) {
+        use crate::integrations::exact::Exact;
+        let Some(running) = self.running.as_mut() else {
+            return;
+        };
+        let answered = [
+            (
+                "owner_gamemode_samples",
+                !matches!(states.gamemode_clients, Exact::Unreachable(_)),
+            ),
+            (
+                "owner_scx_loader_samples",
+                !matches!(states.scx_loader_scheduler, Exact::Unreachable(_)),
+            ),
+            (
+                "owner_power_profile_samples",
+                !matches!(states.power_profile, Exact::Unreachable(_)),
+            ),
+        ];
+        for (name, counted) in answered {
+            let slot = running.host.entry(name.to_owned()).or_insert(0);
+            *slot = slot.saturating_add(u64::from(counted));
+        }
+    }
+
     /// A planning decision the runtime just emitted about `target_root_pid`: one evaluation of the process, and which
     /// authorized actions it offered (eligible, or the one it selected).
     pub fn observe_decision(

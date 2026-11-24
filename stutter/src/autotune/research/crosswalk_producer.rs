@@ -26,7 +26,7 @@ use super::{
 };
 
 /// The dossiers produced, with the provider that fed each and the raw counter that shows it.
-const PRODUCED: [(&str, &str, &str); 13] = [
+const PRODUCED: [(&str, &str, &str); 16] = [
     ("5.22", "psi-interval-records", "psi_samples"),
     ("5.13", "gpu-sample-events", "gpu_samples"),
     ("5.17", "cpu-frequency-events", "cpu_freq_samples"),
@@ -40,6 +40,17 @@ const PRODUCED: [(&str, &str, &str); 13] = [
     ("5.24", "host-cpu-rdt-flags", "resctrl_absent_samples"),
     ("5.26", "host-io-pressure-files", "io_pressure_samples"),
     ("extra.boot", "host-kernel-cmdline", "boot_cmdline_samples"),
+    ("5.1", "gamemode-dbus-owner-state", "owner_gamemode_samples"),
+    (
+        "5.3",
+        "scx-loader-dbus-owner-state",
+        "owner_scx_loader_samples",
+    ),
+    (
+        "5.4",
+        "power-profiles-dbus-owner-state",
+        "owner_power_profile_samples",
+    ),
 ];
 
 /// Whether the resident runtime produces observation evidence for this dossier at all.

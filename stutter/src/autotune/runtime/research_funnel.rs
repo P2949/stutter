@@ -204,6 +204,7 @@ pub(in crate::autotune::runtime) fn build(
     ));
     let telemetry: SharedTelemetry = Default::default();
     let resident: crate::autotune::research::resident_observer::SharedResident = Default::default();
+    spawn_owner_sampler(&resident);
     // The controller journal's own records of each action, kept as it writes them, and the worker's audit file they are
     // joined to, archived beside each action study.
     let journal_archive: crate::autotune::research::evidence_archive::SharedJournalArchive =
@@ -288,6 +289,35 @@ pub(in crate::autotune::runtime) fn select_funnel_builder(
     Some(Box::new(move |intent, campaign, host| {
         build(&study_dir, socket.as_deref(), intent, campaign, host)
     }))
+}
+
+/// How often the tools' own D-Bus owner state is read while the funnel lives.
+const OWNER_SAMPLE_SECONDS: u64 = 10;
+
+/// A thread that reads GameMode's, `scx_loader`'s and power-profiles-daemon's own owner state every few seconds and hands
+/// it to the resident observer, so a slow or absent bus can never stall the runtime. It ends when the observer is dropped.
+fn spawn_owner_sampler(resident: &crate::autotune::research::resident_observer::SharedResident) {
+    let weak = std::sync::Arc::downgrade(resident);
+    let spawned = std::thread::Builder::new()
+        .name("research-owner-sampler".into())
+        .spawn(move || {
+            while let Some(resident) = weak.upgrade() {
+                let observing = resident
+                    .lock()
+                    .is_ok_and(|observer| observer.is_observing());
+                if observing {
+                    let states = crate::integrations::exact::ExactOwnerStates::read();
+                    if let Ok(mut observer) = resident.lock() {
+                        observer.observe_owner_states(&states);
+                    }
+                }
+                drop(resident);
+                std::thread::sleep(std::time::Duration::from_secs(OWNER_SAMPLE_SECONDS));
+            }
+        });
+    if let Err(error) = spawned {
+        log::warn!("research owner sampler could not start: {error}");
+    }
 }
 
 #[cfg(test)]

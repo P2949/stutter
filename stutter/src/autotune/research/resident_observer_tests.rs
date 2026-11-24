@@ -391,3 +391,24 @@ fn each_interval_the_game_was_seen_in_looks_at_the_hosts_own_files() {
         (12, 12, 0, 12, 0)
     );
 }
+
+/// A tool's owner state counts only when its bus answered (running or not running), never when it could not be read.
+#[test]
+fn an_owner_state_counts_only_when_the_bus_gave_a_definite_answer() {
+    use crate::integrations::exact::{Exact, ExactOwnerStates};
+    let mut observer = ResidentObserver::default();
+    observer.arm(target(), Some(0), 1_010);
+    let states = ExactOwnerStates {
+        gamemode_clients: Exact::Absent,
+        scx_loader_scheduler: Exact::Present("lavd".into()),
+        power_profile: Exact::Unreachable("system bus: NoBusAddress".into()),
+    };
+    for _ in 0..3 {
+        observer.observe_owner_states(&states);
+    }
+    let window = observer.freeze(1_090).remove(0);
+    let count = |name: &str| window.host_samples.get(name).copied();
+    assert_eq!(count("owner_gamemode_samples"), Some(3));
+    assert_eq!(count("owner_scx_loader_samples"), Some(3));
+    assert_eq!(count("owner_power_profile_samples"), Some(0));
+}
