@@ -231,7 +231,7 @@ pub(in crate::autotune::runtime) fn build(
     .with_resident(resident.clone())
     .with_provenance(
         journal_archive,
-        crate::autotune::research::evidence_archive::worker_audit_path(worker_socket),
+        crate::autotune::research::evidence_archive::worker_export_path(worker_socket),
     );
     if let Some(socket) = worker_socket.map(std::path::Path::to_path_buf) {
         attempts = attempts.with_claim_verifier_factory(Box::new(move || {

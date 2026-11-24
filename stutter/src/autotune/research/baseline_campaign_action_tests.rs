@@ -57,7 +57,7 @@ struct Acting {
     /// The controller's own journal of every transaction so far, as the resident runtime archives it.
     journal: Vec<serde_json::Value>,
     /// The privileged worker's own audit events of those transactions, as the resident runtime archives them.
-    worker_audit: Vec<serde_json::Value>,
+    worker_export: crate::autotune::research::evidence_producers::WorkerExport,
 }
 
 impl Acting {
@@ -103,21 +103,21 @@ impl Acting {
                 .join(crate::autotune::research::controller_provenance::FILE);
             std::fs::write(&file, serde_json::to_vec(&self.journal).unwrap()).unwrap();
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
-            // The worker applied the action and rolled it back, and says so in its own audit log.
-            for operation in ["apply_action", "rollback_action"] {
-                self.worker_audit.push(
-                    crate::autotune::research::evidence_producers::worker_audit_event(
-                        "cpu-affinity-profile:game-main",
-                        operation,
-                        now + 1,
-                        12,
-                    ),
-                );
-            }
+            // The worker issued, applied and restored a transaction for this very process, and exports it.
+            self.worker_export.transaction(
+                &format!("tx-{:?}", process.pid),
+                "cpu-affinity-profile:game-main",
+                (process.pid.as_u32(), process.start_ticks),
+                (now, now + 1, now + 1),
+            );
             let file = self
                 .running_study()
                 .join(crate::autotune::research::worker_provenance::FILE);
-            std::fs::write(&file, serde_json::to_vec(&self.worker_audit).unwrap()).unwrap();
+            std::fs::write(
+                &file,
+                serde_json::to_vec(self.worker_export.records()).unwrap(),
+            )
+            .unwrap();
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
     }
@@ -380,7 +380,7 @@ fn build_campaign(
         on_tail_ns: acting.unwrap_or(0),
         applies,
         journal: Vec::new(),
-        worker_audit: Vec::new(),
+        worker_export: Default::default(),
     });
     let results_root = results.path().to_path_buf();
     let clock = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(

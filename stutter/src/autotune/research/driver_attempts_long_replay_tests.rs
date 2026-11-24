@@ -87,28 +87,37 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
         std::fs::write(&file, serde_json::to_vec(value).unwrap()).unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     };
-    // The privileged worker's own audit of the same transactions: its apply and its rollback, at the receipt's own seconds.
-    let worker_of = |items: &[serde_json::Value]| -> Vec<serde_json::Value> {
-        items
-            .iter()
-            .flat_map(|item| {
-                [
-                    ("apply_action", item["applied_unix"].as_u64().unwrap_or(0)),
-                    (
-                        "rollback_action",
-                        item["settled_unix"].as_u64().unwrap_or(0),
-                    ),
-                ]
-            })
-            .map(|(operation, at)| {
-                crate::autotune::research::evidence_producers::worker_audit_event(
-                    "cpu-affinity-profile:game-main",
-                    operation,
-                    at,
-                    12,
-                )
-            })
-            .collect()
+    // The privileged worker's own export of the same transactions, each on the receipt's own process and at its own
+    // seconds. `unrestored` leaves that transaction without its restoration; `foreign` adds an applied transaction on
+    // another process that no receipt accounts for.
+    let worker_of = |items: &[serde_json::Value],
+                     unrestored: Option<usize>,
+                     foreign: bool|
+     -> Vec<serde_json::Value> {
+        let action = "cpu-affinity-profile:game-main";
+        let mut export = crate::autotune::research::evidence_producers::WorkerExport::default();
+        for (index, item) in items.iter().enumerate() {
+            let process = (
+                u32::try_from(item["pid"].as_u64().unwrap_or(0)).unwrap_or(0),
+                item["start_ticks"].as_u64().unwrap_or(0),
+            );
+            let name = format!("tx-{index}");
+            let (permitted, applied, settled) = (
+                item["permitted_unix"].as_u64().unwrap_or(0),
+                item["applied_unix"].as_u64().unwrap_or(0),
+                item["settled_unix"].as_u64().unwrap_or(0),
+            );
+            if unrestored == Some(index) {
+                export.push("prepared", &name, action, process, permitted);
+                export.push("applied", &name, action, process, applied);
+            } else {
+                export.transaction(&name, action, process, (permitted, applied, settled));
+            }
+        }
+        if foreign {
+            export.transaction("tx-foreign", action, (4_242, 5), (5_150, 5_150, 5_151));
+        }
+        export.records().to_vec()
     };
     let write = |items: Vec<serde_json::Value>| {
         put("action-receipts.json", &items);
@@ -118,7 +127,7 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
         );
         put(
             crate::autotune::research::worker_provenance::FILE,
-            &worker_of(&items),
+            &worker_of(&items, None, false),
         );
     };
     let replay = || {
@@ -233,23 +242,14 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
         &journal,
     );
     assert!(!replay(), "a transaction the controller did not restore");
-    // The worker's own audit must corroborate too: no rollback of one transaction, an apply nobody accounts for, or no
+    // The worker's own export must corroborate too: no restoration of one transaction, an apply nobody accounts for, or no
     // audit at all each refuse the replay.
     write(whole.clone());
     assert!(replay());
-    let mut audit = worker_of(&whole);
-    audit.remove(1);
+    let audit = worker_of(&whole, Some(0), false);
     put(crate::autotune::research::worker_provenance::FILE, &audit);
-    assert!(!replay(), "a transaction the worker never rolled back");
-    let mut audit = worker_of(&whole);
-    audit.push(
-        crate::autotune::research::evidence_producers::worker_audit_event(
-            "cpu-affinity-profile:game-main",
-            "apply_action",
-            5_150,
-            12,
-        ),
-    );
+    assert!(!replay(), "a transaction the worker never restored");
+    let audit = worker_of(&whole, None, true);
     put(crate::autotune::research::worker_provenance::FILE, &audit);
     assert!(
         !replay(),

@@ -203,15 +203,66 @@ pub fn action_latency_document(pairs: Vec<Value>) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-/// One boundary decision of the privileged worker in its audit log's format: an allowed, successful `operation` (apply or
-/// rollback) of `action_id` that touched `tasks` tasks, at `at_unix`.
-pub fn worker_audit_event(action_id: &str, operation: &str, at_unix: u64, tasks: usize) -> Value {
-    json!({
-        "schema_version": 1, "unix_nanos": u128::from(at_unix) * 1_000_000_000, "command": "daemon_privilege",
-        "action_id": action_id, "safety_class": "ReversibleLowRisk", "dry_run": false, "success": true,
-        "affected_tasks": tasks, "restore_path": null,
-        "message": format!("stage=execution verdict=allow reason_code=ok caller_role=privileged_worker transport=socket operation={operation} policy_intent=Apply request=apply action_id={action_id} error_category=ok detail=ok"),
-    })
+/// A run of the privileged worker's transaction export, in the format its research export writes: one append-only,
+/// hash-chained record per lifecycle event (`prepared`, `applied`, `restored`, ...), naming the exact transaction and the
+/// process the plan was frozen on. Records are chained from the first one pushed, as the worker chains its own file.
+pub struct WorkerExport {
+    records: Vec<Value>,
+    seq: u64,
+    prev: String,
+}
+
+impl Default for WorkerExport {
+    fn default() -> Self {
+        Self {
+            records: Vec::new(),
+            seq: 0,
+            prev: crate::daemon::privilege::research_export::GENESIS.to_owned(),
+        }
+    }
+}
+
+impl WorkerExport {
+    /// One lifecycle `event` of `transaction` for `action_id` on `process` (pid, start ticks) at `at_unix`.
+    pub fn push(
+        &mut self,
+        event: &str,
+        transaction: &str,
+        action_id: &str,
+        process: (u32, u64),
+        at_unix: u64,
+    ) {
+        let mut body = json!({
+            "seq": self.seq + 1, "prev": self.prev,
+            "unix_nanos": (u128::from(at_unix) * 1_000_000_000).to_string(),
+            "boot_id": "b", "event": event, "transaction": transaction, "action_id": action_id,
+            "operation": "CpuAffinityProfile",
+            "process": { "pid": process.0, "start_ticks": process.1 },
+            "success": true, "dropped_before": 0,
+        });
+        let hash = crate::daemon::privilege::research_export::record_hash(&body);
+        body["hash"] = json!(hash);
+        self.seq += 1;
+        self.prev = hash;
+        self.records.push(body);
+    }
+
+    /// One whole transaction: issued at `prepared`, applied at `applied` and restored at `restored`.
+    pub fn transaction(
+        &mut self,
+        transaction: &str,
+        action_id: &str,
+        process: (u32, u64),
+        (prepared, applied, restored): (u64, u64, u64),
+    ) {
+        self.push("prepared", transaction, action_id, process, prepared);
+        self.push("applied", transaction, action_id, process, applied);
+        self.push("restored", transaction, action_id, process, restored);
+    }
+
+    pub fn records(&self) -> &[Value] {
+        &self.records
+    }
 }
 
 /// One transaction's final record in the controller's own journal format (applied, verified, rolled back), as the

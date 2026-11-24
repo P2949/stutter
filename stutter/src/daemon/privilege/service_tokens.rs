@@ -9,6 +9,8 @@ pub(super) struct ServiceActionService {
     inner: InProcessPrivilegedActionService,
     ledger: PathBuf,
     targets: super::service_targets::ServiceTargets,
+    /// The narrow, controller-readable export of this worker's transaction lifecycle for a research campaign.
+    export: super::research_export::ResearchExport,
 }
 
 /// Settled tokens the ledger keeps as tombstones, so that a repeated restore of a recent token
@@ -53,7 +55,49 @@ impl ServiceActionService {
             ledger: home.join("issued-tokens.json"),
             targets: super::service_targets::ServiceTargets::new(uid, cgroup)
                 .with_fence(home.join(super::validation_fence::FENCE_FILE), 0),
+            export: super::research_export::ResearchExport::disabled(),
         }
+    }
+
+    /// Export the transaction lifecycle into `dir`, the worker's runtime directory (traversable by the controller,
+    /// writable only by this worker). The root-private home and audit stay private.
+    pub(super) fn with_research_export(mut self, dir: &Path) -> Self {
+        self.export = super::research_export::ResearchExport::in_dir(dir);
+        self
+    }
+
+    /// One lifecycle record for the transaction `token` belongs to. Never fails the worker.
+    fn export_event(
+        &self,
+        event: super::research_export::Event,
+        token: &RollbackToken,
+        plan: &PrivilegedWorkerCandidatePlan,
+        boot_id: &str,
+        success: bool,
+    ) {
+        use crate::autotune::planning::candidate::CandidateAction;
+        let process =
+            plan.clone()
+                .into_plan_request()
+                .ok()
+                .and_then(|request| match request.candidate {
+                    CandidateAction::CpuAffinityProfile { plan } => plan
+                        .tree_starttime_ticks
+                        .map(|ticks| (plan.tree_pid, ticks)),
+                    CandidateAction::CgroupPlacement { plan } => {
+                        plan.target_root_pid.zip(plan.target_root_starttime_ticks)
+                    }
+                    _ => None,
+                });
+        self.export.record(super::research_export::Input {
+            event,
+            transaction: &rollback_snapshot_digest(token),
+            boot_id,
+            action_id: plan.descriptor.action_id.as_str(),
+            operation: format!("{:?}", plan.operation),
+            process,
+            success,
+        });
     }
 
     /// Worker restart settles every root-issued token before accepting a new connection. The
@@ -106,6 +150,13 @@ impl ServiceActionService {
             .find(|issued| rollback_snapshot_digest(&issued.token) == digest && !issued.restored)
         {
             issued.restored = true;
+            self.export_event(
+                super::research_export::Event::Voided,
+                &issued.token,
+                &issued.plan,
+                &issued.boot_id,
+                true,
+            );
             crate::audit::append_audit_event_to_path(
                 &self.ledger.with_file_name("token-recovery-audit.jsonl"),
                 &privileged_operation_audit_event(
@@ -179,6 +230,14 @@ impl ServiceActionService {
         }
         compact_settled(&mut tokens);
         self.write(&tokens)?;
+        // Durable before the controller's prepare answer: the export says the transaction was issued.
+        self.export_event(
+            super::research_export::Event::Prepared,
+            token,
+            &PrivilegedWorkerCandidatePlan::from_plan_request(plan),
+            &stutter_core::boot::current_boot_id()?,
+            true,
+        );
         Ok(())
     }
 }
@@ -241,7 +300,22 @@ impl PrivilegedActionService for ServiceActionService {
             }
             barrier
         });
-        self.settle_precommit_abort(outcome, recorded.borrow().as_ref())
+        let result = self.settle_precommit_abort(outcome, recorded.borrow().as_ref());
+        if result.is_ok()
+            && let (Some(token), Ok(boot)) = (
+                recorded.borrow().as_ref(),
+                stutter_core::boot::current_boot_id(),
+            )
+        {
+            self.export_event(
+                super::research_export::Event::Applied,
+                token,
+                &PrivilegedWorkerCandidatePlan::from_plan_request(&plan),
+                &boot,
+                true,
+            );
+        }
+        result
     }
     fn rollback(&self, mut request: RollbackRequest) -> anyhow::Result<RollbackResult> {
         let mut tokens = self.read()?;
@@ -253,6 +327,11 @@ impl PrivilegedActionService for ServiceActionService {
             return Err(PrivilegedWorkerError::ServiceRollbackTokenNotIssued.into());
         };
         let issued = &tokens[index];
+        let (exported_plan, exported_boot, exported_token) = (
+            issued.plan.clone(),
+            issued.boot_id.clone(),
+            issued.token.clone(),
+        );
         anyhow::ensure!(
             stutter_core::boot::valid_boot_id(&issued.boot_id),
             "malformed worker-issued boot identity"
@@ -344,14 +423,35 @@ impl PrivilegedActionService for ServiceActionService {
                 audit(true, "settled")?;
                 tokens[index].restored = true;
                 self.write(&tokens)?;
+                self.export_event(
+                    super::research_export::Event::Restored,
+                    &exported_token,
+                    &exported_plan,
+                    &exported_boot,
+                    true,
+                );
                 Ok(result)
             }
             Ok(_) => {
                 audit(false, "left unresolved")?;
+                self.export_event(
+                    super::research_export::Event::RestoreFailed,
+                    &exported_token,
+                    &exported_plan,
+                    &exported_boot,
+                    false,
+                );
                 Err(PrivilegedWorkerError::ServiceRollbackUnresolved.into())
             }
             Err(error) => {
                 audit(false, &format!("failed ({error:#})"))?;
+                self.export_event(
+                    super::research_export::Event::RestoreFailed,
+                    &exported_token,
+                    &exported_plan,
+                    &exported_boot,
+                    false,
+                );
                 if disposition.unresolved > 0 {
                     // The token stays outstanding: a live task is still in Stutter's state.
                     Err(

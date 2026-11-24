@@ -1,20 +1,31 @@
-//! The privileged worker is the only process that applies and restores the action, and it writes its own boundary
-//! decisions to the audit log (`daemon_privilege` events: the stage, the verdict, the operation and the action id,
-//! with a timestamp from its own clock). The gate's receipts and the controller's journal are both the controller side's
-//! account; this is the worker's. The campaign keeps an archive of the worker's audit events for the study's window
-//! (the production `AuditEvent` type), and the replay joins it to every receipt: inside that receipt's window the worker
-//! allowed exactly one apply of the authorized action's id that touched at least one task and exactly one rollback after
-//! it, both successful and neither a dry run, and the worker allowed no other apply of that action during the study's
-//! attempts, so nothing it did is unaccounted for. The archive is copied from the worker's audit log by the resident
-//! runtime during a physical run; nothing here fabricates one.
+//! The privileged worker is the only process that applies and restores the action. It exports its own account of every
+//! transaction it issued (`daemon::privilege::research_export`): an append-only, hash-chained record of each
+//! transaction's lifecycle naming the exact transaction (the digest of the token the worker issued), the operation and
+//! the target process the plan was frozen on. The gate's receipts and the controller's journal are the controller
+//! side's account; this is the worker's. The campaign archives the contiguous run of the export that covers the
+//! study's attempts, and the replay checks, before it joins anything:
+//!
+//! - the archived run is internally intact: every record's hash matches its body, each chains to the one before it, the
+//!   sequence has no gap, and no record says an earlier write was dropped or the chain restarted;
+//!
+//! and then for every receipt:
+//!
+//! - exactly one transaction of the authorized action was issued for the receipt's own process (pid and start
+//!   ticks), and its lifecycle is, in order, prepared, applied and restored, each successful, inside the receipt's
+//!   window; a transaction of the same action on another process never stands in for it;
+//! - no other transaction of the action was applied during the study's attempts, so nothing the worker did is
+//!   unaccounted for.
+//!
+//! The archive is copied from the worker's export by the resident runtime during a physical run; nothing here
+//! fabricates one.
 
 use serde_json::Value;
 
 use super::{ResearchAction, child_verify::AttemptProcess};
-use crate::audit::AuditEvent;
+use crate::daemon::privilege::research_export::{GENESIS, record_hash};
 
-/// The file, beside the study, holding the archived worker audit events.
-pub const FILE: &str = "worker-audit.json";
+/// The file, beside the study, holding the archived run of the worker's transaction export.
+pub const FILE: &str = "worker-transactions.json";
 /// The worker's clock and the gate's are both whole-second wall clocks read at different moments.
 const SLACK_SECONDS: u64 = 2;
 
@@ -25,85 +36,156 @@ fn prefix(action: ResearchAction) -> &'static str {
     }
 }
 
-fn operation_of(event: &AuditEvent, operation: &str) -> bool {
-    event.command == "daemon_privilege"
-        && event.message.contains(&format!("operation={operation} "))
-        && event.message.contains("verdict=allow")
+fn seconds(record: &Value) -> u64 {
+    record["unix_nanos"]
+        .as_str()
+        .and_then(|nanos| nanos.parse::<u128>().ok())
+        .map_or(u64::MAX, |nanos| {
+            u64::try_from(nanos / 1_000_000_000).unwrap_or(u64::MAX)
+        })
 }
 
-fn seconds(event: &AuditEvent) -> u64 {
-    u64::try_from(event.unix_nanos / 1_000_000_000).unwrap_or(u64::MAX)
+/// Why the archived run is not an intact, gapless stretch of the worker's chain, or `Ok`.
+fn intact(records: &[Value]) -> Result<(), &'static str> {
+    let mut expected: Option<(u64, String)> = None;
+    for record in records {
+        let mut body = record.clone();
+        let Some(hash) = body
+            .as_object_mut()
+            .and_then(|object| object.remove("hash"))
+            .and_then(|hash| hash.as_str().map(str::to_owned))
+        else {
+            return Err("WorkerTransactionsUnreadable");
+        };
+        let (Some(seq), Some(prev)) = (body["seq"].as_u64(), body["prev"].as_str()) else {
+            return Err("WorkerTransactionsUnreadable");
+        };
+        if record_hash(&body) != hash {
+            return Err("WorkerTransactionChainBroken");
+        }
+        if let Some((last_seq, last_hash)) = &expected
+            && (seq != last_seq + 1 || prev != last_hash)
+        {
+            return Err("WorkerTransactionChainBroken");
+        }
+        if body["dropped_before"].as_u64().unwrap_or(0) != 0 {
+            return Err("WorkerTransactionExportLossy");
+        }
+        if body.get("chain_restarted").is_some() || (prev == GENESIS && seq != 1) {
+            return Err("WorkerTransactionExportLossy");
+        }
+        expected = Some((seq, hash));
+    }
+    Ok(())
 }
 
-/// Why the archived worker audit does not corroborate these receipts, or `Ok`.
+/// Why the archived worker transactions do not corroborate these receipts, or `Ok`.
 pub fn verify(
     bytes: &[u8],
     action: ResearchAction,
     receipts: &Value,
     processes: &[AttemptProcess],
 ) -> Result<(), &'static str> {
-    let events: Vec<AuditEvent> =
-        serde_json::from_slice(bytes).map_err(|_| "WorkerAuditUnreadable")?;
-    let receipts = receipts.as_array().ok_or("WorkerAuditUnreadable")?;
-    let mine: Vec<&AuditEvent> = events
+    let records: Vec<Value> =
+        serde_json::from_slice(bytes).map_err(|_| "WorkerTransactionsUnreadable")?;
+    let receipts = receipts.as_array().ok_or("WorkerTransactionsUnreadable")?;
+    intact(&records)?;
+    let mine: Vec<&Value> = records
         .iter()
-        .filter(|event| {
-            event
-                .action_id
-                .as_ref()
-                .is_some_and(|id| id.as_str().starts_with(prefix(action)))
+        .filter(|record| {
+            record["action_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with(prefix(action)))
         })
         .collect();
-    let applies: Vec<&&AuditEvent> = mine
-        .iter()
-        .filter(|event| operation_of(event, "apply_action") && event.success && !event.dry_run)
-        .collect();
-    let rollbacks: Vec<&&AuditEvent> = mine
-        .iter()
-        .filter(|event| operation_of(event, "rollback_action") && event.success && !event.dry_run)
-        .collect();
-    let mut accounted_applies = 0usize;
+    let mut claimed: Vec<&str> = Vec::new();
     for receipt in receipts {
-        let (Some(permitted), Some(settled)) = (
+        let (Some(permitted), Some(settled), Some(pid), Some(start_ticks)) = (
             receipt["permitted_unix"].as_u64(),
             receipt["settled_unix"].as_u64(),
+            receipt["pid"].as_u64(),
+            receipt["start_ticks"].as_u64(),
         ) else {
-            return Err("WorkerAuditDoesNotMatchReceipts");
+            return Err("WorkerTransactionsDoNotMatchReceipts");
         };
         let (from, to) = (
             permitted.saturating_sub(SLACK_SECONDS),
             settled.saturating_add(SLACK_SECONDS),
         );
-        let within = |event: &&&AuditEvent| (from..=to).contains(&seconds(event));
-        let mut applied: Vec<_> = applies.iter().filter(|event| within(event)).collect();
-        let mut restored: Vec<_> = rollbacks.iter().filter(|event| within(event)).collect();
-        let (Some(apply), None) = (applied.pop(), applied.pop()) else {
-            return Err("WorkerAuditDoesNotMatchReceipts");
+        // The transactions of this action issued for exactly this process.
+        let mut transactions: Vec<&str> = mine
+            .iter()
+            .filter(|record| {
+                record["process"]["pid"].as_u64() == Some(pid)
+                    && record["process"]["start_ticks"].as_u64() == Some(start_ticks)
+            })
+            .filter_map(|record| record["transaction"].as_str())
+            .collect();
+        transactions.sort_unstable();
+        transactions.dedup();
+        let Some(&transaction) = transactions.iter().find(|transaction| {
+            mine.iter().any(|record| {
+                record["transaction"].as_str() == Some(**transaction)
+                    && record["event"] == "applied"
+                    && (from..=to).contains(&seconds(record))
+            })
+        }) else {
+            return Err("WorkerTransactionsDoNotMatchReceipts");
         };
-        let (Some(rollback), None) = (restored.pop(), restored.pop()) else {
-            return Err("WorkerAuditNotRestored");
-        };
-        if apply.affected_tasks == 0 {
-            return Err("WorkerAuditAppliedNothing");
+        if claimed.contains(&transaction) {
+            return Err("WorkerTransactionsDoNotMatchReceipts");
         }
-        if rollback.unix_nanos < apply.unix_nanos {
-            return Err("WorkerAuditNotRestored");
+        claimed.push(transaction);
+        // Its lifecycle, in the worker's own order: prepared, then applied, then restored, each successful.
+        let events: Vec<(&str, bool)> = mine
+            .iter()
+            .filter(|record| record["transaction"].as_str() == Some(transaction))
+            .map(|record| {
+                (
+                    record["event"].as_str().unwrap_or(""),
+                    record["success"] == true,
+                )
+            })
+            .collect();
+        let position = |name: &str| events.iter().position(|(event, _)| *event == name);
+        match (
+            position("prepared"),
+            position("applied"),
+            position("restored"),
+        ) {
+            (Some(prepared), Some(applied), Some(restored))
+                if prepared < applied && applied < restored =>
+            {
+                if events
+                    .iter()
+                    .any(|(event, ok)| matches!(*event, "prepared" | "applied" | "restored") && !ok)
+                    || events.iter().any(|(event, _)| *event == "restore_failed")
+                {
+                    return Err("WorkerTransactionNotRestored");
+                }
+            }
+            (Some(_), Some(_), None) => return Err("WorkerTransactionNotRestored"),
+            _ => return Err("WorkerTransactionsDoNotMatchReceipts"),
         }
-        accounted_applies += 1;
     }
-    // An apply the worker allowed during the study's attempts that no receipt accounts for is a foreign action.
-    let during_attempts = |event: &&&AuditEvent| {
+    // A transaction of the action applied during the study's attempts that no receipt claims is a foreign action.
+    let during_attempts = |record: &&&Value| {
         processes.iter().any(|process| {
-            (process.started_unix..=process.completed_unix).contains(&seconds(event))
+            (process.started_unix..=process.completed_unix).contains(&seconds(record))
         })
     };
-    if applies
+    let foreign = mine
         .iter()
-        .filter(|event| during_attempts(event))
-        .count()
-        != accounted_applies
-    {
-        return Err("WorkerAuditHasAnUnaccountedApply");
+        .filter(|record| record["event"] == "applied")
+        .filter(during_attempts)
+        .filter(|record| {
+            record["transaction"]
+                .as_str()
+                .is_none_or(|transaction| !claimed.contains(&transaction))
+        })
+        .count();
+    if foreign != 0 {
+        return Err("WorkerTransactionsHaveAnUnaccountedApply");
     }
     Ok(())
 }

@@ -43,6 +43,7 @@ mod live_fence_tests;
 mod model;
 #[path = "../../../shared/linux_peer/ffi.rs"]
 mod peer;
+pub mod research_export;
 mod revalidate;
 mod service_targets;
 mod service_tokens;

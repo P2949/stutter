@@ -1,13 +1,14 @@
 //! The resident runtime's archivers for the two durable accounts of an action that are not the gate's: the controller's
-//! own journal and the privileged worker's audit log. Both are copied (never edited) beside the action study that
+//! own journal and the privileged worker's research export. Both are copied (never edited) beside the action study that
 //! the records belong to, in the formats `controller_provenance` and `worker_provenance` join to the gate's receipts.
 //!
 //! * The controller journal holds only its latest record and replaces it on every transition, so it cannot be read back
 //!   later. A read-only tap on its durable writes (`set_journal_tap`) keeps the last record seen for each transaction
 //!   as it is written; the tap cannot change or veto a write.
-//! * The worker's audit log is an append-only JSON-lines file; lines are read independently (a torn line from a
-//!   concurrent writer is skipped, never repaired) and only the worker's own `daemon_privilege` events for the
-//!   authorized action's id inside the study's attempts are kept.
+//! * The worker's research export is an append-only, hash-chained JSON-lines file in the worker's runtime directory
+//! (`daemon::privilege::research_export`). Its lines are read whole: a line that cannot be parsed is an error, never
+//! skipped (only an unterminated last line, a write in progress, is set aside), and what is kept is the contiguous run
+//! of the chain that covers the study's attempts, so the replay can tell a complete history from a gap.
 
 use std::{
     path::Path,
@@ -15,15 +16,12 @@ use std::{
 };
 
 use super::{ResearchAction, child_verify::AttemptProcess};
-use crate::{
-    audit::AuditEvent,
-    autotune::controller_journal::{ControllerJournalRecord, set_journal_tap},
-};
+use crate::autotune::controller_journal::{ControllerJournalRecord, set_journal_tap};
 
 /// The most transactions kept (the oldest are dropped first).
 const MAX_RECORDS: usize = 4_096;
-/// The audit file is read from its end up to this many bytes (a campaign's events are recent).
-const MAX_AUDIT_BYTES: u64 = 64 * 1024 * 1024;
+/// The export is read whole up to this many bytes; a larger file cannot be shown complete and is refused.
+const MAX_EXPORT_BYTES: u64 = 64 * 1024 * 1024;
 /// The worker's clock and the attempts' are both wall clocks read at different moments.
 const SLACK_SECONDS: u64 = 5;
 
@@ -93,75 +91,86 @@ fn prefix(action: ResearchAction) -> &'static str {
     }
 }
 
-/// The root worker runs with its own private home (`HOME=/var/lib/stutter/worker-<user>`, mode 0700, root), so its audit
-/// log is under that home, not under the controller user's. The worker's unit and its socket directory name the same user
-/// (`/run/stutter-worker-<user>/worker.sock`), which is how the path is found; any other socket falls back to the
-/// controller's own default.
-pub fn worker_audit_path(worker_socket: Option<&Path>) -> std::path::PathBuf {
-    let user = worker_socket
+/// The worker's research export: in the worker's runtime directory (the socket's own directory), which the controller
+/// can traverse and the worker alone can write. The root-private home and the worker's full audit stay private. A
+/// worker with no socket directory has no export, and the empty path reads as unavailable.
+pub fn worker_export_path(worker_socket: Option<&Path>) -> std::path::PathBuf {
+    worker_socket
         .and_then(Path::parent)
-        .and_then(Path::file_name)
-        .and_then(|name| name.to_str())
-        .and_then(|name| name.strip_prefix("stutter-worker-"))
-        .filter(|user| !user.is_empty() && !user.contains('/'));
-    match user {
-        Some(user) => Path::new("/var/lib/stutter")
-            .join(format!("worker-{user}"))
-            .join(".local/state/stutter/audit/actions.jsonl"),
-        None => crate::audit::default_audit_log_path(),
-    }
+        .map(|dir| dir.join(crate::daemon::privilege::research_export::FILE))
+        .unwrap_or_default()
 }
 
-/// Whether the worker's audit file can be read by this process at all (`Err` carries why not: the worker's home is
-/// private to root unless a deployment shares it).
+/// Whether the worker's export can be read by this process at all (`Err` carries why not).
 pub fn worker_audit_readable(path: &Path) -> Result<(), std::io::ErrorKind> {
     std::fs::File::open(path)
         .map(|_| ())
         .map_err(|error| error.kind())
 }
 
-/// The worker's own audit events for this action inside the study's attempts, from the audit file (`path`). A missing or
-/// unreadable file has none.
-pub fn worker_audit_for(
+/// The contiguous run of the worker's export that covers this action's transactions inside the study's attempts: every
+/// record from the first to the last whose time and action fall in the window, other actions' records between them
+/// included, so the chain can be checked through. A missing file has none; one that cannot be read whole, or any line of
+/// it that is not a record, is an error rather than a silent gap.
+pub fn worker_transactions_for(
     path: &Path,
     action: ResearchAction,
     processes: &[AttemptProcess],
-) -> Vec<AuditEvent> {
-    use std::io::{Read, Seek, SeekFrom};
+) -> Result<Vec<serde_json::Value>, &'static str> {
+    use std::io::Read;
     let (Some(from), Some(to)) = (
         processes.iter().map(|p| p.started_unix).min(),
         processes.iter().map(|p| p.completed_unix).max(),
     ) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let (from, to) = (
         from.saturating_sub(SLACK_SECONDS),
         to.saturating_add(SLACK_SECONDS),
     );
-    let Ok(mut file) = std::fs::File::open(path) else {
-        return Vec::new();
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(_) => return Err("WorkerTransactionsUnreadable"),
     };
-    let length = file.metadata().map_or(0, |meta| meta.len());
-    let start = length.saturating_sub(MAX_AUDIT_BYTES);
     let mut bytes = Vec::new();
-    if file.seek(SeekFrom::Start(start)).is_err()
-        || file.take(MAX_AUDIT_BYTES).read_to_end(&mut bytes).is_err()
-    {
-        return Vec::new();
+    (&mut file)
+        .take(MAX_EXPORT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "WorkerTransactionsUnreadable")?;
+    if bytes.len() as u64 > MAX_EXPORT_BYTES {
+        return Err("WorkerTransactionsTooLarge");
     }
-    bytes
-        .split(|byte| *byte == b'\n')
-        .filter_map(|line| serde_json::from_slice::<AuditEvent>(line).ok())
-        .filter(|event| {
-            let seconds = u64::try_from(event.unix_nanos / 1_000_000_000).unwrap_or(u64::MAX);
-            event.command == "daemon_privilege"
-                && (from..=to).contains(&seconds)
-                && event
-                    .action_id
-                    .as_ref()
-                    .is_some_and(|id| id.as_str().starts_with(prefix(action)))
-        })
-        .collect()
+    let mut lines: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
+    // An unterminated last line is a write in progress, not a record; every other line must be one.
+    if !bytes.ends_with(b"\n") {
+        lines.pop();
+    }
+    let mut records = Vec::new();
+    for line in lines.into_iter().filter(|line| !line.is_empty()) {
+        records.push(
+            serde_json::from_slice::<serde_json::Value>(line)
+                .map_err(|_| "WorkerTransactionsUnreadable")?,
+        );
+    }
+    let covered = |record: &serde_json::Value| {
+        let seconds = record["unix_nanos"]
+            .as_str()
+            .and_then(|nanos| nanos.parse::<u128>().ok())
+            .map_or(u64::MAX, |nanos| {
+                u64::try_from(nanos / 1_000_000_000).unwrap_or(u64::MAX)
+            });
+        (from..=to).contains(&seconds)
+            && record["action_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with(prefix(action)))
+    };
+    let first = records.iter().position(covered);
+    let last = records.iter().rposition(covered);
+    Ok(match (first, last) {
+        (Some(first), Some(last)) => records[first..=last].to_vec(),
+        _ => Vec::new(),
+    })
 }
 
 /// The tap is process-wide, so tests that install it take turns.

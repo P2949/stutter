@@ -17,6 +17,9 @@ StateDirectory=stutter/worker-%i
 StateDirectoryMode=0700
 RuntimeDirectory=stutter-worker-%i
 RuntimeDirectoryMode=0711
+# The worker exports the lifecycle of its transactions into this directory (research-transactions.jsonl, root-written,
+# world-readable, hash-chained); it must survive a restart of the worker or the history would be lost with it.
+RuntimeDirectoryPreserve=restart
 UMask=0077
 NoNewPrivileges=true
 # Only what the Supported affinity and cgroup-placement operations need: adjusting another

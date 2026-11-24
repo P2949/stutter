@@ -30,21 +30,31 @@ impl DriverStudyAttempts {
             .lock()
             .map_err(|_| anyhow::anyhow!("the controller journal archive is poisoned"))?
             .for_processes(&processes);
-        let audit = evidence_archive::worker_audit_for(audit_path, action, &processes);
-        // A worker audit this process is not allowed to read is a stated reason, never a silent absence: the action then has
+        let transactions =
+            evidence_archive::worker_transactions_for(audit_path, action, &processes);
+        // A worker export this process cannot read whole is a stated reason, never a silent absence: the action then has
         // no independent corroboration and does not qualify, and the report can say why.
-        if let Err(kind) = evidence_archive::worker_audit_readable(audit_path)
+        let unavailable = match (
+            &transactions,
+            evidence_archive::worker_audit_readable(audit_path),
+        ) {
+            (Err(why), _) => Some((*why).to_owned()),
+            (_, Err(kind)) => Some(format!("{kind:?}")),
+            _ => None,
+        };
+        if let Some(reason) = unavailable
             && !records.is_empty()
         {
             let note = serde_json::to_vec(&serde_json::json!({
-                "reason": format!("{kind:?}"), "path": audit_path.display().to_string(),
+                "reason": reason, "path": audit_path.display().to_string(),
             }))?;
-            let _ = write_new(study_dir, "worker-audit-unavailable.json", &note);
+            let _ = write_new(study_dir, "worker-transactions-unavailable.json", &note);
         }
-        for (name, bytes) in [
-            (controller_provenance::FILE, serde_json::to_vec(&records)?),
-            (worker_provenance::FILE, serde_json::to_vec(&audit)?),
-        ] {
+        let mut files = vec![(controller_provenance::FILE, serde_json::to_vec(&records)?)];
+        if let Ok(transactions) = &transactions {
+            files.push((worker_provenance::FILE, serde_json::to_vec(transactions)?));
+        }
+        for (name, bytes) in files {
             if records.is_empty() {
                 break;
             }

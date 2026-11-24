@@ -477,6 +477,10 @@ fn the_runtimes_archivers_make_the_controllers_and_the_workers_accounts_that_the
         std::fs::File::create(&audit_path).unwrap();
         let mut runner = runner.with_provenance(archive, audit_path.clone());
         let (journal_for_hook, audit_for_hook) = (journal_path.clone(), audit_path.clone());
+        // The worker's export is one hash chain across every transaction it writes.
+        let export = std::sync::Arc::new(std::sync::Mutex::new(
+            crate::autotune::research::evidence_producers::WorkerExport::default(),
+        ));
         ON_ACT.with(|hook| {
             *hook.borrow_mut() = Some(Box::new(move |target, at| {
                 // The controller walks the transaction to reverted through its real durable journal writer.
@@ -497,17 +501,18 @@ fn the_runtimes_archivers_make_the_controllers_and_the_workers_accounts_that_the
                 value["boot_id"] = serde_json::json!(stutter_core::boot::current_boot_id().unwrap());
                 write_controller_journal_record(&journal_for_hook, &serde_json::from_value(value).unwrap()).unwrap();
                 if worker_shows_the_action {
-                    // The worker appends its own decisions to its audit log.
+                    // The worker appends the lifecycle of the transaction it issued to its research export.
+                    let mut export = export.lock().unwrap();
+                    let before = export.records().len();
+                    export.transaction(
+                        &format!("tx-{:?}", target.pid),
+                        "cpu-affinity-profile:game-main",
+                        (target.pid.as_u32(), target.start_ticks),
+                        (at, at + 1, at + 1),
+                    );
                     let mut file = std::fs::OpenOptions::new().append(true).open(&audit_for_hook).unwrap();
-                    for operation in ["apply_action", "rollback_action"] {
-                        writeln!(
-                            file,
-                            "{}",
-                            crate::autotune::research::evidence_producers::worker_audit_event(
-                                "cpu-affinity-profile:game-main", operation, at + 1, 12,
-                            )
-                        )
-                        .unwrap();
+                    for record in &export.records()[before..] {
+                        writeln!(file, "{record}").unwrap();
                     }
                 }
             }));
@@ -522,7 +527,7 @@ fn the_runtimes_archivers_make_the_controllers_and_the_workers_accounts_that_the
     // The archivers wrote both accounts, and the replay (the same function the live outcome uses) joins them.
     let (outcome, path, _root) = run(true);
     assert_eq!(outcome.stage_evidence, Some(true));
-    for file in ["controller-journal.json", "worker-audit.json"] {
+    for file in ["controller-journal.json", "worker-transactions.json"] {
         assert!(path.join(file).is_file(), "{file} was archived");
     }
     let journal: serde_json::Value =

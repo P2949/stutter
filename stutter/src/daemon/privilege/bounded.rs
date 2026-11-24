@@ -89,6 +89,12 @@ pub fn run_privileged_service_worker(
             .as_ref()
             .and_then(|config| config.validation_workload_cgroup.clone()),
     );
+    // The controller can read the lifecycle of the transactions this worker issues from the worker's runtime directory
+    // (the socket's own directory); the root-private home and audit stay private.
+    let service = match socket_path.parent() {
+        Some(runtime_dir) => service.with_research_export(runtime_dir),
+        None => service,
+    };
     service.recover_issued(&policy)?;
     if recover_only {
         return Ok(());

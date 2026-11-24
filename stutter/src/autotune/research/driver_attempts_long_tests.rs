@@ -255,7 +255,7 @@ fn run_acting(
 ) -> AttemptsOutcome {
     let (sighted, tokens, study_dir) = RIG.with(|rig| rig.borrow().clone().expect("a built study"));
     let mut journal: Vec<serde_json::Value> = Vec::new();
-    let mut worker: Vec<serde_json::Value> = Vec::new();
+    let mut worker = crate::autotune::research::evidence_producers::WorkerExport::default();
     let mut acted = std::collections::BTreeSet::new();
     for _ in 0..20_000 {
         if let Some(outcome) = runner.poll(study, 100).unwrap() {
@@ -317,19 +317,15 @@ fn run_acting(
             let file = study_dir.join(crate::autotune::research::controller_provenance::FILE);
             std::fs::write(&file, serde_json::to_vec(&journal).unwrap()).unwrap();
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
-            // The privileged worker's own audit of the same apply and rollback.
-            for operation in ["apply_action", "rollback_action"] {
-                worker.push(
-                    crate::autotune::research::evidence_producers::worker_audit_event(
-                        "cpu-affinity-profile:game-main",
-                        operation,
-                        ACTED_AT.get() + 1,
-                        12,
-                    ),
-                );
-            }
+            // The privileged worker's own export of the same transaction on this very process.
+            worker.transaction(
+                &format!("tx-{pid:?}"),
+                "cpu-affinity-profile:game-main",
+                (pid.as_u32(), process.start_ticks),
+                (ACTED_AT.get(), ACTED_AT.get() + 1, ACTED_AT.get() + 1),
+            );
             let file = study_dir.join(crate::autotune::research::worker_provenance::FILE);
-            std::fs::write(&file, serde_json::to_vec(&worker).unwrap()).unwrap();
+            std::fs::write(&file, serde_json::to_vec(worker.records()).unwrap()).unwrap();
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
     }

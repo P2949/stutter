@@ -75,71 +75,94 @@ fn the_tap_keeps_the_last_record_the_journal_durably_wrote_for_each_transaction_
 }
 
 #[test]
-fn the_worker_audit_is_read_line_by_line_and_only_its_own_events_for_the_action_inside_the_study_are_kept()
- {
+fn the_worker_export_is_read_whole_and_the_run_covering_the_study_is_kept_with_its_neighbours() {
+    use crate::autotune::research::evidence_producers::WorkerExport;
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("actions.jsonl");
-    let event = |command: &str, action: &str, at: u64| {
-        serde_json::json!({
-            "schema_version": 1, "unix_nanos": u128::from(at) * 1_000_000_000, "command": command,
-            "action_id": action, "dry_run": false, "success": true, "affected_tasks": 3, "restore_path": null,
-            "message": "stage=execution verdict=allow operation=apply_action ",
-        })
-        .to_string()
-    };
-    let mut file = std::fs::File::create(&path).unwrap();
-    for line in [
-        event("daemon_privilege", "cpu-affinity-profile:game", 1_000),
-        event("daemon_privilege", "cgroup:place:x", 1_001),
-        event("agent", "cpu-affinity-profile:game", 1_002),
-        event("daemon_privilege", "cpu-affinity-profile:game", 50_000),
-        // A torn line from a concurrent writer is skipped, never repaired.
-        "{\"schema_version\":1,\"unix_nanos\":1000000000000,\"comm".to_owned(),
-        event("daemon_privilege", "cpu-affinity-profile:game", 1_050),
-    ] {
-        writeln!(file, "{line}").unwrap();
+    let path = dir.path().join("research-transactions.jsonl");
+    let action = "cpu-affinity-profile:game";
+    let mut export = WorkerExport::default();
+    // Before the study, in it (with another action's transaction between), and long after it.
+    export.transaction("before", action, (1, 1), (100, 101, 102));
+    export.transaction("mine", action, (40_000, 77), (1_000, 1_001, 1_002));
+    export.transaction("other", "cgroup:place:x", (2, 2), (1_003, 1_004, 1_005));
+    export.transaction("mine-too", action, (40_000, 77), (1_050, 1_051, 1_052));
+    export.transaction("after", action, (3, 3), (50_000, 50_001, 50_002));
+    let mut text = String::new();
+    for record in export.records() {
+        text.push_str(&format!("{record}\n"));
     }
-    drop(file);
-    let kept = worker_audit_for(&path, ResearchAction::CpuAffinityProfile, &[process(1)]);
+    std::fs::write(&path, &text).unwrap();
+    let kept = worker_transactions_for(
+        &path,
+        ResearchAction::CpuAffinityProfile,
+        &[process(40_000)],
+    )
+    .unwrap();
+    let names: Vec<_> = kept
+        .iter()
+        .map(|r| r["transaction"].as_str().unwrap().to_owned())
+        .collect();
+    // The whole contiguous run from the first to the last covered record, other actions' records included.
     assert_eq!(
-        kept.iter()
-            .map(|e| e.unix_nanos / 1_000_000_000)
-            .collect::<Vec<_>>(),
-        vec![1_000, 1_050]
+        names,
+        [
+            "mine", "mine", "mine", "other", "other", "other", "mine-too", "mine-too", "mine-too"
+        ]
     );
     // No file, or no attempt, has none.
-    assert!(
-        worker_audit_for(
+    assert_eq!(
+        worker_transactions_for(
             &dir.path().join("absent"),
             ResearchAction::CpuAffinityProfile,
             &[process(1)]
-        )
-        .is_empty()
+        ),
+        Ok(Vec::new())
     );
-    assert!(worker_audit_for(&path, ResearchAction::CpuAffinityProfile, &[]).is_empty());
+    assert_eq!(
+        worker_transactions_for(&path, ResearchAction::CpuAffinityProfile, &[]),
+        Ok(Vec::new())
+    );
+    // A line that is not a record is an error, never a silent gap; only an unterminated last line (a write in
+    // progress) is set aside.
+    let mut torn = text.clone();
+    torn.push_str("{\"seq\":99,\"ha");
+    std::fs::write(&path, &torn).unwrap();
+    assert!(
+        worker_transactions_for(
+            &path,
+            ResearchAction::CpuAffinityProfile,
+            &[process(40_000)]
+        )
+        .is_ok()
+    );
+    let garbled = text.replacen('\n', "\nnot a record\n", 1);
+    std::fs::write(&path, garbled).unwrap();
+    assert_eq!(
+        worker_transactions_for(
+            &path,
+            ResearchAction::CpuAffinityProfile,
+            &[process(40_000)]
+        ),
+        Err("WorkerTransactionsUnreadable")
+    );
 }
 
 #[test]
-fn the_workers_audit_is_found_under_its_own_private_home_and_an_unreadable_one_says_why() {
+fn the_workers_export_is_found_in_its_runtime_directory_and_an_unreadable_one_says_why() {
     use std::path::Path;
-    // The socket directory names the user the worker serves; its audit is under that worker's own home.
+    // The export is beside the worker's socket, in the directory the controller can traverse; the worker's private
+    // home and its full audit are not used.
     assert_eq!(
-        worker_audit_path(Some(Path::new("/run/stutter-worker-p2949/worker.sock"))),
-        Path::new("/var/lib/stutter/worker-p2949/.local/state/stutter/audit/actions.jsonl")
+        worker_export_path(Some(Path::new("/run/stutter-worker-p2949/worker.sock"))),
+        Path::new("/run/stutter-worker-p2949/research-transactions.jsonl")
     );
-    // A socket that names no user, or one trying to climb out of the state directory, uses the controller's default.
-    for socket in [
-        None,
-        Some("/tmp/worker.sock"),
-        Some("/run/stutter-worker-/worker.sock"),
-        Some("/run/stutter-worker-a/b/worker.sock"),
-    ] {
-        assert_eq!(
-            worker_audit_path(socket.map(Path::new)),
-            crate::audit::default_audit_log_path(),
-            "{socket:?}"
-        );
-    }
+    // No socket means no export, and the empty path reads as unavailable.
+    let none = worker_export_path(None);
+    assert_eq!(none, Path::new(""));
+    assert_eq!(
+        worker_audit_readable(&none),
+        Err(std::io::ErrorKind::NotFound)
+    );
     assert_eq!(
         worker_audit_readable(Path::new("/proc/self/status")),
         Ok(())
