@@ -26,13 +26,15 @@ use super::{
 };
 
 /// The dossiers produced, with the provider that fed each and the raw counter that shows it.
-const PRODUCED: [(&str, &str, &str); 6] = [
+const PRODUCED: [(&str, &str, &str); 8] = [
     ("5.22", "psi-interval-records", "psi_samples"),
     ("5.13", "gpu-sample-events", "gpu_samples"),
     ("5.17", "cpu-frequency-events", "cpu_freq_samples"),
     ("5.9", "host-cpu-topology-files", "topology_samples"),
     ("5.19", "host-numa-node-online", "single_numa_samples"),
     ("5.20", "host-memory-guard-files", "memory_guard_samples"),
+    ("5.18", "host-irq-affinity-files", "irq_placement_samples"),
+    ("5.16", "host-power-policy-files", "power_policy_samples"),
 ];
 
 /// Whether the resident runtime produces observation evidence for this dossier at all.

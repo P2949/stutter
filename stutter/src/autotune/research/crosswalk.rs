@@ -486,7 +486,7 @@ mod tests {
                     row.observed_reason,
                     if matches!(
                         row.id.as_str(),
-                        "5.9" | "5.13" | "5.17" | "5.19" | "5.20" | "5.22"
+                        "5.9" | "5.13" | "5.16" | "5.17" | "5.18" | "5.19" | "5.20" | "5.22"
                     ) {
                         "ProducedSignalAbsentOrBelowItsFloor"
                     } else {

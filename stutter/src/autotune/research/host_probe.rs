@@ -2,7 +2,9 @@
 //!
 //! * 5.9 CPU topology: the online CPU list and a CPU's thread siblings are readable;
 //! * 5.19 NUMA: the online node list is exactly one node, so no inter-node migration is possible;
-//! * 5.20 memory guardrail: memory PSI, swap and the OOM-kill counter are all readable.
+//! * 5.20 memory guardrail: memory PSI, swap and the OOM-kill counter are all readable;
+//! * 5.18 IRQ placement: the interrupt table and the default affinity mask are readable;
+//! * 5.16 power policy: a CPU's scaling governor and energy-performance preference are readable.
 //!
 //! The root is a parameter so the files can be a fixture's; production reads `/`. A file that is absent, unreadable or not
 //! in the expected shape counts for nothing.
@@ -17,6 +19,8 @@ pub struct HostReadings {
     pub topology: bool,
     pub single_numa_node: bool,
     pub memory_guard: bool,
+    pub irq_placement: bool,
+    pub power_policy: bool,
 }
 
 fn read(root: &Path, relative: &str) -> Option<String> {
@@ -42,10 +46,23 @@ pub fn readings(root: &Path) -> HostReadings {
         && read(root, "proc/swaps").is_some()
         && read(root, "proc/vmstat")
             .is_some_and(|text| text.lines().any(|line| line.starts_with("oom_kill ")));
+    // 5.18: the interrupt table and the default affinity mask are readable.
+    let irq_placement = read(root, "proc/interrupts").is_some_and(|text| text.lines().count() > 1)
+        && read(root, "proc/irq/default_smp_affinity").is_some_and(|text| !text.trim().is_empty());
+    // 5.16: the exact power-policy state: the governor and the energy preference of a CPU.
+    let power_policy = read(root, &format!("{cpu}/cpu0/cpufreq/scaling_governor"))
+        .is_some_and(|text| !text.trim().is_empty())
+        && read(
+            root,
+            &format!("{cpu}/cpu0/cpufreq/energy_performance_preference"),
+        )
+        .is_some_and(|text| !text.trim().is_empty());
     HostReadings {
         topology,
         single_numa_node,
         memory_guard,
+        irq_placement,
+        power_policy,
     }
 }
 

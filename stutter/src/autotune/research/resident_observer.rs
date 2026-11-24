@@ -61,6 +61,8 @@ pub struct AttemptResident {
     pub topology_samples: u64,
     pub single_numa_samples: u64,
     pub memory_guard_samples: u64,
+    pub irq_placement_samples: u64,
+    pub power_policy_samples: u64,
     /// One epoch per interval event of the target, so the stretch while an action was held can be cut out exactly.
     pub epochs: Vec<Epoch>,
     /// The attempt outgrew the epoch bound: no pair is derived from this window.
@@ -113,6 +115,8 @@ struct Running {
     topology: u64,
     single_numa: u64,
     memory_guard: u64,
+    irq_placement: u64,
+    power_policy: u64,
     unattributed: u64,
     guard_events: Vec<GuardEvent>,
     guard_events_truncated: bool,
@@ -168,6 +172,8 @@ impl ResidentObserver {
             topology: 0,
             single_numa: 0,
             memory_guard: 0,
+            irq_placement: 0,
+            power_policy: 0,
             unattributed: 0,
             epochs: Vec::new(),
             epochs_truncated: false,
@@ -282,6 +288,12 @@ impl ResidentObserver {
             running.memory_guard = running
                 .memory_guard
                 .saturating_add(u64::from(host.memory_guard));
+            running.irq_placement = running
+                .irq_placement
+                .saturating_add(u64::from(host.irq_placement));
+            running.power_policy = running
+                .power_policy
+                .saturating_add(u64::from(host.power_policy));
         }
     }
 
@@ -427,6 +439,8 @@ impl ResidentObserver {
                 topology_samples: running.topology,
                 single_numa_samples: running.single_numa,
                 memory_guard_samples: running.memory_guard,
+                irq_placement_samples: running.irq_placement,
+                power_policy_samples: running.power_policy,
                 epochs: running.epochs,
                 epochs_truncated: running.epochs_truncated,
                 guard_events: running.guard_events,
@@ -515,7 +529,8 @@ pub fn window_record(window: &AttemptResident) -> serde_json::Value {
         "epochs": window.epochs, "epochs_truncated": window.epochs_truncated,
         "cpu_samples": window.cpu_samples, "gpu_samples": window.gpu_samples, "cpu_freq_samples": window.cpu_freq_samples,
         "topology_samples": window.topology_samples, "single_numa_samples": window.single_numa_samples,
-        "memory_guard_samples": window.memory_guard_samples,
+        "memory_guard_samples": window.memory_guard_samples, "irq_placement_samples": window.irq_placement_samples,
+        "power_policy_samples": window.power_policy_samples,
         "psi_samples": window.psi_samples, "unattributed_intervals": window.unattributed_intervals, "evaluations": window.evaluations,
         "denied_evaluations": window.denied_evaluations,
         "affinity_candidates": window.affinity_candidates, "cgroup_candidates": window.cgroup_candidates,

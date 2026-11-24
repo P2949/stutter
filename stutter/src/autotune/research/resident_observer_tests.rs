@@ -371,6 +371,8 @@ fn each_interval_the_game_was_seen_in_looks_at_the_hosts_own_files() {
         "0,6\n",
     );
     put("sys/devices/system/node/online", "0\n");
+    put("proc/interrupts", "CPU0\n 0: 1 timer\n");
+    put("proc/irq/default_smp_affinity", "fff\n");
     let mut observer = ResidentObserver::default().with_host_root(host.path().to_path_buf());
     observer.arm(target(), Some(0), 1_010);
     for _ in 0..12 {
@@ -382,8 +384,10 @@ fn each_interval_the_game_was_seen_in_looks_at_the_hosts_own_files() {
         (
             window.topology_samples,
             window.single_numa_samples,
-            window.memory_guard_samples
+            window.memory_guard_samples,
+            window.irq_placement_samples,
+            window.power_policy_samples
         ),
-        (12, 12, 0)
+        (12, 12, 0, 12, 0)
     );
 }
