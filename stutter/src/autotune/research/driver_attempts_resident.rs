@@ -174,10 +174,13 @@ impl DriverStudyAttempts {
                 self.host.tool_file_sha256(off),
             )
         });
+        let first = !self.feature_witness.contains_key(&index);
         let seen =
             self.feature_witness
                 .entry(index)
                 .or_insert((treatment, key, Default::default(), now));
+        // The merged witness is complete only if every scan that went into it was.
+        seen.2.complete = (first || seen.2.complete) && witness.complete;
         seen.2.modules.extend(witness.modules);
         seen.2.devices.extend(witness.devices);
         seen.2.ancestors.extend(witness.ancestors);

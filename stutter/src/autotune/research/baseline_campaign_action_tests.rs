@@ -446,7 +446,11 @@ fn build_campaign(
             .with_witness_reader(Box::new(move |_, _| {
                 let on =
                     *witness_now.lock().unwrap() == Some(crate::autotune::research::Treatment::On);
-                let mut witness = crate::autotune::research::feature_proof::Witness::default();
+                // The fixture's scan read the whole process, as a real one does.
+                let mut witness = crate::autotune::research::feature_proof::Witness {
+                    complete: true,
+                    ..Default::default()
+                };
                 if on {
                     witness.devices.insert("/dev/ntsync".to_owned());
                 }

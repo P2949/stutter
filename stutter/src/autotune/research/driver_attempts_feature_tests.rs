@@ -348,7 +348,11 @@ fn a_feature_study_qualifies_only_on_the_kernels_witness_of_its_backend() {
         }))
         .with_witness_reader(Box::new(move |pid, _watch| {
             let on = witness_schedule.lock().unwrap()[(pid - 7_000) as usize] == Treatment::On;
-            let mut witness = Witness::default();
+            // The fixture's scan read the whole process, as a real one does.
+            let mut witness = Witness {
+                complete: true,
+                ..Default::default()
+            };
             if (on && backend_on) || (!on && backend_off) {
                 match factor {
                     ResearchFactor::WineWayland => {
@@ -500,7 +504,11 @@ fn a_factor_told_apart_by_content_is_proven_through_the_driver_from_the_hosts_to
                 "the content-compared name is the one watched"
             );
             let on = schedule.lock().unwrap()[(pid - 7_000) as usize] == Treatment::On;
-            let mut witness = Witness::default();
+            // The fixture's scan read the whole process, as a real one does.
+            let mut witness = Witness {
+                complete: true,
+                ..Default::default()
+            };
             witness.mapped.insert(
                 "d3d12core.dll".to_owned(),
                 [if on {

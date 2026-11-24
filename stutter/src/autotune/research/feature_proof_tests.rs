@@ -22,6 +22,7 @@ fn schedule() -> Vec<Treatment> {
 fn witness(module: Option<&str>) -> Value {
     json!({
         "modules": module.into_iter().collect::<Vec<_>>(), "devices": ["/dev/null"], "ancestors": ["steam"],
+        "complete": true,
     })
 }
 
@@ -127,7 +128,7 @@ fn the_witness_is_read_from_the_kernels_view_of_a_real_process() {
 
 fn content_witness(mapped: Option<&str>, on: &str, off: &str) -> Value {
     json!({
-        "modules": ["d3d12core.dll"], "devices": [], "ancestors": [],
+        "modules": ["d3d12core.dll"], "devices": [], "ancestors": [], "complete": true,
         "mapped": mapped.map(|hash| json!({ "d3d12core.dll": [hash] })).unwrap_or(json!({})),
         "tool_on_sha256": on, "tool_off_sha256": off,
     })
@@ -216,7 +217,7 @@ fn a_factor_told_apart_by_content_is_proven_by_which_build_the_process_mapped() 
 
 #[test]
 fn either_side_of_the_pulse_driver_proves_the_audio_backend_and_its_absence_proves_the_baseline() {
-    let witness = |module: Option<&str>| json!({ "modules": module.into_iter().collect::<Vec<_>>(), "devices": [], "ancestors": [] });
+    let witness = |module: Option<&str>| json!({ "modules": module.into_iter().collect::<Vec<_>>(), "devices": [], "ancestors": [], "complete": true });
     let record = |on_module: &str| {
         let attempts: Vec<Value> = schedule()
             .iter()
@@ -286,4 +287,56 @@ fn a_watched_mapped_file_is_hashed_from_the_kernels_view_of_the_process() {
     )));
     // A name nobody asked to watch is not hashed.
     assert!(observe(std::process::id(), &[]).unwrap().mapped.is_empty());
+}
+
+/// What a process did not show proves its absence only from a scan that read it whole: an attempt treated Off whose scan
+/// was cut at the bound (or recorded before the scan said so) cannot show the baseline free of the backend. An On attempt's
+/// presence is positive evidence and needs no complete scan.
+#[test]
+fn an_off_attempt_whose_scan_was_not_complete_does_not_show_the_backend_absent() {
+    assert_eq!(check(&record(|_| {})), Ok(()));
+    let off_slot = schedule()
+        .iter()
+        .position(|t| *t == Treatment::Off)
+        .expect("an off attempt");
+    let on_slot = schedule()
+        .iter()
+        .position(|t| *t == Treatment::On)
+        .expect("an on attempt");
+    assert_eq!(
+        check(&record(
+            |v| v["attempts"][off_slot]["witness"]["complete"] = false.into()
+        )),
+        Err("FeatureProofScanIncomplete")
+    );
+    // A record from before the field existed reads as incomplete.
+    assert_eq!(
+        check(&record(|v| {
+            v["attempts"][off_slot]["witness"]
+                .as_object_mut()
+                .unwrap()
+                .remove("complete");
+        })),
+        Err("FeatureProofScanIncomplete")
+    );
+    // The On attempt shows the backend; its own scan being cut does not change that.
+    assert_eq!(
+        check(&record(
+            |v| v["attempts"][on_slot]["witness"]["complete"] = false.into()
+        )),
+        Ok(())
+    );
+}
+
+/// A real scan of a live process says it read the process whole, and a mapped file is hashed only when it is the very
+/// inode the maps line names.
+#[test]
+fn a_real_scan_is_complete_and_a_mapped_file_is_hashed_only_by_its_own_inode() {
+    let witness = observe(std::process::id(), &[]).unwrap();
+    assert!(witness.complete);
+    // A path that leads to some other file than the one mapped has no hash.
+    assert_eq!(
+        mapped_file_sha256(std::process::id(), "/proc/self/status", "1"),
+        None
+    );
 }

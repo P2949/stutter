@@ -106,6 +106,10 @@ pub struct Witness {
     pub tool_on_sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_off_sha256: Option<String>,
+    /// The scan of the process was complete: its maps, descriptors and ancestry were read whole, not cut at the bound.
+    /// The absence of a module, device or ancestor proves nothing from a scan that was not.
+    #[serde(default)]
+    pub complete: bool,
 }
 
 impl Witness {
@@ -144,24 +148,40 @@ fn file_sha256(path: &str) -> Option<String> {
         .map(|bytes| stutter_core::hash::sha256_hex(&bytes))
 }
 
+/// SHA-256 of the file a process really mapped: read through that process's own root (its mount namespace, where a
+/// containerised game's paths mean something), and only when that file has the inode the maps line names. A path that now
+/// leads to another file (replaced since it was mapped) is not the mapped file and has no hash. The device is not compared:
+/// on btrfs the maps line shows the superblock's device and `stat` the subvolume's, so the two never agree there.
+fn mapped_file_sha256(pid: u32, path: &str, inode: &str) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let through_root = format!("/proc/{pid}/root{path}");
+    let meta = std::fs::metadata(&through_root).ok()?;
+    (inode.parse::<u64>().ok()? == meta.ino())
+        .then(|| file_sha256(&through_root))
+        .flatten()
+}
+
 /// Reads the witness of a live process from /proc. `None` when the process cannot be read (gone, or not ours).
 pub fn observe(pid: u32, watch: &[&str]) -> Option<Witness> {
     let mut witness = Witness::default();
+    let mut complete = true;
     for line in std::fs::read_to_string(format!("/proc/{pid}/maps"))
         .ok()?
         .lines()
     {
         if witness.modules.len() >= MAX_ITEMS {
+            complete = false;
             break;
         }
         // address perms offset dev inode path: the path is everything after the fifth field.
-        if let Some(path) = line.split_whitespace().nth(5)
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if let Some(&path) = fields.get(5)
             && let Some(name) = path.rsplit('/').next()
         {
             let name = name.to_ascii_lowercase();
             if watch.contains(&name.as_str())
                 && !path.ends_with("(deleted)")
-                && let Some(hash) = file_sha256(path)
+                && let Some(hash) = mapped_file_sha256(pid, path, fields[4])
             {
                 witness.mapped.entry(name.clone()).or_default().insert(hash);
             }
@@ -170,6 +190,7 @@ pub fn observe(pid: u32, watch: &[&str]) -> Option<Witness> {
     }
     for entry in std::fs::read_dir(format!("/proc/{pid}/fd")).ok()?.flatten() {
         if witness.devices.len() >= MAX_ITEMS {
+            complete = false;
             break;
         }
         if let Ok(target) = std::fs::read_link(entry.path())
@@ -196,6 +217,7 @@ pub fn observe(pid: u32, watch: &[&str]) -> Option<Witness> {
         }
         current = parent;
     }
+    witness.complete = complete;
     Some(witness)
 }
 
@@ -305,6 +327,10 @@ pub fn verify(
             {
                 return Err("FeatureProofOffBuildNotShown");
             }
+        }
+        // What the process did not show proves absence only from a scan that read it whole.
+        if entry.treatment == Treatment::Off && !entry.witness.complete {
+            return Err("FeatureProofScanIncomplete");
         }
         match (entry.treatment, entry.witness.shows(backend)) {
             (Treatment::On, true) => on += 1,
