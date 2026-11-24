@@ -209,20 +209,26 @@ impl<S: EventSink> RouteInput for ScriptedInput<S> {
     }
 
     fn script_sha256(&self) -> String {
-        let mut text = String::new();
-        for script in &self.scripts {
-            text.push_str(&format!("phase:{}\n", script.phase));
-            for step in &script.steps {
-                text.push_str(&format!(
-                    "{}:{}:{}\n",
-                    step.at_ms,
-                    step.key.code(),
-                    step.down
-                ));
-            }
-        }
-        stutter_core::hash::sha256_hex(text.as_bytes())
+        script_sha256_of(&self.scripts)
     }
+}
+
+/// The digest of a key script: phases in order, each step's time, key code and direction. The input that plays the script and
+/// the loader that has only read it must agree on it, so it is one function.
+pub fn script_sha256_of(scripts: &[PhaseScript]) -> String {
+    let mut text = String::new();
+    for script in scripts {
+        text.push_str(&format!("phase:{}\n", script.phase));
+        for step in &script.steps {
+            text.push_str(&format!(
+                "{}:{}:{}\n",
+                step.at_ms,
+                step.key.code(),
+                step.down
+            ));
+        }
+    }
+    stutter_core::hash::sha256_hex(text.as_bytes())
 }
 
 #[cfg(test)]

@@ -71,6 +71,21 @@ pub trait LongSessionDriver {
     fn abort(&mut self) -> anyhow::Result<()>;
 }
 
+impl<D: LongSessionDriver + ?Sized> LongSessionDriver for Box<D> {
+    fn observe_process(&mut self, process: Option<SessionProcess>) {
+        (**self).observe_process(process);
+    }
+    fn start(&mut self, unit: &LongWorkUnit) -> Result<(), &'static str> {
+        (**self).start(unit)
+    }
+    fn poll(&mut self) -> LongProgress {
+        (**self).poll()
+    }
+    fn abort(&mut self) -> anyhow::Result<()> {
+        (**self).abort()
+    }
+}
+
 /// The driver this build has: it cannot play a route, and says so.
 pub struct UnavailableDriver;
 

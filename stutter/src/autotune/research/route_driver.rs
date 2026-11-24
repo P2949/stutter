@@ -32,6 +32,11 @@ pub trait RouteInput: Send {
     }
     /// The route is over or abandoned: stop sending anything.
     fn stop(&mut self);
+    /// The game process the host attested for this session: an input that must prove where it sends (the seat the game
+    /// runs on) does so here, before the route's first phase, and a refusal fails the session. Most inputs have nothing to do.
+    fn bind(&mut self, _process: SessionProcess) -> Result<(), &'static str> {
+        Ok(())
+    }
     /// SHA-256 (hex) of the key script this input plays, so the route and the inputs it sends are one frozen
     /// definition; empty for an input with no script of its own.
     fn script_sha256(&self) -> String {
@@ -87,6 +92,8 @@ struct Running {
 pub struct RouteDriver<I: RouteInput> {
     input: I,
     route: Vec<RouteStep>,
+    /// The save directory the session starts from, hashed anew at every start: the definition names the save as it is.
+    save_dir: Option<std::path::PathBuf>,
     clock: Box<dyn FnMut() -> u64 + Send>,
     observed: Option<SessionProcess>,
     state: Option<Running>,
@@ -95,14 +102,43 @@ pub struct RouteDriver<I: RouteInput> {
 impl<I: RouteInput> RouteDriver<I> {
     /// The digest the work unit must carry for this route and these inputs: phase names and lengths in order,
     /// then the input's own script. A unit that names another definition is not this route.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the operator's authorization of a long work unit asks the driver for the definition it must carry"
+        )
+    )]
     pub fn definition_sha256(&self) -> String {
-        definition_sha256_of(&self.route, &self.input.script_sha256())
+        self.definition().unwrap_or_default()
+    }
+
+    /// As `definition_sha256`, with the save the session starts from bound in when the driver has one (an unreadable save
+    /// has no definition).
+    fn definition(&self) -> Result<String, &'static str> {
+        let route = definition_sha256_of(&self.route, &self.input.script_sha256());
+        let Some(dir) = &self.save_dir else {
+            return Ok(route);
+        };
+        let save = save_identity::save_identity_sha256(dir)?;
+        Ok(save_identity::session_definition_sha256(
+            &self.route,
+            &self.input.script_sha256(),
+            &save,
+        ))
+    }
+
+    /// The session starts from this save directory, and its identity is part of the definition a unit must carry.
+    pub fn with_save_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.save_dir = Some(dir);
+        self
     }
 
     pub fn new(input: I, route: Vec<RouteStep>, clock: Box<dyn FnMut() -> u64 + Send>) -> Self {
         Self {
             input,
             route,
+            save_dir: None,
             clock,
             observed: None,
             state: None,
@@ -134,7 +170,8 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
             return Err("BlockedNoLongSessionDriver");
         }
         // The unit names a definition; this is only that session if route and inputs hash to it.
-        if unit.definition_sha256 != self.definition_sha256() {
+        let definition = self.definition().map_err(|_| "BlockedSaveUnreadable")?;
+        if unit.definition_sha256 != definition {
             return Err("BlockedRouteDoesNotMatchTheUnit");
         }
         // The route must be exactly the unit's authorized length, never a shorter one passed off as it.
@@ -171,6 +208,10 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
                 state.phase_started = now;
                 state.last_poll = now;
                 let first = self.route[0].phase.clone();
+                // The input proves where it sends before anything is sent.
+                if let Err(code) = self.input.bind(process) {
+                    return self.fail(code);
+                }
                 if let Err(code) = self.input.begin_phase(&first) {
                     return self.fail(code);
                 }
@@ -239,15 +280,12 @@ impl<I: RouteInput> LongSessionDriver for RouteDriver<I> {
     }
 }
 
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "staged: the save is hashed when the operator authorizes a long work unit"
-    )
-)]
 #[path = "save_identity.rs"]
 pub(crate) mod save_identity;
+
+/// The production composition: the isolated-session route driver built from the operator's session file.
+#[path = "long_session_input.rs"]
+pub(crate) mod long_session_input;
 
 #[cfg(test)]
 #[path = "route_driver_tests.rs"]

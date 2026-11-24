@@ -204,15 +204,29 @@ fn build_guarded_host(
         )?),
         study_root_for_health,
     );
-    // Long attempts are played by a `LongSessionDriver`; this build has none, so one fails with the
-    // typed `BlockedNoLongSessionDriver` (never run on the benchmark). Every other attempt is untouched.
+    // Long attempts are played by a `LongSessionDriver`. With the operator's session file (the environment variable names
+    // it) the driver is the isolated-session route driver, which sends nothing until the game's own seat is attested; a
+    // file that is named but not valid fails the build of the host rather than falling back. Without one this build has no
+    // driver, so a long attempt fails with the typed `BlockedNoLongSessionDriver` (never run on the benchmark). Every other
+    // attempt is untouched.
+    let driver: Box<dyn super::long_receipt::LongSessionDriver + Send> =
+        match std::env::var_os(super::route_driver::long_session_input::ENV) {
+            Some(path) => Box::new(
+                super::route_driver::long_session_input::driver_from(
+                    std::path::Path::new(&path),
+                    intent.uid,
+                )
+                .map_err(|code| anyhow::anyhow!(code))?,
+            ),
+            None => Box::new(super::route_driver::RouteDriver::new(
+                super::route_driver::UnavailableInput,
+                Vec::new(),
+                Box::new(|| 0),
+            )),
+        };
     Ok(Box::new(super::long_host::LongAttemptHost::new(
         SteamAttemptHost::new(port),
-        super::route_driver::RouteDriver::new(
-            super::route_driver::UnavailableInput,
-            Vec::new(),
-            Box::new(|| 0),
-        ),
+        driver,
     )))
 }
 
