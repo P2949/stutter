@@ -38,6 +38,32 @@ pub const DESTRUCTIVE_CLASSES: [&str; 3] = [
     "gpu_health_halt_settles",
 ];
 
+/// The fixture that injects each destructive fault, by the name of its test: a worker killed with tokens outstanding, a
+/// settings crash and a GPU reset, each against a fixture and never against the real game. A fixture case in a receipt
+/// stands for its class only because one of these tests passes against the binary; a test pins that these tests exist, so the
+/// mapping cannot name a fixture that was renamed or removed.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the producer of a fixture case runs these tests and records the result; until it exists the mapping is pinned by a test"
+    )
+)]
+pub const FIXTURE_TESTS: [(&str, &str); 3] = [
+    (
+        "worker_death_tokens_settled",
+        "a_worker_that_dies_after_the_prepare_is_an_error_with_the_token_already_journaled",
+    ),
+    (
+        "settings_rollback_after_crash",
+        "a_hook_recovers_every_arm_that_a_crash_left_edited",
+    ),
+    (
+        "gpu_health_halt_settles",
+        "a_gpu_reset_stops_the_whole_campaign_and_nothing_launches_again",
+    ),
+];
+
 /// A receipt older than this no longer describes the binary that is deployed.
 pub const MAX_AGE_SECONDS: u64 = 7 * 24 * 60 * 60;
 

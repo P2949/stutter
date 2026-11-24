@@ -227,3 +227,35 @@ fn every_case_must_name_a_real_unmodified_correctly_classified_unshared_record()
         Err("FaultEvidenceUnusable")
     );
 }
+
+/// Every destructive class is proven by a named fixture, and that fixture exists: a mapping to a renamed or removed test
+/// would leave a class with no proof while the receipt still named one.
+#[test]
+fn every_destructive_class_names_a_fixture_test_that_exists() {
+    let classes: Vec<&str> = FIXTURE_TESTS.iter().map(|(class, _)| *class).collect();
+    let mut expected: Vec<&str> = DESTRUCTIVE_CLASSES.to_vec();
+    expected.sort_unstable();
+    let mut named = classes.clone();
+    named.sort_unstable();
+    assert_eq!(named, expected, "exactly the destructive classes");
+    // Every named test is defined, once, in the crate's own sources.
+    fn sources(dir: &std::path::Path, out: &mut String) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                sources(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push_str(&std::fs::read_to_string(&path).unwrap());
+            }
+        }
+    }
+    let mut all = String::new();
+    sources(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut all,
+    );
+    for (class, test) in FIXTURE_TESTS {
+        let defined = all.matches(&format!("fn {test}(")).count();
+        assert_eq!(defined, 1, "{class}: `{test}` must be defined exactly once");
+    }
+}
