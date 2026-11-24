@@ -340,6 +340,13 @@ fn child_rows(response: &Value, with_report: bool) -> Vec<Value> {
                         "completed_attempts": child.get("completed_attempts"),
                         "completed_processes": child.get("completed_processes"),
                     });
+                    // A qualified feature child passed `feature_proof_valid`: backend in use, not a measured effect.
+                    if row["stage"] == "feature"
+                        && row["study_result"] == "qualified"
+                        && row["problem"].is_null()
+                    {
+                        row["feature_evidence"] = "BackendWitnessedInUseNotAMeasuredEffect".into();
+                    }
                     if with_report {
                         row["report"] = child.get("report").cloned().unwrap_or(Value::Null);
                     }

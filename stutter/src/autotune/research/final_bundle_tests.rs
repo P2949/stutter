@@ -587,3 +587,32 @@ fn a_long_action_studys_measured_runnable_latency_result_reaches_the_bundle() {
         "ActionMetricUnavailable"
     );
 }
+
+/// A qualified feature child says its backend was witnessed in use; nothing else does, and none claims an effect.
+#[test]
+fn only_a_qualified_feature_child_without_a_problem_carries_the_backend_in_use_note() {
+    let response = json!({
+        "child_studies": [
+            { "study_sha256": "f1", "profile": "gpu", "stage": {"stage": "feature"}, "result": "qualified" },
+            { "study_sha256": "f2", "profile": "gpu", "stage": {"stage": "feature"}, "result": "unqualified" },
+            { "study_sha256": "a1", "profile": "long", "stage": {"stage": "action"}, "result": "qualified" },
+        ],
+        "child_reports": { "children": [
+            { "study": "f1", "problem": null },
+            { "study": "f2", "problem": null },
+            { "study": "a1", "problem": null },
+        ] },
+    });
+    let notes: Vec<Option<String>> = child_rows(&response, false)
+        .iter()
+        .map(|row| row["feature_evidence"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            Some("BackendWitnessedInUseNotAMeasuredEffect".to_owned()),
+            None,
+            None
+        ]
+    );
+}
