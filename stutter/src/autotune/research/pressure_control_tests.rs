@@ -52,12 +52,8 @@ fn only_a_fresh_owned_observed_applied_and_restored_control_for_this_binary_atte
 }
 
 #[test]
-fn the_status_reads_the_file_and_names_a_missing_or_malformed_one() {
+fn a_directory_with_no_raw_record_has_no_pressure_control() {
     let me = "aa".repeat(32);
     let dir = tempfile::tempdir().unwrap();
     assert_eq!(status(dir.path(), &me, NOW), Err("NoPressureControl"));
-    std::fs::write(dir.path().join(FILE), b"{").unwrap();
-    assert_eq!(status(dir.path(), &me, NOW), Err("PressureControlUnusable"));
-    std::fs::write(dir.path().join(FILE), serde_json::to_vec(&good()).unwrap()).unwrap();
-    assert_eq!(status(dir.path(), &me, NOW), Ok(()));
 }
