@@ -244,6 +244,9 @@ pub fn gate_status(study: &Path, own_binary_sha256: &str, now: u64) -> Result<()
     }
 }
 
+#[path = "fault_fixtures.rs"]
+pub(crate) mod fault_fixtures;
+
 #[cfg(test)]
 #[path = "fault_matrix_tests.rs"]
 mod tests;
