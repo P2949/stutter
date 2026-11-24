@@ -74,6 +74,16 @@ struct SessionFile {
     save_dir: PathBuf,
     helper_socket: PathBuf,
     live: LiveFile,
+    /// How to ask the isolated session's Sway-protocol compositor which window has focus; absent means focus is not checked.
+    #[serde(default)]
+    focus_probe: Option<FocusProbeFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FocusProbeFile {
+    swaymsg: PathBuf,
+    sway_socket: PathBuf,
 }
 
 fn key_named(name: &str) -> Option<Key> {
@@ -172,6 +182,10 @@ pub fn load(path: &Path, uid: u32) -> Result<Loaded, &'static str> {
                 crate::autotune::research::scripted_input::isolated_seat::LOGIND_SESSIONS,
             ),
             uid,
+            focus_probe: parsed
+                .focus_probe
+                .map(|probe| (probe.swaymsg, probe.sway_socket)),
+            game_pid: None,
             inner: None,
         },
         route,
@@ -220,6 +234,10 @@ pub struct SessionInput {
     /// Where logind's session records are read from: the system's directory, unless a test supplies its own.
     logind_dir: PathBuf,
     uid: u32,
+    /// `swaymsg` and the isolated session's socket, when the operator named them.
+    focus_probe: Option<(PathBuf, PathBuf)>,
+    /// The attested game process, once bound.
+    game_pid: Option<u32>,
     inner: Option<ScriptedInput<IsolatedSink<SeatSocketSink>>>,
 }
 
@@ -245,6 +263,17 @@ fn game_environment(process: SessionProcess) -> Result<Vec<u8>, &'static str> {
     Ok(bytes)
 }
 
+impl SessionInput {
+    /// The game, and only the game, has focus in the isolated session; nothing is checked when no probe was named.
+    fn check_focus(&self) -> Result<(), &'static str> {
+        use crate::autotune::research::scripted_input::isolated_seat::isolated_focus;
+        let (Some((swaymsg, socket)), Some(pid)) = (&self.focus_probe, self.game_pid) else {
+            return Ok(());
+        };
+        isolated_focus::game_is_focused(&isolated_focus::query_tree(swaymsg, socket)?, pid)
+    }
+}
+
 #[cfg(test)]
 impl SessionInput {
     /// A directory of session records standing in for logind's.
@@ -265,6 +294,7 @@ impl RouteInput for SessionInput {
         let seat = attest_confirmed(&environ, &self.live, &self.logind_dir, self.uid)?;
         let sink = SeatSocketSink::connect(&self.helper_socket, self.uid, seat.display())?;
         let sink = IsolatedSink::new(sink, &seat)?;
+        self.game_pid = Some(process.pid.as_u32());
         self.inner = Some(ScriptedInput::new(sink, self.script.clone()));
         Ok(())
     }
@@ -274,6 +304,8 @@ impl RouteInput for SessionInput {
     }
 
     fn begin_phase(&mut self, phase: &str) -> Result<(), &'static str> {
+        // No key of a phase is sent while anything but the game has focus in the isolated session.
+        self.check_focus()?;
         self.inner
             .as_mut()
             .ok_or("LongInputNotBound")?

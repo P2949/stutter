@@ -433,3 +433,55 @@ fn a_seat_the_environment_claims_but_logind_does_not_show_fails_the_session_befo
         logind(&config, "seat7");
     }
 }
+
+/// With a focus probe named, no key is sent unless the compositor of the isolated session shows the game itself focused.
+#[test]
+fn no_key_is_sent_while_something_other_than_the_game_has_focus_in_the_isolated_session() {
+    use std::os::unix::fs::PermissionsExt;
+    for game_focused in [true, false] {
+        let rig = Rig::new();
+        let swaymsg = rig.dir.path().join("swaymsg");
+        let socket = rig.dir.path().join("sway.sock");
+        let config = rig.config(|value| {
+            value["focus_probe"] = serde_json::json!({ "swaymsg": swaymsg, "sway_socket": socket });
+        });
+        let helper = rig.helper();
+        let clock = Arc::new(AtomicU64::new(100));
+        let mut driver = driver_on(&config, &clock);
+        let (mut child, process) = game(&OWN_SEAT);
+        let focused = if game_focused {
+            process.pid.as_u32()
+        } else {
+            1
+        };
+        let tree = serde_json::json!({ "id": 1, "type": "root", "nodes": [
+            { "id": 3, "type": "workspace", "name": "1", "nodes": [
+                { "id": 9, "type": "con", "pid": focused, "app_id": "x", "focused": true,
+                  "nodes": [], "floating_nodes": [] }
+            ], "floating_nodes": [] }
+        ], "floating_nodes": [] });
+        std::fs::write(&swaymsg, format!("#!/bin/sh\necho '{tree}'\n")).unwrap();
+        std::fs::set_permissions(&swaymsg, std::fs::Permissions::from_mode(0o700)).unwrap();
+        driver.start(&unit_for(&driver)).unwrap();
+        driver.observe_process(Some(process));
+        let first = driver.poll();
+        if game_focused {
+            assert!(matches!(first, LongProgress::Running), "{first:?}");
+            assert!(driver.abort().is_ok());
+        } else {
+            assert!(
+                matches!(
+                    first,
+                    LongProgress::Failed("GameNotFocusedInTheIsolatedSession")
+                ),
+                "{first:?}"
+            );
+        }
+        drop(driver);
+        let received = helper.join().unwrap();
+        // Nothing reached the helper unless the game was the focused window.
+        assert_eq!(received.is_empty(), !game_focused);
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}

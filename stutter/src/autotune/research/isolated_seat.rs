@@ -157,6 +157,10 @@ impl<S: BoundSink> EventSink for IsolatedSink<S> {
     }
 }
 
+/// Whether the game is the focused window of the isolated session.
+#[path = "isolated_focus.rs"]
+pub(crate) mod isolated_focus;
+
 #[cfg(test)]
 #[path = "isolated_seat_tests.rs"]
 mod tests;
