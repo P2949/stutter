@@ -297,6 +297,11 @@ struct Campaign {
     campaign: File,
 }
 
+thread_local! {
+    /// The active-time authorization of the synthetic campaign (a test lowers it to exercise the reservation).
+    pub(super) static ACTIVE_SECONDS: std::cell::Cell<u32> = const { std::cell::Cell::new(28_000) };
+}
+
 fn campaign_with_an_action() -> Campaign {
     build_campaign(None, None)
 }
@@ -319,7 +324,7 @@ fn build_campaign(
     let mut parent = parent();
     parent.max_evidence_bytes = 256 * 1024 * 1024;
     parent.deadline_unix_seconds = parent.issued_unix_seconds + 40_000;
-    parent.max_active_seconds = 28_000;
+    parent.max_active_seconds = ACTIVE_SECONDS.with(std::cell::Cell::get);
     parent.max_attempts = 400;
     parent.actions = vec![ResearchAction::CpuAffinityProfile];
     parent.factors = factor.into_iter().collect();

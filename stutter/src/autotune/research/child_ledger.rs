@@ -341,6 +341,21 @@ impl ChildLedger {
             .collect()
     }
 
+    /// The least time the mandatory studies still undecided (other than `except`) can take: what an optional study
+    /// must leave untouched.
+    pub fn undecided_mandatory_floor(
+        &self,
+        except: &str,
+        facts: super::driver_attempts::TimeFacts,
+    ) -> u64 {
+        self.plan
+            .iter()
+            .filter(|study| study.is_mandatory() && study.study_sha256 != except)
+            .filter(|study| !self.results.contains_key(&study.study_sha256))
+            .map(|study| study.least_seconds(facts))
+            .fold(0u64, u64::saturating_add)
+    }
+
     /// Every planned study in funnel order with its recorded outcome.
     pub fn dispositions(&self) -> Vec<Disposition> {
         self.plan

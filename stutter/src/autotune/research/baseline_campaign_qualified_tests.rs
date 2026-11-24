@@ -175,3 +175,35 @@ fn a_feature_whose_backend_the_kernel_showed_on_every_treated_attempt_qualifies_
     let tampered = verify_all(&run_of);
     assert!(tampered.children.iter().any(|c| c.problem.is_some()));
 }
+
+/// With too little time left for an action study's worst case beside the mandatory work and the terminal
+/// verification, the optional action study is deferred with its typed reason while the mandatory funnel still runs and
+/// qualifies; the same campaign with the usual authorization runs the action.
+#[test]
+fn an_optional_action_study_is_deferred_when_it_would_consume_the_mandatory_reserve_through_the_whole_campaign()
+ {
+    ACTIVE_SECONDS.with(|seconds| seconds.set(14_000));
+    let mut run_of = campaign_that_acts(1_500_000);
+    run(&mut run_of);
+    ACTIVE_SECONDS.with(|seconds| seconds.set(28_000));
+    let dispositions = run_of.driver.dispositions();
+    let action = dispositions
+        .iter()
+        .find(|d| matches!(d.stage, Stage::Action(_)))
+        .expect("the action study is planned");
+    assert_eq!(
+        action.reason.as_str(),
+        "DeferredMandatoryReserve",
+        "{dispositions:?}"
+    );
+    assert_ne!(action.result, Some(StudyResult::Qualified));
+    let screen = dispositions
+        .iter()
+        .find(|d| matches!(d.stage, Stage::Screen))
+        .unwrap();
+    assert_eq!(
+        screen.result,
+        Some(StudyResult::Qualified),
+        "{dispositions:?}"
+    );
+}

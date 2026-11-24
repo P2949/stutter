@@ -444,6 +444,54 @@ impl ChildStudy {
     }
 }
 
+/// Seconds held back for what follows the last study: the final verification, the restoration of anything still
+/// applied and the report. An optional study is admitted only while this and the mandatory work still to run fit.
+pub(crate) const TERMINAL_RESERVE_SECONDS: u64 = 600;
+
+impl ChildStudy {
+    /// Whether the study is part of the campaign's mandatory funnel. The action and feature studies are optional
+    /// experiments: they are deferred, never allowed to take the time the mandatory work still needs.
+    pub(crate) fn is_mandatory(&self) -> bool {
+        !matches!(self.stage, Stage::Action(_) | Stage::Feature(_))
+    }
+
+    /// The least time the study can take, from the frozen attempt floor.
+    pub(crate) fn least_seconds(&self, facts: super::driver_attempts::TimeFacts) -> u64 {
+        let least = if self.profile == Profile::Long {
+            facts.long_min
+        } else {
+            facts.short_min
+        };
+        u64::from(self.least_attempts()).saturating_mul(least)
+    }
+
+    /// The most time the study can take, from its attempt count and the attempt ceiling.
+    pub(crate) fn worst_case_seconds(&self, facts: super::driver_attempts::TimeFacts) -> u64 {
+        let most = if self.profile == Profile::Long {
+            facts.long_max
+        } else {
+            facts.short_max
+        };
+        u64::from(self.min_attempts).saturating_mul(most)
+    }
+}
+
+/// Whether admitting `study` would consume the time the still-undecided mandatory studies and the terminal work need.
+/// Only an optional study is ever refused here: mandatory work runs whenever it is not impossible. An optional study's
+/// worst case must fit beside the least the mandatory remainder and the terminal reserve need.
+pub(crate) fn would_consume_the_mandatory_reserve(
+    study: &ChildStudy,
+    facts: super::driver_attempts::TimeFacts,
+    mandatory_floor: u64,
+) -> bool {
+    !study.is_mandatory()
+        && study
+            .worst_case_seconds(facts)
+            .saturating_add(mandatory_floor)
+            .saturating_add(TERMINAL_RESERVE_SECONDS)
+            > facts.remaining
+}
+
 pub(crate) fn time_feasibility(
     study: &ChildStudy,
     facts: super::driver_attempts::TimeFacts,

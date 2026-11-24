@@ -354,6 +354,9 @@ impl FunnelDriver {
             Err(code) => return Ok(Step::Halted(code)),
         };
         let (blocker, selection) = (self.blocker, self.selection.as_ref());
+        // Only an optional study is ever refused by the reserve, and an optional study is not part of the mandatory sum,
+        // so one floor taken before the step serves every study the step considers.
+        let mandatory_floor = self.runner.ledger().undecided_mandatory_floor("", facts);
         let combined = |study: &ChildStudy| {
             blocker(study)
                 .or_else(|| selection.and_then(|select| select(study)))
@@ -361,6 +364,16 @@ impl FunnelDriver {
                     (super::child_study::time_feasibility(study, facts)
                         == super::child_study::TimeFeasibility::Impossible)
                         .then_some("DeferredActiveTime")
+                })
+                // An optional study is re-judged at every tick, so at each safe boundary: it is deferred when its worst
+                // case would eat into what the mandatory work and the terminal verification still need.
+                .or_else(|| {
+                    super::child_study::would_consume_the_mandatory_reserve(
+                        study,
+                        facts,
+                        mandatory_floor,
+                    )
+                    .then_some("DeferredMandatoryReserve")
                 })
         };
         let step =

@@ -337,3 +337,49 @@ fn authorized_attempt_limit_is_enforced_on_write_and_replay() {
     let handle = File::open(root.path().join("child-studies")).unwrap();
     assert!(ChildLedger::open_with_limit(handle, uid, plan, Some(limit - 1)).is_err());
 }
+
+/// What an optional study must leave untouched is the least time of the mandatory studies still undecided: it shrinks
+/// as the funnel decides them, never includes an optional study, and excludes the study being considered.
+#[test]
+fn the_mandatory_floor_shrinks_as_the_funnel_decides_its_studies_and_never_counts_optional_ones() {
+    use crate::autotune::research::driver_attempts::TimeFacts;
+    let facts = TimeFacts {
+        remaining: u64::MAX / 2,
+        short_min: 60,
+        long_min: 1_200,
+        short_max: 600,
+        long_max: 1_800,
+    };
+    let (_root, handle) = dir();
+    let plan = studies();
+    let mut ledger = ChildLedger::open(handle, crate::syscall::geteuid(), plan.clone()).unwrap();
+    let all: u64 = plan
+        .iter()
+        .filter(|s| s.is_mandatory())
+        .map(|s| s.least_seconds(facts))
+        .sum();
+    assert!(
+        plan.iter().any(|s| !s.is_mandatory()),
+        "an optional study is planned"
+    );
+    assert_eq!(ledger.undecided_mandatory_floor("", facts), all);
+    // Deciding the first mandatory study removes exactly its own least time from the floor.
+    let first = ledger.next_runnable(100, &|_| None).unwrap().unwrap();
+    assert!(first.is_mandatory());
+    ledger
+        .record_run(&first, StudyResult::Qualified, "", first.min_attempts)
+        .unwrap();
+    assert_eq!(
+        ledger.undecided_mandatory_floor("", facts),
+        all - first.least_seconds(facts)
+    );
+    // The study under consideration is never counted against itself.
+    let next = plan
+        .iter()
+        .find(|s| s.is_mandatory() && s.study_sha256 != first.study_sha256)
+        .unwrap();
+    assert_eq!(
+        ledger.undecided_mandatory_floor(&next.study_sha256, facts),
+        all - first.least_seconds(facts) - next.least_seconds(facts)
+    );
+}

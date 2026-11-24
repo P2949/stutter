@@ -167,3 +167,56 @@ fn the_time_left_to_the_deadline_bounds_the_admission_when_it_is_less_than_the_a
         u64::from(runner.parent.max_active_seconds)
     );
 }
+
+/// An optional study (an action or a feature) is admitted only while its worst case fits beside the least the
+/// undecided mandatory studies and the terminal verification need; mandatory work is never refused by the reserve.
+#[test]
+fn an_optional_study_is_deferred_when_its_worst_case_would_consume_the_mandatory_reserve() {
+    use crate::autotune::research::{
+        ResearchAction,
+        child_study::{TERMINAL_RESERVE_SECONDS, would_consume_the_mandatory_reserve},
+        driver_attempts::TimeFacts,
+    };
+    let mut parent = super::parent();
+    parent.actions = vec![ResearchAction::CpuAffinityProfile];
+    let studies = plan(&parent).unwrap();
+    let action = studies
+        .iter()
+        .find(|s| matches!(s.stage, Stage::Action(_)))
+        .expect("an action study is planned");
+    let mandatory = studies.iter().find(|s| s.is_mandatory()).unwrap();
+    assert!(!action.is_mandatory());
+    let facts = |remaining| TimeFacts {
+        remaining,
+        short_min: 60,
+        long_min: 1_200,
+        short_max: 600,
+        long_max: 1_800,
+    };
+    let worst = action.worst_case_seconds(facts(0));
+    let floor = 5_000;
+    let needed = worst + floor + TERMINAL_RESERVE_SECONDS;
+    // Exactly enough for the worst case beside the reserve: admitted; one second short: deferred.
+    assert!(!would_consume_the_mandatory_reserve(
+        action,
+        facts(needed),
+        floor
+    ));
+    assert!(would_consume_the_mandatory_reserve(
+        action,
+        facts(needed - 1),
+        floor
+    ));
+    // With no mandatory work left the reserve is only the terminal verification.
+    assert!(!would_consume_the_mandatory_reserve(
+        action,
+        facts(worst + TERMINAL_RESERVE_SECONDS),
+        0
+    ));
+    // Mandatory work is never refused by the reserve, however little time is left.
+    assert!(!would_consume_the_mandatory_reserve(
+        mandatory,
+        facts(1),
+        floor
+    ));
+}
