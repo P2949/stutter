@@ -68,6 +68,7 @@ fn a_long_action_study_with_its_sealed_latency_measurement_qualifies_and_replays
         .expect("the collectors' windows make a valid record")
     };
     // The raw windows the record derives from, beside the study, as the resident runtime keeps them.
+    super::latency_fixtures::write_guard_events(&path, &windows(20_000_000, 1_500_000));
     let raw: Vec<_> = windows(20_000_000, 1_500_000)
         .iter()
         .map(crate::autotune::research::resident_observer::window_record)
@@ -361,6 +362,7 @@ fn the_latency_record_is_derived_from_the_runtimes_own_events_and_decides_throug
         let mut schedule: Option<Vec<Treatment>> = None;
         let mut elapsed = 0u64;
         let mut outcome = None;
+        let mut steps = 0u64;
         for _ in 0..20_000 {
             if let Some(done) = runner.poll(&study, 100).unwrap() {
                 outcome = Some(done);
@@ -380,6 +382,7 @@ fn the_latency_record_is_derived_from_the_runtimes_own_events_and_decides_throug
             };
             // The normal controller applies the action once in every attempt the gate allows, and restores it.
             if acted.insert(process.pid) {
+                steps = 0;
                 act_once(&gate, process);
             }
             // The action shortens the runnable tail from 20 ms to 1.5 ms in every attempt treated On.
@@ -395,6 +398,9 @@ fn the_latency_record_is_derived_from_the_runtimes_own_events_and_decides_throug
             let mut guard = resident.lock().unwrap();
             for _ in 0..4 {
                 elapsed += 1_000;
+                steps += 1;
+                // The events of one step were seen at the second its interval event was (the test clock walks per call).
+                let at = 5_000 + (steps * 20).min(1_190);
                 guard.observe_intervals(
                     &[IntervalRecord {
                         elapsed_ms: elapsed,
@@ -408,25 +414,34 @@ fn the_latency_record_is_derived_from_the_runtimes_own_events_and_decides_throug
                     0,
                 );
                 for frame in 0..100 {
-                    guard.observe_frame(&FrameEvent {
-                        elapsed_ms: elapsed,
-                        frametime_ms: 12.0 + f64::from(frame % 3),
-                    });
+                    guard.observe_frame_at(
+                        &FrameEvent {
+                            elapsed_ms: elapsed,
+                            frametime_ms: 12.0 + f64::from(frame % 3),
+                        },
+                        at,
+                    );
                 }
-                guard.observe_gpu(&GpuSample {
-                    elapsed_ms: elapsed,
-                    gpu_busy_percent: Some(60),
-                    gpu_clock_mhz: Some(2_000),
-                    temp_millidegrees: Some(60_000),
-                    ..Default::default()
-                });
-                if with_cpu_freq {
-                    guard.observe_cpu_freq(&CpuFreqRecord {
+                guard.observe_gpu_at(
+                    &GpuSample {
                         elapsed_ms: elapsed,
-                        cpu: 0,
-                        freq_khz: 4_000_000,
-                        timestamp_ns: 0,
-                    });
+                        gpu_busy_percent: Some(60),
+                        gpu_clock_mhz: Some(2_000),
+                        temp_millidegrees: Some(60_000),
+                        ..Default::default()
+                    },
+                    at,
+                );
+                if with_cpu_freq {
+                    guard.observe_cpu_freq_at(
+                        &CpuFreqRecord {
+                            elapsed_ms: elapsed,
+                            cpu: 0,
+                            freq_khz: 4_000_000,
+                            timestamp_ns: 0,
+                        },
+                        at,
+                    );
                 }
             }
         }

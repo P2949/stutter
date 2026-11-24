@@ -61,6 +61,10 @@ pub struct AttemptResident {
     pub epochs: Vec<Epoch>,
     /// The attempt outgrew the epoch bound: no pair is derived from this window.
     pub epochs_truncated: bool,
+    /// The raw frame, GPU and CPU frequency events behind the guard facts, each with the second it was seen.
+    pub guard_events: Vec<GuardEvent>,
+    /// The attempt outgrew the event bound: no guard facts are cut from this window.
+    pub guard_events_truncated: bool,
     /// Interval records of the window that carried no process identity: while any exists, the resource owners are not
     /// all identified (a scheduler interval alone does not say who owns the load).
     pub unattributed_intervals: u64,
@@ -103,6 +107,8 @@ struct Running {
     cpu_freq: u64,
     psi: u64,
     unattributed: u64,
+    guard_events: Vec<GuardEvent>,
+    guard_events_truncated: bool,
     epochs: Vec<Epoch>,
     epochs_truncated: bool,
     evaluations: u64,
@@ -153,6 +159,8 @@ impl ResidentObserver {
             unattributed: 0,
             epochs: Vec::new(),
             epochs_truncated: false,
+            guard_events: Vec::new(),
+            guard_events_truncated: false,
             evaluations: 0,
             denied_evaluations: 0,
             affinity_candidates: 0,
@@ -164,6 +172,10 @@ impl ResidentObserver {
     pub fn observe_intervals(&mut self, records: &[IntervalRecord], lost_events: u64) {
         let at = self.clock.map_or_else(unix_now, |clock| clock());
         self.observe_intervals_at(records, lost_events, at);
+    }
+
+    fn now(&self) -> u64 {
+        self.clock.map_or_else(unix_now, |clock| clock())
     }
 
     /// A clock for the epochs (unix seconds), where the system's is not the one the caller means.
@@ -311,45 +323,61 @@ impl ResidentObserver {
 
     /// A GPU sample event: counted, and held for the thermal and power guards.
     pub fn observe_gpu(&mut self, sample: &GpuSample) {
+        let at = self.now();
+        self.observe_gpu_at(sample, at);
+    }
+
+    /// As `observe_gpu`, for a sample seen at `at` (unix seconds).
+    pub fn observe_gpu_at(&mut self, sample: &GpuSample, at: u64) {
         self.observe_gpu_sample();
         if let Some(running) = self.running.as_mut() {
             running.window.push_gpu_sample(sample.clone());
+            running.keep(GuardEvent::Gpu {
+                at,
+                sample: sample.clone(),
+            });
         }
     }
 
     /// A frame event while the attempt runs, held for the foreground frame-tail guard.
     pub fn observe_frame(&mut self, frame: &FrameEvent) {
+        let at = self.now();
+        self.observe_frame_at(frame, at);
+    }
+
+    /// As `observe_frame`, for a frame seen at `at` (unix seconds).
+    pub fn observe_frame_at(&mut self, frame: &FrameEvent, at: u64) {
         if let Some(running) = self.running.as_mut() {
             running.window.push_frame(frame.clone());
+            running.keep(GuardEvent::Frame {
+                at,
+                event: frame.clone(),
+            });
         }
     }
 
     /// A CPU frequency event while the attempt runs, held for the power guard.
     pub fn observe_cpu_freq(&mut self, event: &CpuFreqRecord) {
+        let at = self.now();
+        self.observe_cpu_freq_at(event, at);
+    }
+
+    /// As `observe_cpu_freq`, for an event seen at `at` (unix seconds).
+    pub fn observe_cpu_freq_at(&mut self, event: &CpuFreqRecord, at: u64) {
         if let Some(running) = self.running.as_mut() {
             running.cpu_freq = running.cpu_freq.saturating_add(1);
             running.window.push_cpu_freq_event(event.clone());
+            running.keep(GuardEvent::CpuFreq {
+                at,
+                event: event.clone(),
+            });
         }
     }
 
     /// The attempt ended (or its process is gone): keep its window.
     pub fn end_attempt(&mut self, now_unix: u64) {
         if let Some(running) = self.running.take() {
-            let members = std::collections::BTreeSet::from([running.target.pid.as_u32()]);
-            let signals = running
-                .window
-                .objective_signals_for_target(running.target.pid.as_u32(), &members);
-            let guards = (|| {
-                Some(GuardFacts {
-                    frame_p99_ms: signals.frame_p99_ms?,
-                    frame_samples: signals.frame_samples?,
-                    foreground_over_5ms: signals.foreground_over_5ms?,
-                    thermal_degraded: signals.thermal_degraded?,
-                    thermal_throttle_count: signals.thermal_throttle_count?,
-                    cpu_power_limited: signals.cpu_power_limited?,
-                    gpu_power_limited: signals.gpu_power_limited?,
-                })
-            })();
+            let guards = guard_events::facts_of(&running.window, running.target.pid.as_u32());
             self.finished.push(AttemptResident {
                 target: running.target,
                 cgroup: running.cgroup,
@@ -368,6 +396,8 @@ impl ResidentObserver {
                 psi_samples: running.psi,
                 epochs: running.epochs,
                 epochs_truncated: running.epochs_truncated,
+                guard_events: running.guard_events,
+                guard_events_truncated: running.guard_events_truncated,
                 unattributed_intervals: running.unattributed,
                 evaluations: running.evaluations,
                 denied_evaluations: running.denied_evaluations,
@@ -498,6 +528,21 @@ pub fn resident_entry(
     }
     collector.finish(window.ended_unix)
 }
+
+impl Running {
+    /// Keep a guard event, or note that the bound is passed.
+    fn keep(&mut self, event: GuardEvent) {
+        if self.guard_events.len() >= guard_events::MAX_EVENTS {
+            self.guard_events_truncated = true;
+        } else {
+            self.guard_events.push(event);
+        }
+    }
+}
+
+#[path = "guard_events.rs"]
+pub(crate) mod guard_events;
+use guard_events::GuardEvent;
 
 #[cfg(test)]
 #[path = "resident_observer_tests.rs"]

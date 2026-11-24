@@ -75,6 +75,16 @@ pub(crate) fn write_new_bounded(
 }
 
 pub(crate) fn read_private(dir: &File, name: &str, uid: u32) -> anyhow::Result<Vec<u8>> {
+    read_private_bounded(dir, name, uid, MAX_FILE)
+}
+
+/// As `read_private` for a larger record, with the caller's own size bound.
+pub(crate) fn read_private_bounded(
+    dir: &File,
+    name: &str,
+    uid: u32,
+    max: u64,
+) -> anyhow::Result<Vec<u8>> {
     let file = crate::syscall::openat_nofollow(dir.as_fd(), name)?;
     let meta = file.metadata()?;
     anyhow::ensure!(
@@ -82,11 +92,11 @@ pub(crate) fn read_private(dir: &File, name: &str, uid: u32) -> anyhow::Result<V
             && meta.uid() == uid
             && meta.nlink() == 1
             && meta.mode() & 0o077 == 0
-            && meta.len() <= MAX_FILE,
+            && meta.len() <= max,
         "untrusted campaign record"
     );
     let mut bytes = Vec::new();
-    (&file).take(MAX_FILE + 1).read_to_end(&mut bytes)?;
+    (&file).take(max + 1).read_to_end(&mut bytes)?;
     anyhow::ensure!(
         bytes.len() as u64 == meta.len(),
         "campaign record changed while reading"

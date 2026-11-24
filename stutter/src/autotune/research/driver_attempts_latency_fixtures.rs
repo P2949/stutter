@@ -68,24 +68,33 @@ pub(super) fn fixture_window(
             at,
         );
         for frame in 0..100 {
-            observer.observe_frame(&FrameEvent {
-                elapsed_ms: elapsed,
-                frametime_ms: 12.0 + f64::from(frame % 3),
-            });
+            observer.observe_frame_at(
+                &FrameEvent {
+                    elapsed_ms: elapsed,
+                    frametime_ms: 12.0 + f64::from(frame % 3),
+                },
+                at,
+            );
         }
-        observer.observe_gpu(&GpuSample {
-            elapsed_ms: elapsed,
-            gpu_busy_percent: Some(60),
-            gpu_clock_mhz: Some(2_000),
-            temp_millidegrees: Some(60_000),
-            ..Default::default()
-        });
-        observer.observe_cpu_freq(&CpuFreqRecord {
-            elapsed_ms: elapsed,
-            cpu: 0,
-            freq_khz: 4_000_000,
-            timestamp_ns: 0,
-        });
+        observer.observe_gpu_at(
+            &GpuSample {
+                elapsed_ms: elapsed,
+                gpu_busy_percent: Some(60),
+                gpu_clock_mhz: Some(2_000),
+                temp_millidegrees: Some(60_000),
+                ..Default::default()
+            },
+            at,
+        );
+        observer.observe_cpu_freq_at(
+            &CpuFreqRecord {
+                elapsed_ms: elapsed,
+                cpu: 0,
+                freq_khz: 4_000_000,
+                timestamp_ns: 0,
+            },
+            at,
+        );
         at += 20;
     }
     observer.end_attempt(ended - 10);
@@ -108,4 +117,17 @@ pub(super) fn raw_planner_window(
         "psi_samples": 600, "unattributed_intervals": 0, "evaluations": 600, "denied_evaluations": 0,
         "affinity_candidates": 0, "cgroup_candidates": 0,
     })
+}
+
+/// The raw guard events of `windows`, beside a study, as the resident runtime keeps them.
+pub(super) fn write_guard_events(dir: &std::path::Path, windows: &[AttemptResident]) {
+    use std::os::unix::fs::PermissionsExt;
+    let file = dir.join(crate::autotune::research::resident_observer::guard_events::FILE);
+    let bytes = serde_json::to_vec(
+        &crate::autotune::research::resident_observer::guard_events::record(windows),
+    )
+    .unwrap_or_default();
+    // A write that fails leaves no events file, which the replay under test refuses loudly.
+    let _ = std::fs::write(&file, bytes);
+    let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
 }

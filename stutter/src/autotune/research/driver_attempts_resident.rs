@@ -259,6 +259,23 @@ impl DriverStudyAttempts {
             }
             Err(error) => return Err(error.context("resident windows not recorded")),
         }
+        // The raw events behind the guard facts, beside the windows (a larger bound: they are every frame and sample).
+        let events = serde_json::to_vec(&super::super::resident_observer::guard_events::record(
+            &windows,
+        ))?;
+        match super::super::report_store::write_new_bounded(
+            &dir,
+            super::super::resident_observer::guard_events::FILE,
+            &events,
+            super::super::resident_observer::guard_events::MAX_BYTES,
+        ) {
+            Ok(()) => {}
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AlreadyExists) => {}
+            Err(error) => return Err(error.context("resident guard events not recorded")),
+        }
         resident
             .lock()
             .map_err(|_| anyhow::anyhow!("the resident observer is poisoned"))?
@@ -419,10 +436,16 @@ pub(crate) fn latency_document(
                 && w.target.pid == process.pid
                 && w.target.start_ticks == process.start_ticks
         })?;
-        let guards = window.guards?;
-        if window.epochs_truncated {
+        if window.epochs_truncated || window.guard_events_truncated {
             return None;
         }
+        // The guard facts are over the same stretch as the population, from the attempt's own raw events.
+        let guards = super::super::resident_observer::guard_events::guards_over(
+            &window.guard_events,
+            window.target.pid.as_u32(),
+            range.0,
+            range.1,
+        )?;
         // The population is the attempt's own epochs over the stretch the pair compares, not the whole attempt.
         let (buckets, max_ns, _) = action_epochs::population(&window.epochs, range.0, range.1)?;
         let mut builder = LatencyWindowBuilder::from_population(range.0, buckets, max_ns)?;

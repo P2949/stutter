@@ -244,6 +244,7 @@ impl Acting {
             &schedule, &processes, &receipts, &windows,
         )
         .expect("the collectors' windows make a valid record");
+        super::latency_fixtures::write_guard_events(&dir, &windows);
         let raw: Vec<_> = windows
             .iter()
             .map(crate::autotune::research::resident_observer::window_record)

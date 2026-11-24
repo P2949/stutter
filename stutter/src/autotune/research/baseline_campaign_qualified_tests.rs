@@ -49,7 +49,7 @@ fn an_applied_action_with_its_sealed_measurement_qualifies_through_the_whole_cam
 /// controller's journal archive removed, and a receipt dropped (a partly applied action) each contradict the claimed qualification.
 #[test]
 fn a_qualified_action_campaign_is_refused_when_its_measurement_or_receipts_are_altered() {
-    for tamper in 0..7 {
+    for tamper in 0..9 {
         let mut run_of = campaign_that_acts(1_500_000);
         run(&mut run_of);
         let dispositions = run_of.driver.dispositions();
@@ -87,6 +87,25 @@ fn a_qualified_action_campaign_is_refused_when_its_measurement_or_receipts_are_a
                     serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
                 record["pairs"][0]["on"]["histogram"][0]["count"] = 1_000_000.into();
                 rewrite(&path, &serde_json::to_vec(&record).unwrap());
+            }
+            // The raw events the guard facts were cut from are gone, or no longer give the sealed guard facts.
+            7 => std::fs::remove_file(
+                dir.join(crate::autotune::research::resident_observer::guard_events::FILE),
+            )
+            .unwrap(),
+            8 => {
+                let path =
+                    dir.join(crate::autotune::research::resident_observer::guard_events::FILE);
+                let mut doc: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                for window in doc.as_array_mut().unwrap() {
+                    for event in window["events"].as_array_mut().unwrap() {
+                        if event["kind"] == "frame" {
+                            event["event"]["frametime_ms"] = 99.0.into();
+                        }
+                    }
+                }
+                rewrite(&path, &serde_json::to_vec(&doc).unwrap());
             }
             _ => {
                 receipts.as_array_mut().unwrap().pop();

@@ -322,6 +322,21 @@ pub(super) fn action_result(
         read("action-receipts.json")?,
     );
     super::action_epochs::record_matches_epochs(&record, &windows, &receipts, &processes).ok()?;
+    // And the guard facts are what its archived raw events give over those same stretches.
+    let events: serde_json::Value = serde_json::from_slice(
+        &super::report_store::read_private_bounded(
+            dir,
+            super::resident_observer::guard_events::FILE,
+            uid,
+            super::resident_observer::guard_events::MAX_BYTES,
+        )
+        .ok()?,
+    )
+    .ok()?;
+    super::resident_observer::guard_events::record_matches_events(
+        &record, &events, &receipts, &processes,
+    )
+    .ok()?;
     Some(result)
 }
 
