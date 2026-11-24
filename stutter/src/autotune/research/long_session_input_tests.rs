@@ -485,3 +485,23 @@ fn no_key_is_sent_while_something_other_than_the_game_has_focus_in_the_isolated_
         let _ = child.wait();
     }
 }
+
+/// A focus probe names one compositor completely: a Sway socket or a Hyprland instance, never a mix or half of one.
+#[test]
+fn a_focus_probe_that_names_no_complete_compositor_or_two_is_an_invalid_session_file() {
+    let rig = Rig::new();
+    let sway = serde_json::json!({ "swaymsg": "/bin/sh", "sway_socket": "/tmp/s" });
+    let hypr = serde_json::json!({ "hyprctl": "/bin/sh", "hyprland_instance": "sig", "runtime_dir": "/tmp/r" });
+    let accepted = |probe: serde_json::Value| {
+        load(&rig.config(|value| value["focus_probe"] = probe), uid()).is_ok()
+    };
+    assert!(accepted(sway.clone()));
+    assert!(accepted(hypr.clone()));
+    assert!(!accepted(serde_json::json!({ "swaymsg": "/bin/sh" })));
+    assert!(!accepted(
+        serde_json::json!({ "hyprctl": "/bin/sh", "hyprland_instance": "sig" })
+    ));
+    let mut both = sway;
+    both["hyprctl"] = "/bin/sh".into();
+    assert!(!accepted(both));
+}

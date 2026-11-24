@@ -4,11 +4,16 @@
 //! nothing else of the environment, parsed by the foreground module's own Sway parser, and must show a focused window
 //! whose process id is the attested game's; anything less is a refusal, never an assumption.
 
-use std::{io::Read, path::Path, time::Duration};
+use std::{
+    ffi::OsStr,
+    io::Read,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use crate::foreground::{
-    model::{CONFIDENCE_HIGH, ForegroundProviderStatus},
-    providers::sway::SwayForegroundProvider,
+    model::{CONFIDENCE_HIGH, ForegroundProviderStatus, ForegroundWindowSnapshot},
+    providers::{hyprland::hyprland_snapshot_from_activewindow_json, sway::SwayForegroundProvider},
 };
 
 /// The longest the compositor may take to answer, and the largest tree read.
@@ -17,11 +22,22 @@ const MAX_TREE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Whether `tree_json` (a `swaymsg -t get_tree` answer) shows the focused window to be process `game_pid`.
 pub fn game_is_focused(tree_json: &str, game_pid: u32) -> Result<(), &'static str> {
-    let snapshot = SwayForegroundProvider::new().sample_from_tree_json(0, tree_json);
+    pins_to(
+        &SwayForegroundProvider::new().sample_from_tree_json(0, tree_json),
+        game_pid,
+    )
+}
+
+/// Whether a foreground snapshot shows the focused window to be process `game_pid`, with a process id the compositor itself gave.
+fn pins_to(snapshot: &ForegroundWindowSnapshot, game_pid: u32) -> Result<(), &'static str> {
     if snapshot.status != ForegroundProviderStatus::Available {
         return Err("IsolatedFocusUnreadable");
     }
-    let target = snapshot.decision.target.ok_or("IsolatedFocusUnreadable")?;
+    let target = snapshot
+        .decision
+        .target
+        .as_ref()
+        .ok_or("IsolatedFocusUnreadable")?;
     if snapshot.decision.confidence < CONFIDENCE_HIGH || target.pid.is_none() {
         return Err("IsolatedFocusUnattributed");
     }
@@ -32,16 +48,73 @@ pub fn game_is_focused(tree_json: &str, game_pid: u32) -> Result<(), &'static st
     }
 }
 
+/// How the isolated session's compositor is asked which window has focus.
+#[derive(Clone, Debug)]
+pub enum Probe {
+    /// `swaymsg -t get_tree` against the session's own socket.
+    Sway { swaymsg: PathBuf, socket: PathBuf },
+    /// `hyprctl -j activewindow` against the session's own Hyprland instance.
+    Hyprland {
+        hyprctl: PathBuf,
+        instance_signature: String,
+        runtime_dir: PathBuf,
+    },
+}
+
+impl Probe {
+    /// Whether the compositor of the isolated session shows process `game_pid` as the focused window.
+    pub fn game_is_focused(&self, game_pid: u32) -> Result<(), &'static str> {
+        match self {
+            Self::Sway { swaymsg, socket } => {
+                game_is_focused(&query_tree(swaymsg, socket)?, game_pid)
+            }
+            Self::Hyprland {
+                hyprctl,
+                instance_signature,
+                runtime_dir,
+            } => {
+                let json = run(
+                    hyprctl,
+                    &["-j", "activewindow"],
+                    &[
+                        (
+                            "HYPRLAND_INSTANCE_SIGNATURE",
+                            OsStr::new(instance_signature),
+                        ),
+                        ("XDG_RUNTIME_DIR", runtime_dir.as_os_str()),
+                    ],
+                )?;
+                pins_to(
+                    &hyprland_snapshot_from_activewindow_json(0, &json),
+                    game_pid,
+                )
+            }
+        }
+    }
+}
+
 /// Ask the isolated session's compositor for its tree: `swaymsg -t get_tree` with only `SWAYSOCK` set to that session's
 /// socket, bounded in time and size. `swaymsg` and the socket are absolute paths the operator named.
 pub fn query_tree(swaymsg: &Path, socket: &Path) -> Result<String, &'static str> {
-    if !swaymsg.is_absolute() || !socket.is_absolute() || !swaymsg.is_file() {
+    run(
+        swaymsg,
+        &["-t", "get_tree"],
+        &[("SWAYSOCK", socket.as_os_str())],
+    )
+}
+
+/// Run one compositor query: the absolute program with exactly these arguments and environment, bounded in time and size.
+fn run(program: &Path, args: &[&str], env: &[(&str, &OsStr)]) -> Result<String, &'static str> {
+    if !program.is_absolute() || !program.is_file() || env.iter().any(|(_, value)| value.is_empty())
+    {
         return Err("IsolatedFocusProbeUnusable");
     }
-    let mut child = std::process::Command::new(swaymsg)
-        .args(["-t", "get_tree"])
-        .env_clear()
-        .env("SWAYSOCK", socket)
+    let mut command = std::process::Command::new(program);
+    command.args(args).env_clear();
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    let mut child = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

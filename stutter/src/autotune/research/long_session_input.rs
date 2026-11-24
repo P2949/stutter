@@ -25,7 +25,7 @@ use crate::autotune::research::{
     long_receipt::SessionProcess,
     scripted_input::{
         Key, KeyStep, PhaseScript, ScriptedInput,
-        isolated_seat::{IsolatedSink, LiveSession, attest_confirmed},
+        isolated_seat::{IsolatedSink, LiveSession, attest_confirmed, isolated_focus::Probe},
         script_sha256_of,
         seat_socket_sink::SeatSocketSink,
     },
@@ -82,8 +82,38 @@ struct SessionFile {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FocusProbeFile {
-    swaymsg: PathBuf,
-    sway_socket: PathBuf,
+    swaymsg: Option<PathBuf>,
+    sway_socket: Option<PathBuf>,
+    hyprctl: Option<PathBuf>,
+    hyprland_instance: Option<String>,
+    runtime_dir: Option<PathBuf>,
+}
+
+impl FocusProbeFile {
+    /// Exactly one compositor's complete set of names: a Sway socket, or a Hyprland instance; anything else is invalid.
+    fn probe(self) -> Option<Probe> {
+        match self {
+            Self {
+                swaymsg: Some(swaymsg),
+                sway_socket: Some(socket),
+                hyprctl: None,
+                hyprland_instance: None,
+                runtime_dir: None,
+            } => Some(Probe::Sway { swaymsg, socket }),
+            Self {
+                swaymsg: None,
+                sway_socket: None,
+                hyprctl: Some(hyprctl),
+                hyprland_instance: Some(instance_signature),
+                runtime_dir: Some(runtime_dir),
+            } => Some(Probe::Hyprland {
+                hyprctl,
+                instance_signature,
+                runtime_dir,
+            }),
+            _ => None,
+        }
+    }
 }
 
 fn key_named(name: &str) -> Option<Key> {
@@ -167,6 +197,10 @@ pub fn load(path: &Path, uid: u32) -> Result<Loaded, &'static str> {
     {
         return Err("LongSessionConfigInvalid");
     }
+    let focus_probe = match parsed.focus_probe {
+        None => None,
+        Some(file) => Some(file.probe().ok_or("LongSessionConfigInvalid")?),
+    };
     let live = LiveSession {
         wayland_display: parsed.live.wayland_display,
         x_display: parsed.live.x_display,
@@ -182,9 +216,7 @@ pub fn load(path: &Path, uid: u32) -> Result<Loaded, &'static str> {
                 crate::autotune::research::scripted_input::isolated_seat::LOGIND_SESSIONS,
             ),
             uid,
-            focus_probe: parsed
-                .focus_probe
-                .map(|probe| (probe.swaymsg, probe.sway_socket)),
+            focus_probe,
             game_pid: None,
             inner: None,
         },
@@ -234,8 +266,8 @@ pub struct SessionInput {
     /// Where logind's session records are read from: the system's directory, unless a test supplies its own.
     logind_dir: PathBuf,
     uid: u32,
-    /// `swaymsg` and the isolated session's socket, when the operator named them.
-    focus_probe: Option<(PathBuf, PathBuf)>,
+    /// How to ask the isolated session's compositor which window has focus, when the operator named one.
+    focus_probe: Option<Probe>,
     /// The attested game process, once bound.
     game_pid: Option<u32>,
     inner: Option<ScriptedInput<IsolatedSink<SeatSocketSink>>>,
@@ -266,11 +298,10 @@ fn game_environment(process: SessionProcess) -> Result<Vec<u8>, &'static str> {
 impl SessionInput {
     /// The game, and only the game, has focus in the isolated session; nothing is checked when no probe was named.
     fn check_focus(&self) -> Result<(), &'static str> {
-        use crate::autotune::research::scripted_input::isolated_seat::isolated_focus;
-        let (Some((swaymsg, socket)), Some(pid)) = (&self.focus_probe, self.game_pid) else {
+        let (Some(probe), Some(pid)) = (&self.focus_probe, self.game_pid) else {
             return Ok(());
         };
-        isolated_focus::game_is_focused(&isolated_focus::query_tree(swaymsg, socket)?, pid)
+        probe.game_is_focused(pid)
     }
 }
 

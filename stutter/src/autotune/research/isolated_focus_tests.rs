@@ -75,3 +75,42 @@ fn the_query_passes_only_the_isolated_socket_and_refuses_a_slow_or_failing_compo
         Err("IsolatedFocusProbeUnusable")
     );
 }
+
+/// A Hyprland session is asked with its own instance signature and runtime directory, and only its active window's own pid passes.
+#[test]
+fn a_hyprland_session_is_asked_through_its_own_instance_and_only_the_games_pid_passes() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let script = |name: &str, body: &str| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    };
+    let probe = |hyprctl: std::path::PathBuf| Probe::Hyprland {
+        hyprctl,
+        instance_signature: "sig-77".to_owned(),
+        runtime_dir: dir.path().join("run"),
+    };
+    // The program answers only when it was given exactly the isolated session's instance and arguments.
+    let active = script(
+        "hyprctl",
+        &format!(
+            "[ \"$HYPRLAND_INSTANCE_SIGNATURE\" = sig-77 ] && [ \"$XDG_RUNTIME_DIR\" = '{}' ] && [ \"$*\" = '-j activewindow' ] \
+             && echo '{{\"address\":\"0x1\",\"class\":\"game\",\"pid\":100,\"title\":\"t\"}}'",
+            dir.path().join("run").display()
+        ),
+    );
+    assert_eq!(probe(active.clone()).game_is_focused(100), Ok(()));
+    assert_eq!(
+        probe(active.clone()).game_is_focused(200),
+        Err("GameNotFocusedInTheIsolatedSession")
+    );
+    // No active window ({} / empty), or a program that fails, never passes.
+    let none = script("none", "echo '{}'");
+    assert!(probe(none).game_is_focused(100).is_err());
+    assert_eq!(
+        probe(script("fails", "exit 1")).game_is_focused(100),
+        Err("IsolatedFocusUnreadable")
+    );
+}
