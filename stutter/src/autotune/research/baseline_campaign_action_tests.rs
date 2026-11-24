@@ -67,6 +67,7 @@ impl Acting {
         }
         use std::sync::atomic::Ordering::SeqCst;
         self.acted_at.store(now, SeqCst);
+        GATE_READS.with(|reads| reads.set(0));
         let target = crate::autotune::research::action_child::ChildTarget {
             pid: process.pid,
             start_ticks: process.start_ticks,
@@ -161,70 +162,81 @@ impl Acting {
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
 
-    /// The latency record the collectors counted over the study's eight sessions, sealed beside the running study.
+    /// The latency record the collectors counted over the study's eight sessions, sealed beside the running study: each
+    /// attempt's window is its own epochs, cut over the stretch the gate holds the action (shown held ten seconds into the
+    /// session, restored 300 s later), the same cut the production sealing and the replay make.
     fn seal_measurement(&self) {
         use crate::autotune::research::{
+            action_child::ChildTarget,
             action_latency,
             child_verify::AttemptProcess,
-            evidence_producers::{
-                LatencyWindowBuilder, WindowGuards, action_latency_document, latency_pair,
-            },
             treatment::{Treatment, treatments_of},
         };
         let dir = self.running_study();
         let intent: ResearchIntentV1 =
             serde_json::from_slice(&std::fs::read(dir.join("intent.json")).unwrap()).unwrap();
         let schedule = treatments_of(&intent).unwrap().unwrap();
-        let process = |slot: usize| {
-            let (session, started, ended) = &self.history[slot];
-            AttemptProcess {
-                slot: slot as u32,
-                pid: session.pid,
-                start_ticks: session.start_ticks,
-                uid: session.uid,
-                started_unix: *started,
-                completed_unix: *ended,
-            }
-        };
-        let window = |slot: usize, tail_ns: u64| {
-            let (_, started, ended) = &self.history[slot];
-            let mut builder = LatencyWindowBuilder::new(started + 10);
-            for _ in 0..1_900 {
-                builder.event(500_000);
-            }
-            for _ in 0..100 {
-                builder.event(tail_ns);
-            }
-            builder.finish(
-                ended - 10,
-                WindowGuards {
-                    foreground_p99_ms: 12.0,
-                    foreground_samples: 1_000,
-                    foreground_over_5ms: 10,
-                    thermal_degraded: false,
-                    thermal_throttle_count: 0,
-                    cpu_power_limited: false,
-                    gpu_power_limited: false,
-                },
-            )
-        };
-        let pairs = (0..schedule.len() / 2)
-            .map(|block| {
-                let (a, b) = (block * 2, block * 2 + 1);
-                let (off, on) = if schedule[a] == Treatment::Off {
-                    (a, b)
+        let processes: Vec<AttemptProcess> = (0..schedule.len())
+            .map(|slot| {
+                let (session, started, ended) = &self.history[slot];
+                AttemptProcess {
+                    slot: slot as u32,
+                    pid: session.pid,
+                    start_ticks: session.start_ticks,
+                    uid: session.uid,
+                    started_unix: *started,
+                    completed_unix: *ended,
+                }
+            })
+            .collect();
+        let receipts: Vec<serde_json::Value> = processes
+            .iter()
+            .filter(|p| schedule[p.slot as usize] == Treatment::On)
+            .map(|p| {
+                serde_json::json!({ "pid": p.pid, "start_ticks": p.start_ticks,
+                    "applied_unix": p.started_unix + 11, "settled_unix": p.started_unix + 311 })
+            })
+            .collect();
+        let windows: Vec<_> = processes
+            .iter()
+            .map(|p| {
+                let tail = if schedule[p.slot as usize] == Treatment::On {
+                    self.on_tail_ns
                 } else {
-                    (b, a)
+                    20_000_000
                 };
-                latency_pair(
-                    (&process(off), window(off, 20_000_000)),
-                    (&process(on), window(on, self.on_tail_ns)),
+                super::latency_fixtures::fixture_window(
+                    ChildTarget {
+                        pid: p.pid,
+                        start_ticks: p.start_ticks,
+                        uid: p.uid,
+                    },
+                    p.slot,
+                    p.started_unix,
+                    p.completed_unix,
+                    tail,
                 )
             })
             .collect();
-        let file = dir.join(action_latency::FILE);
-        std::fs::write(&file, action_latency_document(pairs)).unwrap();
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let bytes = crate::autotune::research::driver_attempts::resident::latency_document(
+            &schedule, &processes, &receipts, &windows,
+        )
+        .expect("the collectors' windows make a valid record");
+        let raw: Vec<_> = windows
+            .iter()
+            .map(crate::autotune::research::resident_observer::window_record)
+            .collect();
+        for (name, content) in [
+            (
+                crate::autotune::research::resident_observer::WINDOWS_FILE,
+                serde_json::to_vec(&raw).unwrap(),
+            ),
+            (action_latency::FILE, bytes),
+        ] {
+            let file = dir.join(name);
+            std::fs::write(&file, content).unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
     }
 }
 
@@ -298,6 +310,11 @@ struct Campaign {
 }
 
 thread_local! {
+    /// How many times the gate has read its clock since the attempt's action began.
+    static GATE_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+thread_local! {
     /// The active-time authorization of the synthetic campaign (a test lowers it to exercise the reservation).
     pub(super) static ACTIVE_SECONDS: std::cell::Cell<u32> = const { std::cell::Cell::new(28_000) };
 }
@@ -358,8 +375,16 @@ fn build_campaign(
             ActionGate::unarmed(Box::new(move || {
                 Some(held.load(std::sync::atomic::Ordering::SeqCst))
             }))
+            // The first read is when the action is shown held, the next when its restoration is accepted, 300 s later.
             .with_clock(Box::new(move || {
-                at.load(std::sync::atomic::Ordering::SeqCst) + 1
+                at.load(std::sync::atomic::Ordering::SeqCst)
+                    + 1
+                    + 300
+                        * GATE_READS.with(|reads| {
+                            let n = reads.get();
+                            reads.set(n + 1);
+                            n.min(1)
+                        })
             }))
             .with_state_probe(Box::new(move |pid| {
                 Some(KernelState {

@@ -10,9 +10,6 @@ fn a_long_action_study_with_its_sealed_latency_measurement_qualifies_and_replays
     use crate::autotune::research::{
         action_latency,
         child_verify::AttemptProcess,
-        evidence_producers::{
-            LatencyWindowBuilder, WindowGuards, action_latency_document, latency_pair,
-        },
         treatment::{Treatment, treatments_of},
     };
     let (root, mut runner, study, gate, parent) = build(&unit().definition_sha256);
@@ -29,45 +26,55 @@ fn a_long_action_study_with_its_sealed_latency_measurement_qualifies_and_replays
         started_unix: 5_000,
         completed_unix: 6_200,
     };
-    let window = |tail_ns: u64| {
-        let mut builder = LatencyWindowBuilder::new(5_010);
-        for _ in 0..1_900 {
-            builder.event(500_000);
-        }
-        for _ in 0..100 {
-            builder.event(tail_ns);
-        }
-        builder.finish(
-            6_190,
-            WindowGuards {
-                foreground_p99_ms: 12.0,
-                foreground_samples: 1_000,
-                foreground_over_5ms: 10,
-                thermal_degraded: false,
-                thermal_throttle_count: 0,
-                cpu_power_limited: false,
-                gpu_power_limited: false,
-            },
-        )
+    let processes: Vec<_> = (0..schedule.len() as u32).map(process).collect();
+    // The gate holds the action 300 s in each treated attempt: shown held one second after the controller acts (at
+    // 5_100 plus ten seconds per attempt), restored 300 s later.
+    let receipts: Vec<serde_json::Value> = processes
+        .iter()
+        .filter(|p| schedule[p.slot as usize] == Treatment::On)
+        .map(|p| {
+            serde_json::json!({ "pid": p.pid, "start_ticks": p.start_ticks,
+                                "applied_unix": 5_101 + 10 * u64::from(p.slot),
+                                "settled_unix": 5_401 + 10 * u64::from(p.slot) })
+        })
+        .collect();
+    // The windows the collectors counted: the tail is the action's effect in an attempt treated On.
+    let windows = |off_tail: u64, on_tail: u64| -> Vec<_> {
+        processes
+            .iter()
+            .map(|p| {
+                let tail = if schedule[p.slot as usize] == Treatment::On {
+                    on_tail
+                } else {
+                    off_tail
+                };
+                super::latency_fixtures::fixture_window(
+                    attempt_process(p.slot),
+                    p.slot,
+                    5_000,
+                    6_200,
+                    tail,
+                )
+            })
+            .collect()
     };
-    let record = |off_tail: u64, on_tail: u64| {
-        action_latency_document(
-            (0..schedule.len() as u32 / 2)
-                .map(|block| {
-                    let (a, b) = (block * 2, block * 2 + 1);
-                    let (off, on) = if schedule[a as usize] == Treatment::Off {
-                        (a, b)
-                    } else {
-                        (b, a)
-                    };
-                    latency_pair(
-                        (&process(off), window(off_tail)),
-                        (&process(on), window(on_tail)),
-                    )
-                })
-                .collect(),
+    let record = |off_tail: u64, on_tail: u64| -> Vec<u8> {
+        crate::autotune::research::driver_attempts::resident::latency_document(
+            &schedule,
+            &processes,
+            &receipts,
+            &windows(off_tail, on_tail),
         )
+        .expect("the collectors' windows make a valid record")
     };
+    // The raw windows the record derives from, beside the study, as the resident runtime keeps them.
+    let raw: Vec<_> = windows(20_000_000, 1_500_000)
+        .iter()
+        .map(crate::autotune::research::resident_observer::window_record)
+        .collect();
+    let raw_file = path.join(crate::autotune::research::resident_observer::WINDOWS_FILE);
+    std::fs::write(&raw_file, serde_json::to_vec(&raw).unwrap()).unwrap();
+    std::fs::set_permissions(&raw_file, std::fs::Permissions::from_mode(0o600)).unwrap();
     let file = path.join(action_latency::FILE);
     std::fs::write(&file, record(20_000_000, 1_500_000)).unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -105,7 +112,6 @@ fn a_long_action_study_with_its_sealed_latency_measurement_qualifies_and_replays
     // Replay: the same function over the same bytes, and a worse tail is a measurement that is still valid but
     // decides Revert, never Keep.
     let bytes = std::fs::read(&file).unwrap();
-    let processes: Vec<_> = (0..schedule.len() as u32).map(process).collect();
     let result = action_latency::verify(&bytes, &schedule, &processes).unwrap();
     assert_eq!(
         (result.pairs, result.decision),
@@ -148,6 +154,9 @@ fn every_attempts_observed_window_is_kept_beside_the_study_as_raw_counters() {
         process_tree::TaskClass,
     };
     let (root, runner, study, _gate, _parent) = build(&unit().definition_sha256);
+    // The fixture sessions sit at synthetic unix times: the observers stamp their epochs from a clock that walks them.
+    crate::autotune::research::resident_observer::TEST_CLOCK
+        .with(|clock| clock.set(Some(super::latency_fixtures::clock())));
     let resident: SharedResident = Default::default();
     let mut runner = runner.with_resident(resident.clone());
     let (sighted, _, _) = RIG.with(|rig| rig.borrow().clone().unwrap());
@@ -341,10 +350,14 @@ fn the_latency_record_is_derived_from_the_runtimes_own_events_and_decides_throug
         recorder::{CpuFreqRecord, FrameEvent, GpuSample},
     };
     let run = |with_cpu_freq: bool| {
-        let (root, runner, study, _gate, _parent) = build(&unit().definition_sha256);
+        let (root, runner, study, gate, _parent) = build(&unit().definition_sha256);
+        // The fixture sessions sit at synthetic unix times: the observers stamp their epochs from a clock that walks them.
+        crate::autotune::research::resident_observer::TEST_CLOCK
+            .with(|clock| clock.set(Some(super::latency_fixtures::clock())));
         let resident: SharedResident = Default::default();
         let mut runner = runner.with_resident(resident.clone());
         let path = root.path().join("studies").join(&study.study_sha256[..16]);
+        let mut acted = std::collections::BTreeSet::new();
         let mut schedule: Option<Vec<Treatment>> = None;
         let mut elapsed = 0u64;
         let mut outcome = None;
@@ -365,6 +378,10 @@ fn the_latency_record_is_derived_from_the_runtimes_own_events_and_decides_throug
             else {
                 continue;
             };
+            // The normal controller applies the action once in every attempt the gate allows, and restores it.
+            if acted.insert(process.pid) {
+                act_once(&gate, process);
+            }
             // The action shortens the runnable tail from 20 ms to 1.5 ms in every attempt treated On.
             let on = schedule[(process.pid.as_u32() - 5_000) as usize] == Treatment::On;
             let tail = if on { 1_500_000 } else { 20_000_000 };
@@ -552,6 +569,9 @@ fn a_justified_abstention_stands_on_the_planner_observation_the_runtime_derived_
     use crate::autotune::research::resident_observer::SharedResident;
     let run = |offer: Option<&'static str>, watch: bool| {
         let (root, runner, study, _gate, _parent) = build(&unit().definition_sha256);
+        // The fixture sessions sit at synthetic unix times: the observers stamp their epochs from a clock that walks them.
+        crate::autotune::research::resident_observer::TEST_CLOCK
+            .with(|clock| clock.set(Some(super::latency_fixtures::clock())));
         let resident: SharedResident = Default::default();
         let mut runner = runner.with_resident(resident.clone());
         let outcome = 'run: {

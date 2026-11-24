@@ -692,3 +692,6 @@ mod long;
 
 #[path = "driver_attempts_feature_replay_tests.rs"]
 mod feature_replay;
+
+#[path = "driver_attempts_latency_fixtures.rs"]
+mod latency_fixtures;

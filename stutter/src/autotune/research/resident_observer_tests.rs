@@ -305,3 +305,53 @@ fn an_interval_with_no_process_identity_is_counted_as_an_unattributed_owner() {
     assert_eq!(window.unattributed_intervals, 1);
     assert!(window.cpu_samples > 0);
 }
+
+/// One epoch per interval event of the target, stamped with the time the runtime observed it, in the canonical layout:
+/// what lets the stretch while an action was held be cut out of the attempt exactly. A window that outgrows the bound
+/// says so instead of silently dropping epochs.
+#[test]
+fn each_interval_event_of_the_target_is_kept_as_an_epoch_and_a_window_that_outgrows_the_bound_says_so()
+ {
+    use crate::autotune::research::action_epochs::MAX_EPOCHS;
+    let mut observer = ResidentObserver::default();
+    observer.arm(target(), Some(0), 1_000);
+    for at in [1_010, 1_020, 1_030] {
+        observer.observe_intervals_at(
+            &[
+                interval(4242, TaskClass::Game, 100, 500_000),
+                // Another class is not the game's population.
+                interval(9, TaskClass::Compiler, 5_000, 90_000_000),
+            ],
+            0,
+            at,
+        );
+    }
+    // An event with nothing of the target in it is no epoch.
+    observer.observe_intervals_at(&[interval(9, TaskClass::Compiler, 5, 1)], 0, 1_040);
+    let window = observer.freeze(1_100).remove(0);
+    assert!(!window.epochs_truncated);
+    assert_eq!(
+        window
+            .epochs
+            .iter()
+            .map(|e| (e.unix, e.events))
+            .collect::<Vec<_>>(),
+        [(1_010, 100), (1_020, 100), (1_030, 100)]
+    );
+    // The epochs add up to the window's own population.
+    let total: u64 = window.epochs.iter().map(|e| e.events).sum();
+    assert_eq!(total, window.events());
+    // Past the bound the window is marked, and keeps counting its population.
+    let mut long = ResidentObserver::default();
+    long.arm(target(), Some(0), 1_000);
+    for at in 0..=MAX_EPOCHS as u64 {
+        long.observe_intervals_at(
+            &[interval(4242, TaskClass::Game, 1, 500_000)],
+            0,
+            1_000 + at,
+        );
+    }
+    let window = long.freeze(1_000_000).remove(0);
+    assert!(window.epochs_truncated);
+    assert_eq!(window.epochs.len(), MAX_EPOCHS);
+}

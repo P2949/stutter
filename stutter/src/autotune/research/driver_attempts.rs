@@ -417,7 +417,6 @@ impl DriverStudyAttempts {
         );
         self.feature_receipt(&study_dir, study)?;
         self.seal_resident_observation(&study_dir, &windows, &evidence)?;
-        self.seal_action_latency(study, &study_dir, driver.intent(), &windows, &evidence)?;
         self.seal_planner_observation(study, &study_dir, &windows, &evidence)?;
         self.archive_provenance(study, &study_dir, &evidence)?;
         let activation = self.feature_activation(study, u32::try_from(report.attempts_completed)?);
@@ -452,6 +451,8 @@ impl DriverStudyAttempts {
                 checked
             }
         };
+        // The gate's receipts are durable now: the action's measurement is cut from the epochs they say it was held over.
+        self.seal_action_latency(study, &study_dir, driver.intent(), &windows, &evidence)?;
         Ok(AttemptsOutcome {
             planned_attempts: driver.intent().max_attempts,
             source_order: driver

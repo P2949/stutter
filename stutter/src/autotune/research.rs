@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) mod action_bridge;
 pub(crate) mod action_child;
 pub(crate) mod action_coverage;
+pub mod action_epochs;
 pub(crate) mod action_gate;
 pub mod action_latency;
 #[cfg_attr(

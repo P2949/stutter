@@ -306,7 +306,18 @@ pub(super) fn action_result(
     let bytes = read_private(dir, super::action_latency::FILE, uid).ok()?;
     let treatments = super::treatment::treatments_of(intent).ok()??;
     let processes = super::child_verify_rules::processes_of(evidence);
-    super::action_latency::verify(&bytes, &treatments, &processes).ok()
+    let result = super::action_latency::verify(&bytes, &treatments, &processes).ok()?;
+    // The sealed windows must be exactly what the attempts' own epochs and the gate's receipts give.
+    let read = |name: &str| -> Option<serde_json::Value> {
+        serde_json::from_slice(&read_private(dir, name, uid).ok()?).ok()
+    };
+    let (record, windows, receipts) = (
+        serde_json::from_slice::<serde_json::Value>(&bytes).ok()?,
+        read(super::resident_observer::WINDOWS_FILE)?,
+        read("action-receipts.json")?,
+    );
+    super::action_epochs::record_matches_epochs(&record, &windows, &receipts, &processes).ok()?;
+    Some(result)
 }
 
 /// The result an action child's report carries into the bundle, read from the child's own directory.

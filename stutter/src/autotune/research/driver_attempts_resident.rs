@@ -276,12 +276,7 @@ impl DriverStudyAttempts {
         evidence: &std::collections::BTreeMap<u32, super::super::report::AttemptEvidenceV1>,
     ) -> anyhow::Result<()> {
         use super::super::{
-            action_latency,
-            child_verify_rules::processes_of,
-            evidence_producers::{
-                LatencyWindowBuilder, WindowGuards, action_latency_document, latency_pair,
-            },
-            treatment::{Treatment, treatments_of},
+            action_latency, child_verify_rules::processes_of, treatment::treatments_of,
         };
         if !matches!(study.stage, Stage::Action(_)) || windows.is_empty() {
             return Ok(());
@@ -290,62 +285,18 @@ impl DriverStudyAttempts {
             return Ok(());
         };
         let processes = processes_of(evidence);
-        let window_json = |slot: u32| -> Option<serde_json::Value> {
-            let process = processes.iter().find(|p| p.slot == slot)?;
-            let window = windows.iter().find(|w| {
-                w.attempt == Some(slot)
-                    && w.target.pid == process.pid
-                    && w.target.start_ticks == process.start_ticks
-            })?;
-            let guards = window.guards?;
-            let mut builder = LatencyWindowBuilder::from_population(
-                window.started_unix.max(process.started_unix),
-                window.histogram.clone(),
-                window.max_ns,
-            )?;
-            builder.lost(window.lost_events.saturating_add(window.invalid_intervals));
-            if window.target_changed {
-                builder.target_changed();
-            }
-            Some(builder.finish(
-                window.ended_unix.min(process.completed_unix),
-                WindowGuards {
-                    foreground_p99_ms: guards.frame_p99_ms,
-                    foreground_samples: guards.frame_samples,
-                    foreground_over_5ms: guards.foreground_over_5ms,
-                    thermal_degraded: guards.thermal_degraded,
-                    thermal_throttle_count: guards.thermal_throttle_count,
-                    cpu_power_limited: guards.cpu_power_limited,
-                    gpu_power_limited: guards.gpu_power_limited,
-                },
-            ))
-        };
-        let mut pairs = Vec::new();
-        for block in 0..schedule.len() / 2 {
-            let (a, b) = (block as u32 * 2, block as u32 * 2 + 1);
-            let (off, on) = if schedule[a as usize] == Treatment::Off {
-                (a, b)
-            } else {
-                (b, a)
-            };
-            let (Some(off_process), Some(on_process)) = (
-                processes.iter().find(|p| p.slot == off),
-                processes.iter().find(|p| p.slot == on),
-            ) else {
-                continue;
-            };
-            let (Some(off_window), Some(on_window)) = (window_json(off), window_json(on)) else {
-                return Ok(());
-            };
-            pairs.push(latency_pair(
-                (off_process, off_window),
-                (on_process, on_window),
-            ));
-        }
-        let bytes = action_latency_document(pairs);
-        if action_latency::verify(&bytes, &schedule, &processes).is_err() {
+        // The gate's receipts say when the action was held in each treated attempt: the epochs are cut there.
+        let receipts: Vec<serde_json::Value> = super::super::report_store::read_private(
+            study_dir,
+            "action-receipts.json",
+            self.parent.uid,
+        )
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+        let Some(bytes) = latency_document(&schedule, &processes, &receipts, windows) else {
             return Ok(());
-        }
+        };
         match write_new(study_dir, action_latency::FILE, &bytes) {
             Ok(()) => Ok(()),
             Err(error)
@@ -436,4 +387,90 @@ impl DriverStudyAttempts {
             Err(error) => Err(error),
         }
     }
+}
+
+/// The paired runnable-latency document an action study's collectors can seal from the attempts' own epochs and the
+/// gate's receipts, or `None` when any pair lacks a treated interval, its epochs (a truncated window has none), the guard
+/// facts or a population the real verifier accepts. Sealing and the tests that need a sealed record both use this.
+pub(crate) fn latency_document(
+    schedule: &[super::super::treatment::Treatment],
+    processes: &[super::super::child_verify::AttemptProcess],
+    receipts: &[serde_json::Value],
+    windows: &[super::super::resident_observer::AttemptResident],
+) -> Option<Vec<u8>> {
+    use super::super::{
+        action_epochs, action_latency,
+        evidence_producers::{
+            LatencyWindowBuilder, WindowGuards, action_latency_document, latency_pair,
+        },
+        treatment::Treatment,
+    };
+    let window_json = |slot: u32, range: (u64, u64)| -> Option<serde_json::Value> {
+        let process = processes.iter().find(|p| p.slot == slot)?;
+        let window = windows.iter().find(|w| {
+            w.attempt == Some(slot)
+                && w.target.pid == process.pid
+                && w.target.start_ticks == process.start_ticks
+        })?;
+        let guards = window.guards?;
+        if window.epochs_truncated {
+            return None;
+        }
+        // The population is the attempt's own epochs over the stretch the pair compares, not the whole attempt.
+        let (buckets, max_ns, _) = action_epochs::population(&window.epochs, range.0, range.1)?;
+        let mut builder = LatencyWindowBuilder::from_population(range.0, buckets, max_ns)?;
+        builder.lost(window.lost_events.saturating_add(window.invalid_intervals));
+        if window.target_changed {
+            builder.target_changed();
+        }
+        Some(builder.finish(
+            range.1,
+            WindowGuards {
+                foreground_p99_ms: guards.frame_p99_ms,
+                foreground_samples: guards.frame_samples,
+                foreground_over_5ms: guards.foreground_over_5ms,
+                thermal_degraded: guards.thermal_degraded,
+                thermal_throttle_count: guards.thermal_throttle_count,
+                cpu_power_limited: guards.cpu_power_limited,
+                gpu_power_limited: guards.gpu_power_limited,
+            },
+        ))
+    };
+    let mut pairs = Vec::new();
+    for block in 0..schedule.len() / 2 {
+        let (a, b) = (block as u32 * 2, block as u32 * 2 + 1);
+        let (off, on) = if schedule[a as usize] == Treatment::Off {
+            (a, b)
+        } else {
+            (b, a)
+        };
+        let (Some(off_process), Some(on_process)) = (
+            processes.iter().find(|p| p.slot == off),
+            processes.iter().find(|p| p.slot == on),
+        ) else {
+            continue;
+        };
+        // The interval the action was held in the On attempt, and the same offsets in the Off attempt.
+        let treated = receipts
+            .iter()
+            .find(|receipt| {
+                receipt["pid"].as_u64() == Some(u64::from(on_process.pid.as_u32()))
+                    && receipt["start_ticks"].as_u64() == Some(on_process.start_ticks)
+            })
+            .and_then(action_epochs::treated_interval)?;
+        let (on_range, off_range) =
+            action_epochs::pair_ranges(treated, on_process.started_unix, off_process.started_unix);
+        let (Some(off_window), Some(on_window)) =
+            (window_json(off, off_range), window_json(on, on_range))
+        else {
+            return None;
+        };
+        pairs.push(latency_pair(
+            (off_process, off_window),
+            (on_process, on_window),
+        ));
+    }
+    let bytes = action_latency_document(pairs);
+    action_latency::verify(&bytes, schedule, processes).ok()?;
+    Some(bytes)
 }

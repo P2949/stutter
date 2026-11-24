@@ -152,6 +152,11 @@ fn session(definition: &str) -> LongSessionRecord {
 
 type Shared = crate::autotune::research::action_gate::SharedActionGate;
 
+thread_local! {
+    /// How many times the gate has read its clock since the attempt's action began.
+    static GATE_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 fn build(
     definition: &str,
 ) -> (
@@ -201,7 +206,18 @@ fn build_with<D: LongSessionDriver + Send + 'static>(
         ActionGate::unarmed(Box::new(move || {
             Some(held.load(std::sync::atomic::Ordering::SeqCst))
         }))
-        .with_clock(Box::new(|| ACTED_AT.get() + 1))
+        // The first read is when the action is shown held, the next when its restoration is accepted: 300 s later, as a
+        // route that holds it for minutes would show.
+        .with_clock(Box::new(|| {
+            ACTED_AT.get()
+                + 1
+                + 300
+                    * GATE_READS.with(|reads| {
+                        let n = reads.get();
+                        reads.set(n + 1);
+                        n.min(1)
+                    })
+        }))
         .with_state_probe(Box::new(|pid| {
             Some(KernelState {
                 cpus_allowed: "0-15".into(),
@@ -276,6 +292,7 @@ fn run_acting(
         if FIXED_SESSIONS.get() {
             ACTED_AT.set(5_100 + 10 * u64::from(pid.as_u32() - 5_000));
         }
+        GATE_READS.with(|reads| reads.set(0));
         let mut gate = gate.lock().unwrap();
         if gate.permit(
             Some(ResearchAction::CpuAffinityProfile),
@@ -525,3 +542,33 @@ mod qualified;
 
 #[path = "driver_attempts_long_replay_tests.rs"]
 mod replay;
+
+/// The normal controller applying the action once on `process` and restoring it, as the gate observes it: permitted
+/// at the attempt's own second, shown held at the next, restored 300 s after that (the gate's clock steps that far).
+fn act_once(gate: &Shared, process: ChildTarget) {
+    let (_, tokens, _) = RIG.with(|rig| rig.borrow().clone().expect("a built study"));
+    ACTED_AT.set(5_100 + 10 * u64::from(process.pid.as_u32() - 5_000));
+    GATE_READS.with(|reads| reads.set(0));
+    let mut gate = gate.lock().unwrap();
+    if gate.permit(
+        Some(ResearchAction::CpuAffinityProfile),
+        process,
+        ACTED_AT.get(),
+    ) {
+        tokens.store(1, std::sync::atomic::Ordering::SeqCst);
+        gate.observe_holdings(
+            true,
+            0,
+            vec![Holding {
+                experiment_id: stutter_core::ids::ExperimentId::new(format!(
+                    "exp-{:?}",
+                    process.pid
+                )),
+                action: Some(ResearchAction::CpuAffinityProfile),
+                pid: Some(process.pid),
+            }],
+        );
+        tokens.store(0, std::sync::atomic::Ordering::SeqCst);
+        gate.observe_runtime(false, 0);
+    }
+}

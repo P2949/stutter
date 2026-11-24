@@ -7,7 +7,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use super::{action_child::ChildTarget, child_verify::AttemptProcess};
+use super::{
+    action_child::ChildTarget,
+    action_epochs::{Epoch, MAX_EPOCHS},
+    child_verify::AttemptProcess,
+};
 use crate::{
     autotune::{objective::runnable_signal::is_primary_game_class, rolling_window::RollingWindow},
     metrics::{IntervalRecord, LatencyHistogram, LatencyHistogramBucket},
@@ -53,6 +57,10 @@ pub struct AttemptResident {
     /// CPU frequency events the runtime saw while the attempt ran.
     pub cpu_freq_samples: u64,
     pub psi_samples: u64,
+    /// One epoch per interval event of the target, so the stretch while an action was held can be cut out exactly.
+    pub epochs: Vec<Epoch>,
+    /// The attempt outgrew the epoch bound: no pair is derived from this window.
+    pub epochs_truncated: bool,
     /// Interval records of the window that carried no process identity: while any exists, the resource owners are not
     /// all identified (a scheduler interval alone does not say who owns the load).
     pub unattributed_intervals: u64,
@@ -95,6 +103,8 @@ struct Running {
     cpu_freq: u64,
     psi: u64,
     unattributed: u64,
+    epochs: Vec<Epoch>,
+    epochs_truncated: bool,
     evaluations: u64,
     denied_evaluations: u64,
     affinity_candidates: u64,
@@ -105,6 +115,8 @@ struct Running {
 pub struct ResidentObserver {
     running: Option<Running>,
     finished: Vec<AttemptResident>,
+    /// The clock that stamps an epoch (unix seconds); the system clock unless a test sets another.
+    clock: Option<fn() -> u64>,
 }
 
 impl ResidentObserver {
@@ -119,6 +131,10 @@ impl ResidentObserver {
             return;
         }
         self.end_attempt(now_unix);
+        #[cfg(test)]
+        if let Some(clock) = TEST_CLOCK.with(std::cell::Cell::get) {
+            (clock.arm)();
+        }
         self.running = Some(Running {
             target,
             cgroup: cgroup_of(target.pid.as_u32()),
@@ -135,6 +151,8 @@ impl ResidentObserver {
             cpu_freq: 0,
             psi: 0,
             unattributed: 0,
+            epochs: Vec::new(),
+            epochs_truncated: false,
             evaluations: 0,
             denied_evaluations: 0,
             affinity_candidates: 0,
@@ -144,8 +162,31 @@ impl ResidentObserver {
 
     /// An interval event: the records it carried and the events its sources dropped since the last one.
     pub fn observe_intervals(&mut self, records: &[IntervalRecord], lost_events: u64) {
+        let at = self.clock.map_or_else(unix_now, |clock| clock());
+        self.observe_intervals_at(records, lost_events, at);
+    }
+
+    /// A clock for the epochs (unix seconds), where the system's is not the one the caller means.
+    pub fn with_clock(mut self, clock: fn() -> u64) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    /// As `observe_intervals`, for an event observed at `at_unix`.
+    pub fn observe_intervals_at(
+        &mut self,
+        records: &[IntervalRecord],
+        lost_events: u64,
+        at_unix: u64,
+    ) {
         let Some(running) = self.running.as_mut() else {
             return;
+        };
+        let mut epoch = Epoch {
+            unix: at_unix,
+            events: 0,
+            max_ns: 0,
+            counts: vec![0; running.buckets.len()],
         };
         running.lost = running.lost.saturating_add(lost_events);
         running.window.push_intervals(records.iter().cloned());
@@ -181,7 +222,19 @@ impl ResidentObserver {
             for (bucket, incoming) in running.buckets.iter_mut().zip(&record.histogram) {
                 bucket.count = bucket.count.saturating_add(incoming.count);
             }
+            for (slot, incoming) in epoch.counts.iter_mut().zip(&record.histogram) {
+                *slot = slot.saturating_add(incoming.count);
+            }
+            epoch.events = epoch.events.saturating_add(record.samples);
+            epoch.max_ns = epoch.max_ns.max(record.max_ns);
             running.max_ns = running.max_ns.max(record.max_ns);
+        }
+        if epoch.events > 0 {
+            if running.epochs.len() < MAX_EPOCHS {
+                running.epochs.push(epoch);
+            } else {
+                running.epochs_truncated = true;
+            }
         }
         if seen {
             // One scheduler and one pressure reading per interval in which the runtime saw the game.
@@ -313,6 +366,8 @@ impl ResidentObserver {
                 gpu_samples: running.gpu,
                 cpu_freq_samples: running.cpu_freq,
                 psi_samples: running.psi,
+                epochs: running.epochs,
+                epochs_truncated: running.epochs_truncated,
                 unattributed_intervals: running.unattributed,
                 evaluations: running.evaluations,
                 denied_evaluations: running.denied_evaluations,
@@ -347,6 +402,30 @@ impl ResidentObserver {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A clock a test installs for the epochs its observers stamp (the fixtures' sessions sit at synthetic unix times).
+    pub(crate) static TEST_CLOCK: std::cell::Cell<Option<TestClock>> = const { std::cell::Cell::new(None) };
+}
+
+/// A test's clock for the epochs, and what it does when a new attempt is armed (a session starts its own time).
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) struct TestClock {
+    pub now: fn() -> u64,
+    pub arm: fn(),
+}
+
+fn unix_now() -> u64 {
+    #[cfg(test)]
+    if let Some(clock) = TEST_CLOCK.with(std::cell::Cell::get) {
+        return (clock.now)();
+    }
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
 /// The unified-hierarchy cgroup of a process from its own `/proc/<pid>/cgroup`, empty when it cannot be read.
 fn cgroup_of(pid: u32) -> String {
     std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
@@ -370,6 +449,7 @@ pub fn window_record(window: &AttemptResident) -> serde_json::Value {
         "histogram": window.histogram, "max_ns": window.max_ns,
         "lost_events": window.lost_events, "invalid_intervals": window.invalid_intervals,
         "target_changed": window.target_changed,
+        "epochs": window.epochs, "epochs_truncated": window.epochs_truncated,
         "cpu_samples": window.cpu_samples, "gpu_samples": window.gpu_samples, "cpu_freq_samples": window.cpu_freq_samples,
         "psi_samples": window.psi_samples, "unattributed_intervals": window.unattributed_intervals, "evaluations": window.evaluations,
         "denied_evaluations": window.denied_evaluations,

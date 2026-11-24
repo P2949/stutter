@@ -49,7 +49,7 @@ fn an_applied_action_with_its_sealed_measurement_qualifies_through_the_whole_cam
 /// controller's journal archive removed, and a receipt dropped (a partly applied action) each contradict the claimed qualification.
 #[test]
 fn a_qualified_action_campaign_is_refused_when_its_measurement_or_receipts_are_altered() {
-    for tamper in 0..5 {
+    for tamper in 0..7 {
         let mut run_of = campaign_that_acts(1_500_000);
         run(&mut run_of);
         let dispositions = run_of.driver.dispositions();
@@ -70,6 +70,24 @@ fn a_qualified_action_campaign_is_refused_when_its_measurement_or_receipts_are_a
             .unwrap(),
             4 => std::fs::remove_file(dir.join(crate::autotune::research::worker_provenance::FILE))
                 .unwrap(),
+            // The raw epochs a window was cut from no longer give the sealed window.
+            5 => {
+                let path = dir.join(crate::autotune::research::resident_observer::WINDOWS_FILE);
+                let mut windows: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                for window in windows.as_array_mut().unwrap() {
+                    window["epochs"] = serde_json::json!([]);
+                }
+                rewrite(&path, &serde_json::to_vec(&windows).unwrap());
+            }
+            // The sealed window itself no longer matches its epochs.
+            6 => {
+                let path = dir.join(crate::autotune::research::action_latency::FILE);
+                let mut record: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                record["pairs"][0]["on"]["histogram"][0]["count"] = 1_000_000.into();
+                rewrite(&path, &serde_json::to_vec(&record).unwrap());
+            }
             _ => {
                 receipts.as_array_mut().unwrap().pop();
                 rewrite(&receipts_path, &serde_json::to_vec(&receipts).unwrap());
