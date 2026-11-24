@@ -136,3 +136,30 @@ fn a_sink_bound_to_any_other_display_is_refused_and_one_on_the_seat_carries_a_wh
             && bytes.len() % crate::autotune::research::scripted_input::EVENT_BYTES == 0
     );
 }
+
+#[test]
+fn logind_must_confirm_the_seat_and_user_of_the_games_session() {
+    let live = LiveSession {
+        wayland_display: "wayland-1".into(),
+        x_display: ":0".into(),
+        session_id: "11".into(),
+    };
+    let environ = b"WAYLAND_DISPLAY=wayland-77\0DISPLAY=:77\0XDG_SESSION_ID=42\0XDG_SEAT=seat7\0";
+    let dir = tempfile::tempdir().unwrap();
+    let check =
+        || attest_confirmed(environ, &live, dir.path(), 1000).map(|seat| seat.seat().to_owned());
+    assert_eq!(check(), Err("GameSessionNotKnownToLogind"));
+    std::fs::write(dir.path().join("42"), "SEAT=seat7\nUID=1000\n").unwrap();
+    assert_eq!(check(), Ok("seat7".to_owned()));
+    std::fs::write(dir.path().join("42"), "SEAT=seat8\nUID=1000\n").unwrap();
+    assert_eq!(check(), Err("GameSeatNotConfirmedByLogind"));
+    std::fs::write(dir.path().join("42"), "SEAT=seat7\nUID=1001\n").unwrap();
+    assert_eq!(check(), Err("GameSeatNotConfirmedByLogind"));
+    // A session id that is a path never reads outside the directory.
+    let traversal =
+        b"WAYLAND_DISPLAY=wayland-77\0DISPLAY=:77\0XDG_SESSION_ID=../42\0XDG_SEAT=seat7\0";
+    assert_eq!(
+        attest_confirmed(traversal, &live, dir.path(), 1000).err(),
+        Some("GameSessionNotKnownToLogind")
+    );
+}

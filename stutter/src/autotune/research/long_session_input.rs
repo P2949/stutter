@@ -6,7 +6,7 @@
 //! * the session file must be a regular file owned by the controller's user, writable by no one else, and small;
 //! * the save the session starts from is part of the definition a work unit must carry, hashed anew at every start;
 //! * when the game process is attested, its own environment (read from the kernel, for that very pid and start time)
-//!   must show a display, session and logind seat of its own (`isolated_seat::attest`), and only then is the helper's
+//!   must show a display, session and logind seat of its own (`isolated_seat::attest_confirmed`, which also asks logind's own session record), and only then is the helper's
 //!   private socket connected, naming that display, through `IsolatedSink`, which refuses a sink bound anywhere else.
 //!
 //! Any refusal fails the session with a typed reason before the first key. Without the session file the build keeps
@@ -25,7 +25,7 @@ use crate::autotune::research::{
     long_receipt::SessionProcess,
     scripted_input::{
         Key, KeyStep, PhaseScript, ScriptedInput,
-        isolated_seat::{IsolatedSink, LiveSession, attest},
+        isolated_seat::{IsolatedSink, LiveSession, attest_confirmed},
         script_sha256_of,
         seat_socket_sink::SeatSocketSink,
     },
@@ -168,6 +168,9 @@ pub fn load(path: &Path, uid: u32) -> Result<Loaded, &'static str> {
             script,
             helper_socket: parsed.helper_socket,
             live,
+            logind_dir: PathBuf::from(
+                crate::autotune::research::scripted_input::isolated_seat::LOGIND_SESSIONS,
+            ),
             uid,
             inner: None,
         },
@@ -214,6 +217,8 @@ pub struct SessionInput {
     script_sha256: String,
     helper_socket: PathBuf,
     live: LiveSession,
+    /// Where logind's session records are read from: the system's directory, unless a test supplies its own.
+    logind_dir: PathBuf,
     uid: u32,
     inner: Option<ScriptedInput<IsolatedSink<SeatSocketSink>>>,
 }
@@ -240,6 +245,15 @@ fn game_environment(process: SessionProcess) -> Result<Vec<u8>, &'static str> {
     Ok(bytes)
 }
 
+#[cfg(test)]
+impl SessionInput {
+    /// A directory of session records standing in for logind's.
+    pub(crate) fn with_logind_dir(mut self, dir: PathBuf) -> Self {
+        self.logind_dir = dir;
+        self
+    }
+}
+
 impl RouteInput for SessionInput {
     fn available(&self) -> bool {
         true
@@ -248,7 +262,7 @@ impl RouteInput for SessionInput {
     fn bind(&mut self, process: SessionProcess) -> Result<(), &'static str> {
         let environ = game_environment(process)?;
         // The seat is the game session's own and never the live one; nothing else is attested.
-        let seat = attest(&environ, &self.live)?;
+        let seat = attest_confirmed(&environ, &self.live, &self.logind_dir, self.uid)?;
         let sink = SeatSocketSink::connect(&self.helper_socket, self.uid, seat.display())?;
         let sink = IsolatedSink::new(sink, &seat)?;
         self.inner = Some(ScriptedInput::new(sink, self.script.clone()));

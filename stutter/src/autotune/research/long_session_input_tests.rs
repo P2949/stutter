@@ -107,8 +107,20 @@ const OWN_SEAT: [(&str, &str); 4] = [
     ("XDG_SEAT", "seat7"),
 ];
 
+/// A directory standing in for logind's, holding the record of session 42 on `seat` for the test user.
+fn logind(config: &Path, seat: &str) -> std::path::PathBuf {
+    let dir = config.parent().unwrap().join("logind");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("42"), format!("SEAT={seat}\nUID={}\n", uid())).unwrap();
+    dir
+}
+
 fn driver_on(config: &Path, clock: &Arc<AtomicU64>) -> RouteDriver<SessionInput> {
     let loaded = load(config, uid()).unwrap();
+    let loaded = crate::autotune::research::route_driver::long_session_input::Loaded {
+        input: loaded.input.with_logind_dir(logind(config, "seat7")),
+        ..loaded
+    };
     let clock = clock.clone();
     RouteDriver::new(
         loaded.input,
@@ -374,4 +386,41 @@ fn the_authorization_the_operator_reads_is_exactly_the_definition_and_duration_a
         super::authorization(&bad, uid()).err(),
         Some("LongSessionConfigInvalid")
     );
+}
+
+/// The game's environment is the launcher's claim; logind's own record of its session must say the same seat and user.
+#[test]
+fn a_seat_the_environment_claims_but_logind_does_not_show_fails_the_session_before_a_key() {
+    let rig = Rig::new();
+    let config = rig.config(|_| {});
+    for (name, seat) in [
+        ("logind names another seat", Some("seat8")),
+        ("logind has no such session", None),
+    ] {
+        let clock = Arc::new(AtomicU64::new(1_000));
+        let mut driver = driver_on(&config, &clock);
+        let dir = config.parent().unwrap().join("logind");
+        match seat {
+            Some(seat) => {
+                logind(&config, seat);
+            }
+            None => std::fs::remove_file(dir.join("42")).unwrap(),
+        }
+        let (mut child, process) = game(&OWN_SEAT);
+        driver.start(&unit_for(&driver)).unwrap();
+        driver.observe_process(Some(process));
+        let progress = driver.poll();
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            matches!(
+                progress,
+                LongProgress::Failed(
+                    "GameSeatNotConfirmedByLogind" | "GameSessionNotKnownToLogind"
+                )
+            ),
+            "{name}: {progress:?}"
+        );
+        logind(&config, "seat7");
+    }
 }

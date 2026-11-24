@@ -98,6 +98,40 @@ pub fn attest(game_environ: &[u8], live: &LiveSession) -> Result<IsolatedSeat, &
     })
 }
 
+/// Where logind keeps one record per session (`<id>`, with `SEAT=` and `UID=` lines).
+pub const LOGIND_SESSIONS: &str = "/run/systemd/sessions";
+
+/// As `attest`, and the seat the game's environment names must also be the one logind itself recorded for that session
+/// and for this user: an environment is the launcher's claim, the session record is the system's.
+pub fn attest_confirmed(
+    game_environ: &[u8],
+    live: &LiveSession,
+    logind_dir: &std::path::Path,
+    uid: u32,
+) -> Result<IsolatedSeat, &'static str> {
+    let seat = attest(game_environ, live)?;
+    let id = environment(game_environ)
+        .get("XDG_SESSION_ID")
+        .cloned()
+        .unwrap_or_default();
+    // The id names a file: nothing but a session id's own characters may reach the path.
+    if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        return Err("GameSessionNotKnownToLogind");
+    }
+    let record =
+        std::fs::read_to_string(logind_dir.join(&id)).map_err(|_| "GameSessionNotKnownToLogind")?;
+    let field = |name: &str| {
+        record.lines().find_map(|line| {
+            line.strip_prefix(name)
+                .and_then(|rest| rest.strip_prefix('='))
+        })
+    };
+    if field("SEAT") != Some(seat.seat()) || field("UID") != Some(uid.to_string().as_str()) {
+        return Err("GameSeatNotConfirmedByLogind");
+    }
+    Ok(seat)
+}
+
 /// A device sink that says which display its device is bound to.
 pub trait BoundSink: EventSink {
     fn bound_display(&self) -> &str;
