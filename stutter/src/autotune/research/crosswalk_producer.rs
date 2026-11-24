@@ -30,6 +30,11 @@ const PRODUCED: [(&str, &str, &str); 3] = [
     ("5.17", "cpu-frequency-events", "cpu_freq_samples"),
 ];
 
+/// Whether the resident runtime produces observation evidence for this dossier at all.
+pub(super) fn produces(id: &str) -> bool {
+    PRODUCED.iter().any(|produced| produced.0 == id)
+}
+
 /// Write the campaign's observations record and its evidence artifacts from the children's raw windows.
 pub fn produce(campaign: &File, uid: u32, campaign_sha256: &str) -> anyhow::Result<()> {
     let Ok(studies) =

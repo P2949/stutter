@@ -283,6 +283,10 @@ pub struct Row {
     /// `ObservedInCampaign` only when the campaign supplied a digest of its own evidence for this row;
     /// otherwise `NotObservedInThisCampaign`, whatever the plan intended.
     pub observed_disposition: &'static str,
+    /// Why the row has the disposition it has: the evidence it rests on, or the typed reason there is none (no resident
+    /// producer feeds it, the produced signal was below its floor, or the plan itself blocks or excludes it). Absence of
+    /// evidence is never left to read as a proven exclusion, and an exclusion is never left to read as a missing signal.
+    pub observed_reason: &'static str,
     pub observed_source_sha256: Option<String>,
     pub evidence_digest: String,
     pub next_bug_if_any: Option<&'static str>,
@@ -294,6 +298,36 @@ pub enum CrosswalkError {
     CountMismatch(usize),
     UnknownId(String),
     MissingId(&'static str),
+}
+
+/// The disposition of a row in a campaign and why. A row the plan blocks or excludes says so; a row the plan wants observed
+/// is observed only with the campaign's own evidence, and otherwise says whether a resident producer exists for it at all.
+fn disposition(id: &str, planned: Closure, observed: bool) -> (&'static str, &'static str) {
+    if observed {
+        return ("ObservedInCampaign", "EvidenceVerified");
+    }
+    match planned {
+        Closure::BlockedHardware => ("BlockedHardware", "PlannedBlockedByHardware"),
+        Closure::BlockedPolicy => ("BlockedPolicy", "PlannedBlockedByPolicy"),
+        Closure::ExcludedGameApi => ("ExcludedGameApi", "PlannedExclusionTheGameCannotUse"),
+        Closure::AlreadySatisfied | Closure::FutureGraduation => {
+            ("NotAnObservationRole", "PlannedAsNeitherObservedNorTested")
+        }
+        Closure::Tested => (
+            "NotObservedInThisCampaign",
+            "PlannedAsATestNotAnObservation",
+        ),
+        // A resident producer exists for the three signals the runtime feeds; for them the campaign's signal was absent
+        // or below its floor. For every other dossier nothing in the resident runtime feeds it yet.
+        Closure::Observed if super::crosswalk_producer::produces(id) => (
+            "NotObservedInThisCampaign",
+            "ProducedSignalAbsentOrBelowItsFloor",
+        ),
+        Closure::Observed => (
+            "NotObservedInThisCampaign",
+            "NoResidentProducerFeedsThisDossier",
+        ),
+    }
 }
 
 /// Joins the static Cyberpunk roles to the integration coverage ledger. Exactly 34 rows are
@@ -360,11 +394,8 @@ pub fn build_rows_observed(
             signal_quality: "per-attempt provider quality; absent is unknown, never zero",
             permission: spec.2,
             closure: spec.1,
-            observed_disposition: if observed.contains_key(spec.0) {
-                "ObservedInCampaign"
-            } else {
-                "NotObservedInThisCampaign"
-            },
+            observed_disposition: disposition(spec.0, spec.1, observed.contains_key(spec.0)).0,
+            observed_reason: disposition(spec.0, spec.1, observed.contains_key(spec.0)).1,
             observed_source_sha256: observed.get(spec.0).cloned(),
             evidence_digest: digest,
             next_bug_if_any: None,
@@ -403,7 +434,7 @@ mod tests {
         assert!(
             plain
                 .iter()
-                .all(|r| r.observed_disposition == "NotObservedInThisCampaign"
+                .all(|r| r.observed_disposition != "ObservedInCampaign"
                     && r.observed_source_sha256.is_none())
         );
         let observed = [("5.1".to_owned(), "ab".repeat(32))].into();
@@ -421,6 +452,63 @@ mod tests {
         );
         let json = serde_json::to_value(one).unwrap();
         assert!(json.get("planned_closure").is_some() && json.get("closure").is_none());
+    }
+
+    /// Every one of the 34 rows says why it is not observed: a row the plan blocks or excludes says so (never a missing
+    /// signal), one the plan wants observed says whether a resident producer exists for it, and none is left unexplained.
+    #[test]
+    fn every_row_without_evidence_has_a_typed_reason_and_a_block_is_never_a_missing_signal() {
+        let rows = build_rows(&ledger()).expect("rows");
+        assert!(rows.iter().all(|r| !r.observed_reason.is_empty()));
+        for row in &rows {
+            match row.closure {
+                Closure::BlockedHardware => assert_eq!(
+                    (row.observed_disposition, row.observed_reason),
+                    ("BlockedHardware", "PlannedBlockedByHardware"),
+                    "{}",
+                    row.id
+                ),
+                Closure::BlockedPolicy => assert_eq!(
+                    (row.observed_disposition, row.observed_reason),
+                    ("BlockedPolicy", "PlannedBlockedByPolicy"),
+                    "{}",
+                    row.id
+                ),
+                Closure::ExcludedGameApi => {
+                    assert_eq!(row.observed_disposition, "ExcludedGameApi", "{}", row.id)
+                }
+                Closure::Tested => assert_eq!(
+                    row.observed_reason, "PlannedAsATestNotAnObservation",
+                    "{}",
+                    row.id
+                ),
+                Closure::Observed => assert_eq!(
+                    row.observed_reason,
+                    if matches!(row.id.as_str(), "5.13" | "5.17" | "5.22") {
+                        "ProducedSignalAbsentOrBelowItsFloor"
+                    } else {
+                        "NoResidentProducerFeedsThisDossier"
+                    },
+                    "{}",
+                    row.id
+                ),
+                Closure::AlreadySatisfied | Closure::FutureGraduation => {
+                    assert_eq!(
+                        row.observed_disposition, "NotAnObservationRole",
+                        "{}",
+                        row.id
+                    )
+                }
+            }
+        }
+        // With evidence, the reason is the evidence.
+        let observed = [("5.13".to_owned(), "ab".repeat(32))].into();
+        let with = build_rows_observed(&ledger(), &observed).expect("rows");
+        let row = with.iter().find(|r| r.id == "5.13").unwrap();
+        assert_eq!(
+            (row.observed_disposition, row.observed_reason),
+            ("ObservedInCampaign", "EvidenceVerified")
+        );
     }
 
     #[test]

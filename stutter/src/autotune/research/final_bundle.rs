@@ -127,10 +127,20 @@ fn crosswalk(response: &Value) -> Value {
             for row in &rows {
                 *counts.entry(format!("{:?}", row.closure)).or_default() += 1;
             }
+            let mut dispositions = std::collections::BTreeMap::<String, u32>::new();
+            for row in &rows {
+                *dispositions
+                    .entry(format!(
+                        "{}:{}",
+                        row.observed_disposition, row.observed_reason
+                    ))
+                    .or_default() += 1;
+            }
             json!({
                 "count": rows.len(),
                 "planned_closure_counts": counts,
                 "observed_in_campaign": rows.iter().filter(|r| r.observed_disposition == "ObservedInCampaign").count(),
+                "by_disposition": dispositions,
                 "rows": rows,
                 "note": "planned_closure is the plan's intended role for the dossier, not a result; observed_disposition says whether this campaign supplied evidence for it (only the dossiers named, with their digests, in the campaign's own crosswalk-observations record); a row is never GameBenefitValidated, and only a qualified study below can say a benefit was measured",
             })
