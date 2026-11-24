@@ -274,3 +274,50 @@ fn the_raw_archive_and_receipts_count_toward_the_campaign_storage_cap() {
         Some("CampaignEvidenceBytesExceeded")
     );
 }
+
+/// Without the optional frame provider the renderer is authenticated by what the attempt itself proves: a native result
+/// for its own process whose loaded runtime is the arm's own installation. A runtime that is another build's or unknown, or
+/// a session with no native result, does not authenticate it.
+#[test]
+fn the_renderer_is_authenticated_natively_only_by_a_matched_runtime_of_the_attempts_own_result() {
+    use crate::autotune::research::{
+        driver_attempts::resident::renderer_authenticated_natively, loaded_runtime::RuntimeBinding,
+    };
+    let run = run_campaign();
+    let uid = crate::syscall::geteuid();
+    let path = std::fs::read_dir(studies_dir(&run))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.join("evidence").is_dir())
+        .expect("a study with evidence");
+    let evidence = std::fs::File::open(path.join("evidence")).unwrap();
+    let items = crate::autotune::research::report_store::read_evidence(&evidence, uid).unwrap();
+    let native: Vec<_> = items
+        .values()
+        .filter(|item| item.native_completion.is_some())
+        .collect();
+    assert!(
+        !native.is_empty(),
+        "the campaign's attempts have native results"
+    );
+    for item in &native {
+        assert!(renderer_authenticated_natively(Some(item)));
+        for binding in [
+            Some(RuntimeBinding::Mismatched),
+            Some(RuntimeBinding::Unknown),
+            None,
+        ] {
+            let mut changed = (*item).clone();
+            changed.native_completion.as_mut().unwrap().runtime_binding = binding;
+            assert!(
+                !renderer_authenticated_natively(Some(&changed)),
+                "{binding:?}"
+            );
+        }
+        let mut none = (*item).clone();
+        none.native_completion = None;
+        assert!(!renderer_authenticated_natively(Some(&none)));
+    }
+    assert!(!renderer_authenticated_natively(None));
+}

@@ -359,6 +359,10 @@ impl DriverStudyAttempts {
                         && receipt["snapshots"].as_u64().unwrap_or(0) > 0
                 })
             });
+            // Without the optional frame provider the renderer is still authenticated by what the attempt itself proves: its
+            // native benchmark completed for this very process and the runtime the game mapped is the arm's own installation
+            // (the observation's GPU samples are checked separately for the floor).
+            let bound = bound || renderer_authenticated_natively(evidence.get(&process.slot));
             // The observation covers the part of the window inside the attempt.
             let clamped = AttemptResident {
                 started_unix: window.started_unix.max(process.started_unix),
@@ -476,4 +480,16 @@ pub(crate) fn latency_document(
     let bytes = action_latency_document(pairs);
     action_latency::verify(&bytes, schedule, processes).ok()?;
     Some(bytes)
+}
+
+/// Whether an attempt's native result authenticates the renderer without the frame provider: the benchmark completed for
+/// the attempt's own process and the loaded runtime is the arm's own installation. A long session has no native result.
+pub(crate) fn renderer_authenticated_natively(
+    evidence: Option<&super::super::report::AttemptEvidenceV1>,
+) -> bool {
+    evidence
+        .and_then(|item| item.native_completion.as_deref())
+        .is_some_and(|native| {
+            native.runtime_binding == Some(super::super::loaded_runtime::RuntimeBinding::Matched)
+        })
 }
