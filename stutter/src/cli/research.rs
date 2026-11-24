@@ -69,6 +69,19 @@ enum ResearchCommand {
         #[arg(long)]
         session_file: PathBuf,
     },
+    /// Record the destructive fault classes' fixture results from a `cargo test` log as evidence beside a study, and print the
+    /// cases a fault-matrix receipt carries for them. Local; touches nothing but the study directory.
+    FaultFixtures {
+        /// The private study directory the evidence is written beside.
+        #[arg(long)]
+        study_root: PathBuf,
+        /// The log of the fixture test run (`cargo test` output).
+        #[arg(long)]
+        test_log: PathBuf,
+        /// SHA-256 of the Stutter binary the fixtures ran against.
+        #[arg(long)]
+        binary_sha256: String,
+    },
     /// Record what the Stutter units actually run (binary hash, active state) against an expected
     /// pin, as a receipt in the study directory. Read-only and local.
     DeployReceipt {
@@ -130,6 +143,15 @@ impl From<ResearchArgs> for ResearchClientInput {
             ResearchCommand::SessionDefinition { session_file } => {
                 ResearchClientAction::SessionDefinition { session_file }
             }
+            ResearchCommand::FaultFixtures {
+                study_root,
+                test_log,
+                binary_sha256,
+            } => ResearchClientAction::FaultFixtures {
+                study_root,
+                test_log,
+                binary_sha256,
+            },
             ResearchCommand::DeployReceipt {
                 study_root,
                 systemctl,

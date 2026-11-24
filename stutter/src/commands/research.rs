@@ -43,6 +43,12 @@ pub enum ResearchClientAction {
     SessionDefinition {
         session_file: PathBuf,
     },
+    /// Record the destructive fault classes' fixture results from a test log beside a study. Local.
+    FaultFixtures {
+        study_root: PathBuf,
+        test_log: PathBuf,
+        binary_sha256: String,
+    },
     /// Read what the Stutter units actually run (binary path and hash, active state) and compare it
     /// with the expected pin; write the receipt into the study directory. Read-only and local.
     DeployReceipt {
@@ -201,6 +207,9 @@ fn request(action: ResearchClientAction, uid: u32) -> anyhow::Result<ResearchReq
         ResearchClientAction::SessionDefinition { .. } => {
             anyhow::bail!("session-definition does not use the resident socket")
         }
+        ResearchClientAction::FaultFixtures { .. } => {
+            anyhow::bail!("fault-fixtures does not use the resident socket")
+        }
         ResearchClientAction::Submit(path) => {
             let parent = path
                 .parent()
@@ -323,6 +332,14 @@ pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
     }
     if let ResearchClientAction::FreezeColdArms { intent, study_root } = &input.action {
         return freeze_cold_arms(intent, study_root, uid);
+    }
+    if let ResearchClientAction::FaultFixtures {
+        study_root,
+        test_log,
+        binary_sha256,
+    } = &input.action
+    {
+        return fault_fixtures(study_root, test_log, binary_sha256, uid);
     }
     if let ResearchClientAction::SessionDefinition { session_file } = &input.action {
         let authorization =
@@ -469,6 +486,33 @@ fn exchange(
         ),
         "research request was denied or blocked"
     );
+    Ok(())
+}
+
+/// Record the fixture results of the destructive fault classes from a test log beside the private study directory, and
+/// print the cases the matrix receipt carries.
+fn fault_fixtures(
+    study_root: &std::path::Path,
+    test_log: &std::path::Path,
+    binary_sha256: &str,
+    uid: u32,
+) -> anyhow::Result<()> {
+    let meta = std::fs::symlink_metadata(study_root)?;
+    anyhow::ensure!(
+        meta.is_dir() && meta.uid() == uid && meta.mode() & 0o077 == 0,
+        "untrusted study directory"
+    );
+    let log = std::fs::read_to_string(test_log)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let cases = crate::autotune::research::fault_matrix::fault_fixtures::produce(
+        study_root,
+        binary_sha256,
+        now,
+        crate::autotune::research::fault_matrix::fault_fixtures::runner_from_log(&log),
+    )?;
+    println!("{}", serde_json::to_string_pretty(&cases)?);
     Ok(())
 }
 

@@ -57,6 +57,10 @@ pub struct AttemptResident {
     /// CPU frequency events the runtime saw while the attempt ran.
     pub cpu_freq_samples: u64,
     pub psi_samples: u64,
+    /// Looks at the host (one per interval the game was seen in) that showed each fact the crosswalk observes.
+    pub topology_samples: u64,
+    pub single_numa_samples: u64,
+    pub memory_guard_samples: u64,
     /// One epoch per interval event of the target, so the stretch while an action was held can be cut out exactly.
     pub epochs: Vec<Epoch>,
     /// The attempt outgrew the epoch bound: no pair is derived from this window.
@@ -106,6 +110,9 @@ struct Running {
     gpu: u64,
     cpu_freq: u64,
     psi: u64,
+    topology: u64,
+    single_numa: u64,
+    memory_guard: u64,
     unattributed: u64,
     guard_events: Vec<GuardEvent>,
     guard_events_truncated: bool,
@@ -123,6 +130,8 @@ pub struct ResidentObserver {
     finished: Vec<AttemptResident>,
     /// The clock that stamps an epoch (unix seconds); the system clock unless a test sets another.
     clock: Option<fn() -> u64>,
+    /// Where the host's files are read from: `/` unless a test supplies a root.
+    host_root: Option<std::path::PathBuf>,
 }
 
 impl ResidentObserver {
@@ -156,6 +165,9 @@ impl ResidentObserver {
             gpu: 0,
             cpu_freq: 0,
             psi: 0,
+            topology: 0,
+            single_numa: 0,
+            memory_guard: 0,
             unattributed: 0,
             epochs: Vec::new(),
             epochs_truncated: false,
@@ -176,6 +188,12 @@ impl ResidentObserver {
 
     fn now(&self) -> u64 {
         self.clock.map_or_else(unix_now, |clock| clock())
+    }
+
+    /// A root for the host's files, where `/` is not the host the caller means.
+    pub fn with_host_root(mut self, root: std::path::PathBuf) -> Self {
+        self.host_root = Some(root);
+        self
     }
 
     /// A clock for the epochs (unix seconds), where the system's is not the one the caller means.
@@ -252,6 +270,18 @@ impl ResidentObserver {
             // One scheduler and one pressure reading per interval in which the runtime saw the game.
             running.cpu = running.cpu.saturating_add(1);
             running.psi = running.psi.saturating_add(1);
+            let host = host_probe::readings(
+                self.host_root
+                    .as_deref()
+                    .unwrap_or(std::path::Path::new("/")),
+            );
+            running.topology = running.topology.saturating_add(u64::from(host.topology));
+            running.single_numa = running
+                .single_numa
+                .saturating_add(u64::from(host.single_numa_node));
+            running.memory_guard = running
+                .memory_guard
+                .saturating_add(u64::from(host.memory_guard));
         }
     }
 
@@ -394,6 +424,9 @@ impl ResidentObserver {
                 gpu_samples: running.gpu,
                 cpu_freq_samples: running.cpu_freq,
                 psi_samples: running.psi,
+                topology_samples: running.topology,
+                single_numa_samples: running.single_numa,
+                memory_guard_samples: running.memory_guard,
                 epochs: running.epochs,
                 epochs_truncated: running.epochs_truncated,
                 guard_events: running.guard_events,
@@ -481,6 +514,8 @@ pub fn window_record(window: &AttemptResident) -> serde_json::Value {
         "target_changed": window.target_changed,
         "epochs": window.epochs, "epochs_truncated": window.epochs_truncated,
         "cpu_samples": window.cpu_samples, "gpu_samples": window.gpu_samples, "cpu_freq_samples": window.cpu_freq_samples,
+        "topology_samples": window.topology_samples, "single_numa_samples": window.single_numa_samples,
+        "memory_guard_samples": window.memory_guard_samples,
         "psi_samples": window.psi_samples, "unattributed_intervals": window.unattributed_intervals, "evaluations": window.evaluations,
         "denied_evaluations": window.denied_evaluations,
         "affinity_candidates": window.affinity_candidates, "cgroup_candidates": window.cgroup_candidates,
@@ -539,6 +574,9 @@ impl Running {
         }
     }
 }
+
+#[path = "host_probe.rs"]
+pub(crate) mod host_probe;
 
 #[path = "guard_events.rs"]
 pub(crate) mod guard_events;

@@ -106,3 +106,14 @@ fn evidence_for_another_binary_is_refused_by_the_verifier() {
         Err("FaultEvidenceMisclassified")
     );
 }
+
+#[test]
+fn a_test_log_gives_a_pass_only_for_a_fixture_whose_own_line_says_ok() {
+    let log = "running 3 tests\n\
+        test autotune::a::tests::a_worker_that_dies_after_the_prepare_is_an_error_with_the_token_already_journaled ... ok\n\
+        test autotune::b::tests::a_hook_recovers_every_arm_that_a_crash_left_edited ... FAILED\n";
+    let mut run = runner_from_log(log);
+    assert!(run(FIXTURE_TESTS[0].1).unwrap().passed);
+    assert!(!run(FIXTURE_TESTS[1].1).unwrap().passed);
+    assert!(run(FIXTURE_TESTS[2].1).is_none());
+}

@@ -7,6 +7,8 @@
 //! * 5.22 PSI: pressure readings in the game's interval records (`psi_samples`).
 //! * 5.13 GPU owner/observe: GPU samples (`gpu_samples`).
 //! * 5.17 CPU frequency and power guardrail: CPU frequency events (`cpu_freq_samples`).
+//! * 5.9 CPU topology, 5.19 one online NUMA node and 5.20 memory guardrail: the kernel's own files (`resident_observer::host_probe`),
+//!   looked at once per interval in which the runtime saw the game.
 //!
 //! A dossier with a single attempt short of the sample floor, or no window at all, is not produced: absence stays
 //! `NotObservedInThisCampaign`. Nothing here upgrades a dossier from a plan or a fixture.
@@ -24,10 +26,13 @@ use super::{
 };
 
 /// The dossiers produced, with the provider that fed each and the raw counter that shows it.
-const PRODUCED: [(&str, &str, &str); 3] = [
+const PRODUCED: [(&str, &str, &str); 6] = [
     ("5.22", "psi-interval-records", "psi_samples"),
     ("5.13", "gpu-sample-events", "gpu_samples"),
     ("5.17", "cpu-frequency-events", "cpu_freq_samples"),
+    ("5.9", "host-cpu-topology-files", "topology_samples"),
+    ("5.19", "host-numa-node-online", "single_numa_samples"),
+    ("5.20", "host-memory-guard-files", "memory_guard_samples"),
 ];
 
 /// Whether the resident runtime produces observation evidence for this dossier at all.

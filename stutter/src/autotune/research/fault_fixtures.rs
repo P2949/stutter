@@ -20,13 +20,6 @@ pub struct FixtureRun {
 
 /// Run every destructive class's fixture through `run` (given the test's name) and store the evidence of each beside
 /// `study` for the binary `binary_sha256`. Returns one case per class, in `FIXTURE_TESTS` order.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the operator's fault-matrix command assembles the receipt from these cases; until then tests drive it"
-    )
-)]
 pub fn produce(
     study: &std::path::Path,
     binary_sha256: &str,
@@ -78,6 +71,20 @@ pub fn produce(
         });
     }
     Ok(cases)
+}
+
+/// A runner over the text of a `cargo test` run: a fixture passed when its line ends `ok`, failed when the log says anything
+/// else about it, and is missing when the log never names it. The matching line is kept as the evidence output.
+pub fn runner_from_log(log: &str) -> impl FnMut(&str) -> Option<FixtureRun> + '_ {
+    move |test| {
+        let line = log
+            .lines()
+            .find(|line| line.starts_with("test ") && line.contains(&format!("::{test} ... ")))?;
+        Some(FixtureRun {
+            passed: line.ends_with(" ... ok"),
+            output: line.to_owned(),
+        })
+    }
 }
 
 #[cfg(test)]

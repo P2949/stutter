@@ -188,3 +188,22 @@ fn an_unreadable_child_window_file_is_an_error_and_the_evidence_names_the_files_
     assert_eq!(artifact["sources"][0]["child"], "0123456789abcdef");
     assert_eq!(artifact["sources"].as_array().unwrap().len(), 1);
 }
+
+#[test]
+fn the_host_facts_are_observed_only_when_every_attempt_looked_at_them_enough_times() {
+    let c = campaign();
+    let host = |topology: u64, numa: u64, memory: u64| {
+        json!({ "started_unix": 1_000, "ended_unix": 1_100, "topology_samples": topology,
+                "single_numa_samples": numa, "memory_guard_samples": memory })
+    };
+    child(
+        &c,
+        "0123456789abcdef",
+        vec![host(20, 20, 20), host(20, 9, 20)],
+    );
+    produce(&c.file, c.uid, CAMPAIGN).unwrap();
+    // The second attempt saw one node too few times: 5.19 is not observed; 5.9 and 5.20 are.
+    let mut seen = observed(&c).unwrap();
+    seen.sort();
+    assert_eq!(seen, ["5.20", "5.9"]);
+}

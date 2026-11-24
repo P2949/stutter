@@ -42,13 +42,6 @@ pub const DESTRUCTIVE_CLASSES: [&str; 3] = [
 /// settings crash and a GPU reset, each against a fixture and never against the real game. A fixture case in a receipt
 /// stands for its class only because one of these tests passes against the binary; a test pins that these tests exist, so the
 /// mapping cannot name a fixture that was renamed or removed.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the producer of a fixture case runs these tests and records the result; until it exists the mapping is pinned by a test"
-    )
-)]
 pub const FIXTURE_TESTS: [(&str, &str); 3] = [
     (
         "worker_death_tokens_settled",

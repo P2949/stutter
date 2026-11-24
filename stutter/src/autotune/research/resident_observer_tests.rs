@@ -355,3 +355,35 @@ fn each_interval_event_of_the_target_is_kept_as_an_epoch_and_a_window_that_outgr
     assert!(window.epochs_truncated);
     assert_eq!(window.epochs.len(), MAX_EPOCHS);
 }
+
+/// The host facts are looked at once per interval in which the game was seen, from the files under the observer's root.
+#[test]
+fn each_interval_the_game_was_seen_in_looks_at_the_hosts_own_files() {
+    let host = tempfile::tempdir().unwrap();
+    let put = |relative: &str, text: &str| {
+        let path = host.path().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    put("sys/devices/system/cpu/online", "0-11\n");
+    put(
+        "sys/devices/system/cpu/cpu0/topology/thread_siblings_list",
+        "0,6\n",
+    );
+    put("sys/devices/system/node/online", "0\n");
+    let mut observer = ResidentObserver::default().with_host_root(host.path().to_path_buf());
+    observer.arm(target(), Some(0), 1_010);
+    for _ in 0..12 {
+        observer.observe_intervals(&[interval(4242, TaskClass::Game, 100, 500_000)], 0);
+    }
+    let window = observer.freeze(1_090).remove(0);
+    // Topology and the single node were readable every time; the memory files were never there.
+    assert_eq!(
+        (
+            window.topology_samples,
+            window.single_numa_samples,
+            window.memory_guard_samples
+        ),
+        (12, 12, 0)
+    );
+}
