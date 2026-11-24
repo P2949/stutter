@@ -7,18 +7,18 @@ fn put(root: &Path, relative: &str, text: &str) {
 }
 
 fn host(root: &Path) {
-    put(root, "sys/devices/system/cpu/online", "0-11\n");
+    let cpu = "sys/devices/system/cpu";
+    put(root, &format!("{cpu}/online"), "0-11\n");
     put(
         root,
-        "sys/devices/system/cpu/cpu0/topology/thread_siblings_list",
+        &format!("{cpu}/cpu0/topology/thread_siblings_list"),
         "0,6\n",
     );
     put(root, "sys/devices/system/node/online", "0\n");
-    put(
-        root,
-        "proc/pressure/memory",
-        "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n",
-    );
+    let some = "some avg10=0.00 avg60=0.00 avg300=0.00 total=0\n";
+    put(root, "proc/pressure/memory", some);
+    put(root, "proc/pressure/io", some);
+    put(root, "proc/pressure/cpu", some);
     put(root, "proc/swaps", "Filename\tType\tSize\tUsed\tPriority\n");
     put(root, "proc/vmstat", "nr_free_pages 1\noom_kill 0\n");
     put(
@@ -29,54 +29,78 @@ fn host(root: &Path) {
     put(root, "proc/irq/default_smp_affinity", "fff\n");
     put(
         root,
-        "sys/devices/system/cpu/cpu0/cpufreq/scaling_governor",
+        &format!("{cpu}/cpu0/cpufreq/scaling_governor"),
         "powersave\n",
     );
     put(
         root,
-        "sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference",
+        &format!("{cpu}/cpu0/cpufreq/energy_performance_preference"),
         "balance_performance\n",
     );
+    put(root, "sys/kernel/sched_ext/state", "disabled\n");
+    put(
+        root,
+        "sys/kernel/mm/damon/admin/kdamonds/nr_kdamonds",
+        "0\n",
+    );
+    put(
+        root,
+        "proc/cpuinfo",
+        "processor\t: 0\nflags\t\t: fpu vme sse4_2\n",
+    );
+}
+
+fn counts(root: &Path, name: &str) -> bool {
+    readings(root)
+        .into_iter()
+        .find(|(counter, _)| *counter == name)
+        .is_some_and(|(_, counted)| counted)
 }
 
 #[test]
 fn each_fact_is_read_from_its_own_files_and_a_missing_or_odd_one_counts_for_nothing() {
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(readings(dir.path()), HostReadings::default());
-    host(dir.path());
-    assert_eq!(
-        readings(dir.path()),
-        HostReadings {
-            topology: true,
-            single_numa_node: true,
-            memory_guard: true,
-            irq_placement: true,
-            power_policy: true
-        }
-    );
-    // Two online nodes is not the single-node host the dossier observes.
-    put(dir.path(), "sys/devices/system/node/online", "0-1\n");
-    assert!(!readings(dir.path()).single_numa_node);
-    // A PSI file of another shape, or no OOM counter, is not the guardrail's signal.
-    put(dir.path(), "proc/pressure/memory", "garbage\n");
-    assert!(!readings(dir.path()).memory_guard);
-    host(dir.path());
-    put(dir.path(), "proc/vmstat", "nr_free_pages 1\n");
-    assert!(!readings(dir.path()).memory_guard);
-    host(dir.path());
-    put(
-        dir.path(),
-        "sys/devices/system/cpu/cpu0/topology/thread_siblings_list",
-        "\n",
-    );
-    assert!(!readings(dir.path()).topology);
-    host(dir.path());
-    put(dir.path(), "proc/interrupts", "CPU0\n");
-    put(
-        dir.path(),
-        "sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference",
-        "",
-    );
-    let both = readings(dir.path());
-    assert!(!both.irq_placement && !both.power_policy);
+    let root = dir.path();
+    assert!(readings(root).iter().all(|(_, counted)| !counted));
+    host(root);
+    assert!(readings(root).iter().all(|(name, counted)| *counted || {
+        panic!("{name} was not counted on a complete host")
+    }));
+    // Each rule fails on its own odd shape, and only that counter goes.
+    let breaks: [(&str, &str, &str); 8] = [
+        (
+            "single_numa_samples",
+            "sys/devices/system/node/online",
+            "0-1\n",
+        ),
+        ("memory_guard_samples", "proc/pressure/memory", "garbage\n"),
+        ("memory_guard_samples", "proc/vmstat", "nr_free_pages 1\n"),
+        (
+            "topology_samples",
+            "sys/devices/system/cpu/cpu0/topology/thread_siblings_list",
+            "\n",
+        ),
+        ("irq_placement_samples", "proc/interrupts", "CPU0\n"),
+        (
+            "damon_samples",
+            "sys/kernel/mm/damon/admin/kdamonds/nr_kdamonds",
+            "x\n",
+        ),
+        (
+            "resctrl_absent_samples",
+            "proc/cpuinfo",
+            "flags\t: fpu rdt_a\n",
+        ),
+        ("io_pressure_samples", "proc/pressure/cpu", "garbage\n"),
+    ];
+    for (counter, file, text) in breaks {
+        host(root);
+        put(root, file, text);
+        assert!(!counts(root, counter), "{counter} with {file}");
+        let others = readings(root)
+            .iter()
+            .filter(|(name, counted)| *name != counter && !counted)
+            .count();
+        assert_eq!(others, 0, "only {counter} should go");
+    }
 }

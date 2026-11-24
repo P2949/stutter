@@ -58,11 +58,7 @@ pub struct AttemptResident {
     pub cpu_freq_samples: u64,
     pub psi_samples: u64,
     /// Looks at the host (one per interval the game was seen in) that showed each fact the crosswalk observes.
-    pub topology_samples: u64,
-    pub single_numa_samples: u64,
-    pub memory_guard_samples: u64,
-    pub irq_placement_samples: u64,
-    pub power_policy_samples: u64,
+    pub host_samples: std::collections::BTreeMap<String, u64>,
     /// One epoch per interval event of the target, so the stretch while an action was held can be cut out exactly.
     pub epochs: Vec<Epoch>,
     /// The attempt outgrew the epoch bound: no pair is derived from this window.
@@ -112,11 +108,7 @@ struct Running {
     gpu: u64,
     cpu_freq: u64,
     psi: u64,
-    topology: u64,
-    single_numa: u64,
-    memory_guard: u64,
-    irq_placement: u64,
-    power_policy: u64,
+    host: std::collections::BTreeMap<String, u64>,
     unattributed: u64,
     guard_events: Vec<GuardEvent>,
     guard_events_truncated: bool,
@@ -169,11 +161,7 @@ impl ResidentObserver {
             gpu: 0,
             cpu_freq: 0,
             psi: 0,
-            topology: 0,
-            single_numa: 0,
-            memory_guard: 0,
-            irq_placement: 0,
-            power_policy: 0,
+            host: std::collections::BTreeMap::new(),
             unattributed: 0,
             epochs: Vec::new(),
             epochs_truncated: false,
@@ -281,19 +269,10 @@ impl ResidentObserver {
                     .as_deref()
                     .unwrap_or(std::path::Path::new("/")),
             );
-            running.topology = running.topology.saturating_add(u64::from(host.topology));
-            running.single_numa = running
-                .single_numa
-                .saturating_add(u64::from(host.single_numa_node));
-            running.memory_guard = running
-                .memory_guard
-                .saturating_add(u64::from(host.memory_guard));
-            running.irq_placement = running
-                .irq_placement
-                .saturating_add(u64::from(host.irq_placement));
-            running.power_policy = running
-                .power_policy
-                .saturating_add(u64::from(host.power_policy));
+            for (name, counted) in host {
+                let slot = running.host.entry(name.to_owned()).or_insert(0);
+                *slot = slot.saturating_add(u64::from(counted));
+            }
         }
     }
 
@@ -436,11 +415,7 @@ impl ResidentObserver {
                 gpu_samples: running.gpu,
                 cpu_freq_samples: running.cpu_freq,
                 psi_samples: running.psi,
-                topology_samples: running.topology,
-                single_numa_samples: running.single_numa,
-                memory_guard_samples: running.memory_guard,
-                irq_placement_samples: running.irq_placement,
-                power_policy_samples: running.power_policy,
+                host_samples: running.host,
                 epochs: running.epochs,
                 epochs_truncated: running.epochs_truncated,
                 guard_events: running.guard_events,
@@ -519,7 +494,7 @@ pub const WINDOWS_FILE: &str = "resident-windows.json";
 
 /// One window as raw counters, the immutable evidence the sealed records are derived from.
 pub fn window_record(window: &AttemptResident) -> serde_json::Value {
-    serde_json::json!({
+    let mut record = serde_json::json!({
         "attempt": window.attempt, "cgroup": window.cgroup,
         "pid": window.target.pid, "start_ticks": window.target.start_ticks, "uid": window.target.uid,
         "started_unix": window.started_unix, "ended_unix": window.ended_unix,
@@ -528,9 +503,6 @@ pub fn window_record(window: &AttemptResident) -> serde_json::Value {
         "target_changed": window.target_changed,
         "epochs": window.epochs, "epochs_truncated": window.epochs_truncated,
         "cpu_samples": window.cpu_samples, "gpu_samples": window.gpu_samples, "cpu_freq_samples": window.cpu_freq_samples,
-        "topology_samples": window.topology_samples, "single_numa_samples": window.single_numa_samples,
-        "memory_guard_samples": window.memory_guard_samples, "irq_placement_samples": window.irq_placement_samples,
-        "power_policy_samples": window.power_policy_samples,
         "psi_samples": window.psi_samples, "unattributed_intervals": window.unattributed_intervals, "evaluations": window.evaluations,
         "denied_evaluations": window.denied_evaluations,
         "affinity_candidates": window.affinity_candidates, "cgroup_candidates": window.cgroup_candidates,
@@ -540,7 +512,12 @@ pub fn window_record(window: &AttemptResident) -> serde_json::Value {
             "thermal_throttle_count": g.thermal_throttle_count, "cpu_power_limited": g.cpu_power_limited,
             "gpu_power_limited": g.gpu_power_limited,
         })),
-    })
+    });
+    // What each look at the host showed, by counter name.
+    for (name, count) in &window.host_samples {
+        record[name] = (*count).into();
+    }
+    record
 }
 
 /// The resident-observation entry of one finished window, from what was counted (nothing is stated): the lost samples

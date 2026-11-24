@@ -382,11 +382,11 @@ fn each_interval_the_game_was_seen_in_looks_at_the_hosts_own_files() {
     // Topology and the single node were readable every time; the memory files were never there.
     assert_eq!(
         (
-            window.topology_samples,
-            window.single_numa_samples,
-            window.memory_guard_samples,
-            window.irq_placement_samples,
-            window.power_policy_samples
+            window.host_samples["topology_samples"],
+            window.host_samples["single_numa_samples"],
+            window.host_samples["memory_guard_samples"],
+            window.host_samples["irq_placement_samples"],
+            window.host_samples["power_policy_samples"],
         ),
         (12, 12, 0, 12, 0)
     );
