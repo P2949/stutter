@@ -70,7 +70,8 @@ fn a_route_reaches_the_helper_only_through_an_attested_seat_whole_and_a_dead_hel
         x_display: ":0".into(),
         session_id: "11".into(),
     };
-    let game = b"WAYLAND_DISPLAY=wayland-77\0DISPLAY=:77\0XDG_SESSION_ID=42\0".to_vec();
+    let game =
+        b"WAYLAND_DISPLAY=wayland-77\0DISPLAY=:77\0XDG_SESSION_ID=42\0XDG_SEAT=seat7\0".to_vec();
     let seat = attest(&game, &live).unwrap();
     // A helper bound to the live display is refused by the seat gate before any event is written.
     let on_live = SeatSocketSink::connect(&path, uid, "wayland-1").unwrap();

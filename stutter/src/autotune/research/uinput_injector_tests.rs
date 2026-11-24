@@ -11,7 +11,7 @@ fn seat() -> IsolatedSeat {
         session_id: "11".into(),
     };
     attest(
-        b"WAYLAND_DISPLAY=wayland-77\0DISPLAY=:77\0XDG_SESSION_ID=42\0",
+        b"WAYLAND_DISPLAY=wayland-77\0DISPLAY=:77\0XDG_SESSION_ID=42\0XDG_SEAT=seat7\0",
         &live,
     )
     .unwrap()
@@ -33,33 +33,48 @@ fn a_device_with_no_seat_or_on_another_seat_is_never_written_to() {
     // No ID_SEAT means seat0: the live seat.
     assert_eq!(udev_seat("E:ID_INPUT=1\nE:ID_INPUT_KEY=1\n"), "seat0");
     assert_eq!(udev_seat("E:ID_INPUT=1\nE:ID_SEAT=seat7\n"), "seat7");
-    let refused = |record: &str, seat: &str| {
-        DeviceInjector::new(Vec::<u8>::new(), &seat_for_test(), record, seat).err()
+    // The seat is the attested session's own (seat7): a device must be on exactly that one.
+    let refused =
+        |record: &str| DeviceInjector::new(Vec::<u8>::new(), &seat_for_test(), record).err();
+    assert_eq!(
+        refused("E:ID_INPUT=1\n"),
+        Some("DeviceNotOnTheIsolatedSeat")
+    );
+    assert_eq!(
+        refused("E:ID_SEAT=seat0\n"),
+        Some("DeviceNotOnTheIsolatedSeat")
+    );
+    assert_eq!(
+        refused("E:ID_SEAT=seat8\n"),
+        Some("DeviceNotOnTheIsolatedSeat")
+    );
+    assert!(DeviceInjector::new(Vec::<u8>::new(), &seat_for_test(), "E:ID_SEAT=seat7\n").is_ok());
+}
+
+/// The seat comes from the game's own session, so no caller can name a seat of its choosing, and a game on `seat0` (or on
+/// no seat the kernel's session shows) can never be attested at all.
+#[test]
+fn a_game_on_the_live_seat_or_on_none_is_never_attested() {
+    let live = LiveSession {
+        wayland_display: "wayland-1".into(),
+        x_display: ":0".into(),
+        session_id: "11".into(),
+    };
+    let game = |seat: &str| {
+        format!("WAYLAND_DISPLAY=wayland-77\0DISPLAY=:77\0XDG_SESSION_ID=42\0{seat}").into_bytes()
     };
     assert_eq!(
-        refused("E:ID_INPUT=1\n", "seat7"),
-        Some("DeviceNotOnTheIsolatedSeat")
+        attest(&game("XDG_SEAT=seat0\0"), &live).err(),
+        Some("GameOnTheLiveSeat")
+    );
+    assert_eq!(attest(&game(""), &live).err(), Some("GameSeatUnknown"));
+    assert_eq!(
+        attest(&game("XDG_SEAT=\0"), &live).err(),
+        Some("GameSeatUnknown")
     );
     assert_eq!(
-        refused("E:ID_SEAT=seat0\n", "seat7"),
-        Some("DeviceNotOnTheIsolatedSeat")
-    );
-    assert_eq!(
-        refused("E:ID_SEAT=seat8\n", "seat7"),
-        Some("DeviceNotOnTheIsolatedSeat")
-    );
-    // An isolated seat that is named seat0 (or not named) is the live seat.
-    assert_eq!(
-        refused("E:ID_SEAT=seat0\n", "seat0"),
-        Some("IsolatedSeatNameIsTheLiveSeat")
-    );
-    assert_eq!(
-        refused("E:ID_INPUT=1\n", "seat0"),
-        Some("IsolatedSeatNameIsTheLiveSeat")
-    );
-    assert_eq!(
-        refused("E:ID_SEAT=\n", ""),
-        Some("IsolatedSeatNameIsTheLiveSeat")
+        attest(&game("XDG_SEAT=seat7\0"), &live).unwrap().seat(),
+        "seat7"
     );
 }
 
@@ -81,13 +96,8 @@ fn a_device_on_the_isolated_seat_receives_whole_events_through_the_helper() {
             Ok(())
         }
     }
-    let injector = DeviceInjector::new(
-        Shared(written.clone()),
-        &seat(),
-        "E:ID_SEAT=seat7\n",
-        "seat7",
-    )
-    .unwrap();
+    let injector =
+        DeviceInjector::new(Shared(written.clone()), &seat(), "E:ID_SEAT=seat7\n").unwrap();
     let mut helper = SeatHelper::new(injector, &seat());
     let mut route = Vec::new();
     route.extend_from_slice(&encode_key(Key::W, true));

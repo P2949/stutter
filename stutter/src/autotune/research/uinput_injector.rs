@@ -61,19 +61,14 @@ pub struct DeviceInjector<W: Write> {
 }
 
 impl<W: Write> DeviceInjector<W> {
-    /// `record` is the device\'s own udev record; `isolated_seat_name` is the seat the isolated session was given. The
-    /// device must be on that seat, and that seat must not be `seat0` (the seat of the live session).
-    pub fn new(
-        writer: W,
-        _seat: &IsolatedSeat,
-        record: &str,
-        isolated_seat_name: &str,
-    ) -> Result<Self, &'static str> {
-        let on = udev_seat(record);
-        if isolated_seat_name.is_empty() || isolated_seat_name == "seat0" {
+    /// `record` is the device\'s own udev record. The seat it must be on is the attested seat's own (the game session's
+    /// logind seat), never a name the caller supplies, and that seat is never `seat0` (the live session's).
+    pub fn new(writer: W, seat: &IsolatedSeat, record: &str) -> Result<Self, &'static str> {
+        let name = seat.seat();
+        if name.is_empty() || name == "seat0" {
             return Err("IsolatedSeatNameIsTheLiveSeat");
         }
-        if on != isolated_seat_name {
+        if udev_seat(record) != name {
             return Err("DeviceNotOnTheIsolatedSeat");
         }
         Ok(Self { writer })

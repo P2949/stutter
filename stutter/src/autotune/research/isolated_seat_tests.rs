@@ -17,6 +17,7 @@ fn game(extra: &[(&str, &str)]) -> Vec<u8> {
         ("WAYLAND_DISPLAY", "wayland-77"),
         ("DISPLAY", ":77"),
         ("XDG_SESSION_ID", "42"),
+        ("XDG_SEAT", "seat7"),
     ];
     env.extend_from_slice(extra);
     env.into_iter()

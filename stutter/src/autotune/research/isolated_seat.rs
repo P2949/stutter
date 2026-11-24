@@ -4,8 +4,8 @@
 //!
 //! * `attest` turns the game process's own environment (read from the kernel) and the user's live session into an
 //!   `IsolatedSeat`, and refuses unless the game runs on a display of its own: a Wayland display and an X display
-//!   that are not the live session's, no Hyprland instance, and not the live session id. An absent or shared display
-//!   is refused, never assumed isolated.
+//!   that are not the live session's, no Hyprland instance, not the live session id, and a logind seat other than
+//!   `seat0`. An absent or shared display or seat is refused, never assumed isolated.
 //! * `IsolatedSink` wraps a device sink and can only be built from an attested seat and a sink that names the very
 //!   display it is bound to; a sink bound anywhere else (above all, the live display) is refused at construction and
 //!   can never be written through.
@@ -30,12 +30,19 @@ pub struct LiveSession {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IsolatedSeat {
     display: String,
+    seat: String,
 }
 
 impl IsolatedSeat {
     /// The Wayland display the game runs on.
     pub fn display(&self) -> &str {
         &self.display
+    }
+
+    /// The logind seat of the game's own session (`XDG_SEAT` of its environment), never `seat0`. A device is on the
+    /// isolated seat only when udev attaches it to this one: the name is the game's, not a caller's.
+    pub fn seat(&self) -> &str {
+        &self.seat
     }
 }
 
@@ -77,8 +84,17 @@ pub fn attest(game_environ: &[u8], live: &LiveSession) -> Result<IsolatedSeat, &
     {
         return Err("GameSharesTheLiveSession");
     }
+    // The seat logind gave the game's session: absent is unknown, and seat0 is the live session's own seat.
+    let seat = env
+        .get("XDG_SEAT")
+        .filter(|value| !value.is_empty())
+        .ok_or("GameSeatUnknown")?;
+    if seat == "seat0" {
+        return Err("GameOnTheLiveSeat");
+    }
     Ok(IsolatedSeat {
         display: wayland.clone(),
+        seat: seat.clone(),
     })
 }
 

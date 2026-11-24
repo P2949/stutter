@@ -36,7 +36,7 @@ fn seat() -> IsolatedSeat {
         session_id: "11".into(),
     };
     attest(
-        b"WAYLAND_DISPLAY=wayland-77\0DISPLAY=:77\0XDG_SESSION_ID=42\0",
+        b"WAYLAND_DISPLAY=wayland-77\0DISPLAY=:77\0XDG_SESSION_ID=42\0XDG_SEAT=seat7\0",
         &live,
     )
     .unwrap()
