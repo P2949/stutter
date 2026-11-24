@@ -543,6 +543,21 @@ mod tests {
         assert_eq!(supported[0].id, "5.21");
     }
 
+    /// Every dossier the plan wants observed has a resident producer: none is left as 'nothing feeds it'.
+    #[test]
+    fn every_dossier_the_plan_wants_observed_has_a_resident_producer() {
+        for spec in SPECS
+            .iter()
+            .filter(|spec| matches!(spec.1, Closure::Observed))
+        {
+            assert!(
+                super::super::crosswalk_producer::produces(spec.0),
+                "{} has no resident producer",
+                spec.0
+            );
+        }
+    }
+
     #[test]
     fn rejects_thirty_three_and_unknown_ids() {
         let mut doc: serde_json::Value = serde_json::from_str(&ledger()).expect("json");
