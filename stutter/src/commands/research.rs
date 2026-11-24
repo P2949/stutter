@@ -48,6 +48,7 @@ pub enum ResearchClientAction {
         study_root: PathBuf,
         test_log: PathBuf,
         binary_sha256: String,
+        physical_cases: Option<PathBuf>,
     },
     /// Read what the Stutter units actually run (binary path and hash, active state) and compare it
     /// with the expected pin; write the receipt into the study directory. Read-only and local.
@@ -337,9 +338,16 @@ pub async fn run(input: ResearchClientInput) -> anyhow::Result<()> {
         study_root,
         test_log,
         binary_sha256,
+        physical_cases,
     } = &input.action
     {
-        return fault_fixtures(study_root, test_log, binary_sha256, uid);
+        return fault_fixtures(
+            study_root,
+            test_log,
+            binary_sha256,
+            physical_cases.as_deref(),
+            uid,
+        );
     }
     if let ResearchClientAction::SessionDefinition { session_file } = &input.action {
         let authorization =
@@ -495,6 +503,7 @@ fn fault_fixtures(
     study_root: &std::path::Path,
     test_log: &std::path::Path,
     binary_sha256: &str,
+    physical_cases: Option<&std::path::Path>,
     uid: u32,
 ) -> anyhow::Result<()> {
     let meta = std::fs::symlink_metadata(study_root)?;
@@ -512,7 +521,20 @@ fn fault_fixtures(
         now,
         crate::autotune::research::fault_matrix::fault_fixtures::runner_from_log(&log),
     )?;
-    println!("{}", serde_json::to_string_pretty(&cases)?);
+    let Some(physical) = physical_cases else {
+        println!("{}", serde_json::to_string_pretty(&cases)?);
+        return Ok(());
+    };
+    let physical: Vec<crate::autotune::research::fault_matrix::FaultCase> =
+        serde_json::from_slice(&std::fs::read(physical)?)?;
+    let receipt = crate::autotune::research::fault_matrix::fault_fixtures::assemble(
+        study_root,
+        binary_sha256,
+        now,
+        cases,
+        physical,
+    )?;
+    println!("{}", serde_json::to_string_pretty(&receipt)?);
     Ok(())
 }
 

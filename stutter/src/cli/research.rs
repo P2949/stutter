@@ -81,6 +81,10 @@ enum ResearchCommand {
         /// SHA-256 of the Stutter binary the fixtures ran against.
         #[arg(long)]
         binary_sha256: String,
+        /// The operator's physical cases (a JSON list of fault cases whose evidence files are already in `fault-evidence/`); when
+        /// given, the full matrix receipt is assembled, checked and written.
+        #[arg(long)]
+        physical_cases: Option<PathBuf>,
     },
     /// Record what the Stutter units actually run (binary hash, active state) against an expected
     /// pin, as a receipt in the study directory. Read-only and local.
@@ -147,10 +151,12 @@ impl From<ResearchArgs> for ResearchClientInput {
                 study_root,
                 test_log,
                 binary_sha256,
+                physical_cases,
             } => ResearchClientAction::FaultFixtures {
                 study_root,
                 test_log,
                 binary_sha256,
+                physical_cases,
             },
             ResearchCommand::DeployReceipt {
                 study_root,

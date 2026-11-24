@@ -73,6 +73,33 @@ pub fn produce(
     Ok(cases)
 }
 
+/// Join the fixture cases with the operator's physical cases into the matrix receipt, check that the receipt attests and that every
+/// case's evidence reopens (the same checks G6 makes), and only then write it beside the study as `fault-matrix-<now>.json`.
+/// Nothing is written for a matrix that would not attest.
+pub fn assemble(
+    study: &std::path::Path,
+    binary_sha256: &str,
+    now: u64,
+    fixtures: Vec<FaultCase>,
+    physical: Vec<FaultCase>,
+) -> anyhow::Result<super::FaultMatrixReceipt> {
+    let receipt = super::FaultMatrixReceipt {
+        schema: 1,
+        binary_sha256: binary_sha256.to_owned(),
+        captured_unix: now,
+        cases: fixtures.into_iter().chain(physical).collect(),
+    };
+    super::attested(&receipt, binary_sha256, now).map_err(|reason| anyhow::anyhow!(reason))?;
+    super::artifacts_verified(&receipt, study).map_err(|reason| anyhow::anyhow!(reason))?;
+    let dir = File::from(crate::syscall::open_dir_no_symlinks(study)?);
+    crate::autotune::research::report_store::write_new(
+        &dir,
+        &format!("fault-matrix-{now}.json"),
+        &serde_json::to_vec_pretty(&receipt)?,
+    )?;
+    Ok(receipt)
+}
+
 /// A runner over the text of a `cargo test` run: a fixture passed when its line ends `ok`, failed when the log says anything
 /// else about it, and is missing when the log never names it. The matching line is kept as the evidence output.
 pub fn runner_from_log(log: &str) -> impl FnMut(&str) -> Option<FixtureRun> + '_ {

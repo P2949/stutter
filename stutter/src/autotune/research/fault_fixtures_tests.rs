@@ -117,3 +117,43 @@ fn a_test_log_gives_a_pass_only_for_a_fixture_whose_own_line_says_ok() {
     assert!(!run(FIXTURE_TESTS[1].1).unwrap().passed);
     assert!(run(FIXTURE_TESTS[2].1).is_none());
 }
+
+/// The physical cases of `receipt_with`, split off from its fixture cases.
+fn physical_of(receipt: &FaultMatrixReceipt) -> Vec<FaultCase> {
+    receipt
+        .cases
+        .iter()
+        .filter(|case| case.mode == Mode::Physical)
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn the_assembled_receipt_is_checked_then_written_and_gate_g6_reads_it_back() {
+    let dir = study();
+    let me = "aa".repeat(32);
+    let fixtures = produce(&dir, &me, NOW, pass).unwrap();
+    let physical = physical_of(&receipt_with(&dir, Vec::new()));
+    let receipt = assemble(&dir, &me, NOW, fixtures, physical).unwrap();
+    assert_eq!(receipt.cases.len(), REQUIRED_CLASSES.len());
+    assert_eq!(
+        crate::autotune::research::fault_matrix::gate_status(&dir, &me, NOW),
+        Ok(())
+    );
+}
+
+#[test]
+fn a_matrix_that_would_not_attest_writes_nothing() {
+    let dir = study();
+    let me = "aa".repeat(32);
+    // A failing fixture, or a missing physical case, never becomes a receipt.
+    let failed = produce(&dir, &me, NOW, |_| None).unwrap();
+    let physical = physical_of(&receipt_with(&dir, Vec::new()));
+    assert!(assemble(&dir, &me, NOW, failed, physical.clone()).is_err());
+    let fixtures = produce(&dir, &me, NOW, pass).unwrap();
+    assert!(assemble(&dir, &me, NOW, fixtures, physical[1..].to_vec()).is_err());
+    assert_eq!(
+        crate::autotune::research::fault_matrix::gate_status(&dir, &me, NOW),
+        Err("NoFaultMatrixReceipt")
+    );
+}
