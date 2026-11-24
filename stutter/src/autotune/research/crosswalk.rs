@@ -500,8 +500,7 @@ mod tests {
                             | "5.26"
                             | "extra.boot"
                             | "5.1"
-                            | "5.3"
-                            | "5.4"
+                            | "5.7"
                     ) {
                         "ProducedSignalAbsentOrBelowItsFloor"
                     } else {

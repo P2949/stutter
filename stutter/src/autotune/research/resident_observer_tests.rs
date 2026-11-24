@@ -410,5 +410,5 @@ fn an_owner_state_counts_only_when_the_bus_gave_a_definite_answer() {
     let count = |name: &str| window.host_samples.get(name).copied();
     assert_eq!(count("owner_gamemode_samples"), Some(3));
     assert_eq!(count("owner_scx_loader_samples"), Some(3));
-    assert_eq!(count("owner_power_profile_samples"), Some(0));
+    assert_eq!(count("owner_power_profile_samples"), None);
 }

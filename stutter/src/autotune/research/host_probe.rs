@@ -89,7 +89,8 @@ pub fn readings(root: &Path) -> HostReadings {
         ),
         (
             "resctrl_absent_samples",
-            flags.is_some_and(|line| !line.split_whitespace().any(|flag| flag == "rdt_a")),
+            flags.is_some_and(|line| !line.split_whitespace().any(|flag| flag == "rdt_a"))
+                && !root.join("sys/fs/resctrl/schemata").exists(),
         ),
         ("boot_cmdline_samples", nonempty(root, "proc/cmdline")),
         (

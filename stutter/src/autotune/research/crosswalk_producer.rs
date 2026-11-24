@@ -26,7 +26,7 @@ use super::{
 };
 
 /// The dossiers produced, with the provider that fed each and the raw counter that shows it.
-const PRODUCED: [(&str, &str, &str); 16] = [
+const PRODUCED: [(&str, &str, &str); 15] = [
     ("5.22", "psi-interval-records", "psi_samples"),
     ("5.13", "gpu-sample-events", "gpu_samples"),
     ("5.17", "cpu-frequency-events", "cpu_freq_samples"),
@@ -42,14 +42,9 @@ const PRODUCED: [(&str, &str, &str); 16] = [
     ("extra.boot", "host-kernel-cmdline", "boot_cmdline_samples"),
     ("5.1", "gamemode-dbus-owner-state", "owner_gamemode_samples"),
     (
-        "5.3",
+        "5.7",
         "scx-loader-dbus-owner-state",
         "owner_scx_loader_samples",
-    ),
-    (
-        "5.4",
-        "power-profiles-dbus-owner-state",
-        "owner_power_profile_samples",
     ),
 ];
 

@@ -90,6 +90,15 @@ fn game(environment: &[(&str, &str)]) -> (std::process::Child, SessionProcess) {
         .envs(environment.iter().copied())
         .spawn()
         .unwrap();
+    // Until the child has exec'd, /proc shows the environment it inherited from this process, not the one it was given.
+    for _ in 0..500 {
+        let comm =
+            std::fs::read_to_string(format!("/proc/{}/comm", child.id())).unwrap_or_default();
+        if comm.trim() == "sleep" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
     let start_ticks = crate::process_tree::process_starttime_at(Path::new("/proc"), child.id())
         .expect("the stand-in game is alive");
     let process = SessionProcess {

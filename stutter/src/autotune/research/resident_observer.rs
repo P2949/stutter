@@ -292,10 +292,6 @@ impl ResidentObserver {
                 "owner_scx_loader_samples",
                 !matches!(states.scx_loader_scheduler, Exact::Unreachable(_)),
             ),
-            (
-                "owner_power_profile_samples",
-                !matches!(states.power_profile, Exact::Unreachable(_)),
-            ),
         ];
         for (name, counted) in answered {
             let slot = running.host.entry(name.to_owned()).or_insert(0);
