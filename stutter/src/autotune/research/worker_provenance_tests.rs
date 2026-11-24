@@ -196,3 +196,58 @@ fn an_altered_dropped_or_lossy_export_is_refused_before_anything_is_joined() {
         Err("WorkerTransactionsUnreadable")
     );
 }
+
+/// The controller's transaction is the worker's only when the token the controller kept names it.
+#[test]
+fn the_controllers_token_digest_must_be_the_transaction_the_worker_applied_on_that_process() {
+    use crate::autotune::research::evidence_producers::{
+        controller_journal_record, worker_transaction_of,
+    };
+    let receipts = json!([
+        { "transaction": "exp-0", "pid": 100, "start_ticks": 50, "permitted_unix": 1_100, "settled_unix": 1_105 },
+        { "transaction": "exp-1", "pid": 101, "start_ticks": 51, "permitted_unix": 2_100, "settled_unix": 2_105 },
+    ]);
+    let journal = |names: [&str; 2]| {
+        serde_json::to_vec(&json!([
+            controller_journal_record(names[0], ACTION, (100, 50), (1_100, 1_101)),
+            controller_journal_record(names[1], ACTION, (101, 51), (2_100, 2_101)),
+        ]))
+        .unwrap()
+    };
+    let worker = |names: [&str; 2]| {
+        let mut export = WorkerExport::default();
+        for (slot, name) in names.iter().enumerate() {
+            let base = 1_100 + slot as u64 * 1_000;
+            export.transaction(
+                &worker_transaction_of(name),
+                ACTION,
+                (100 + slot as u32, 50 + slot as u64),
+                (base, base + 1, base + 4),
+            );
+        }
+        serde_json::to_vec(export.records()).unwrap()
+    };
+    let bind = |j: &[u8], w: &[u8]| bind_controller_tokens(j, &receipts, w);
+    let same = ["exp-0", "exp-1"];
+    assert_eq!(bind(&journal(same), &worker(same)), Ok(()));
+    // The worker applied a different transaction on the very process: process identity alone would have passed.
+    assert_eq!(
+        bind(&journal(same), &worker(["exp-0", "exp-other"])),
+        Err("ControllerTransactionIsNotTheWorkers")
+    );
+    // Two receipts cannot share one worker transaction.
+    assert_eq!(
+        bind(&journal(["exp-0", "exp-0"]), &worker(["exp-0", "exp-0"])),
+        Err("ControllerTransactionIsNotTheWorkers")
+    );
+    // A journal that kept no token has nothing to bind.
+    let tokenless = serde_json::to_vec(&json!([
+        { "boot_id": "b", "schema_version": 1, "state": "reverted", "experiment_id": "exp-0", "action_id": ACTION },
+        controller_journal_record("exp-1", ACTION, (101, 51), (2_100, 2_101)),
+    ]))
+    .unwrap();
+    assert_eq!(
+        bind(&tokenless, &worker(same)),
+        Err("ControllerTransactionIsNotTheWorkers")
+    );
+}

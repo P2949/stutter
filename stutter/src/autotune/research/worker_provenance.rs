@@ -190,6 +190,64 @@ pub fn verify(
     Ok(())
 }
 
+/// Whether the controller's transaction for every receipt is the very transaction the worker issued: the digest of the
+/// rollback token the controller's journal kept is the transaction the worker's export applied on the receipt's own
+/// process, inside the receipt's window, and no two receipts share one. Process identity alone could pair a receipt with
+/// a different transaction on the same process; the token digest is what the worker itself named.
+pub fn bind_controller_tokens(
+    journal: &[u8],
+    receipts: &Value,
+    worker: &[u8],
+) -> Result<(), &'static str> {
+    use crate::autotune::controller_journal::ControllerJournalRecord;
+    const REFUSED: &str = "ControllerTransactionIsNotTheWorkers";
+    let journal: Vec<ControllerJournalRecord> =
+        serde_json::from_slice(journal).map_err(|_| "ControllerJournalUnreadable")?;
+    let worker: Vec<Value> =
+        serde_json::from_slice(worker).map_err(|_| "WorkerTransactionsUnreadable")?;
+    let receipts = receipts.as_array().ok_or(REFUSED)?;
+    let mut digests: Vec<String> = Vec::new();
+    for receipt in receipts {
+        let (Some(name), Some(permitted), Some(settled), Some(pid), Some(start_ticks)) = (
+            receipt["transaction"].as_str(),
+            receipt["permitted_unix"].as_u64(),
+            receipt["settled_unix"].as_u64(),
+            receipt["pid"].as_u64(),
+            receipt["start_ticks"].as_u64(),
+        ) else {
+            return Err(REFUSED);
+        };
+        let token = journal
+            .iter()
+            .find(|record| {
+                record
+                    .experiment_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == name)
+            })
+            .and_then(|record| record.rollback_token.as_ref())
+            .ok_or(REFUSED)?;
+        let digest = crate::daemon::privilege::rollback_snapshot_digest(token);
+        let (from, to) = (
+            permitted.saturating_sub(SLACK_SECONDS),
+            settled.saturating_add(SLACK_SECONDS),
+        );
+        let applied = worker.iter().any(|record| {
+            record["transaction"].as_str() == Some(digest.as_str())
+                && record["event"] == "applied"
+                && record["success"] == true
+                && record["process"]["pid"].as_u64() == Some(pid)
+                && record["process"]["start_ticks"].as_u64() == Some(start_ticks)
+                && (from..=to).contains(&seconds(record))
+        });
+        if !applied || digests.contains(&digest) {
+            return Err(REFUSED);
+        }
+        digests.push(digest);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "worker_provenance_tests.rs"]
 mod tests;

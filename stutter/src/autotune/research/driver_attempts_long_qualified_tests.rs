@@ -522,7 +522,7 @@ fn the_runtimes_archivers_make_the_controllers_and_the_workers_accounts_that_the
                     let mut export = export.lock().unwrap();
                     let before = export.records().len();
                     export.transaction(
-                        &format!("tx-{:?}", target.pid),
+                        &crate::autotune::research::evidence_producers::worker_transaction_of(&format!("exp-{:?}", target.pid)),
                         "cpu-affinity-profile:game-main",
                         (target.pid.as_u32(), target.start_ticks),
                         (at, at + 1, at + 1),

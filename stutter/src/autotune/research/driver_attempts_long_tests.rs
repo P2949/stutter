@@ -336,7 +336,9 @@ fn run_acting(
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
             // The privileged worker's own export of the same transaction on this very process.
             worker.transaction(
-                &format!("tx-{pid:?}"),
+                &crate::autotune::research::evidence_producers::worker_transaction_of(&format!(
+                    "exp-{pid:?}"
+                )),
                 "cpu-affinity-profile:game-main",
                 (pid.as_u32(), process.start_ticks),
                 (ACTED_AT.get(), ACTED_AT.get() + 1, ACTED_AT.get() + 1),

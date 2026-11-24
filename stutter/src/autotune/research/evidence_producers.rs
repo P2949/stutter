@@ -278,10 +278,19 @@ pub fn controller_journal_record(
         "experiment_id": transaction, "action_id": action_id,
         "target_identity": format!("pid:{}:starttime:{}:active_tasks:12", process.0, process.1),
         "verify_result": "rollback_verified",
-        "rollback_token": { "kind": "cpu-affinity-restore-file", "restore_path": "restore.json", "affected_tasks": 12 },
+        "rollback_token": { "kind": "cpu-affinity-restore-file", "restore_path": format!("restore-{transaction}.json"), "affected_tasks": 12 },
         "phase_started_unix_nanos": u128::from(window_unix.0) * 1_000_000_000,
         "updated_unix_nanos": u128::from(window_unix.1) * 1_000_000_000,
     })
+}
+
+/// The transaction name the worker exports for the controller's transaction `transaction`: the digest of the very token
+/// `controller_journal_record` keeps.
+pub fn worker_transaction_of(transaction: &str) -> String {
+    let record = controller_journal_record(transaction, "", (0, 0), (0, 0));
+    serde_json::from_value(record["rollback_token"].clone())
+        .map(|token| crate::daemon::privilege::rollback_snapshot_digest(&token))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

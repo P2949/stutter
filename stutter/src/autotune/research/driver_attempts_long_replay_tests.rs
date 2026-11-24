@@ -101,7 +101,9 @@ fn the_replayed_action_evidence_needs_a_valid_receipt_on_every_treated_attempt_o
                 u32::try_from(item["pid"].as_u64().unwrap_or(0)).unwrap_or(0),
                 item["start_ticks"].as_u64().unwrap_or(0),
             );
-            let name = format!("tx-{index}");
+            let name = crate::autotune::research::evidence_producers::worker_transaction_of(
+                item["transaction"].as_str().unwrap(),
+            );
             let (permitted, applied, settled) = (
                 item["permitted_unix"].as_u64().unwrap_or(0),
                 item["applied_unix"].as_u64().unwrap_or(0),

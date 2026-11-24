@@ -106,7 +106,10 @@ impl Acting {
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
             // The worker issued, applied and restored a transaction for this very process, and exports it.
             self.worker_export.transaction(
-                &format!("tx-{:?}", process.pid),
+                &crate::autotune::research::evidence_producers::worker_transaction_of(&format!(
+                    "exp-{:?}",
+                    process.pid
+                )),
                 "cpu-affinity-profile:game-main",
                 (process.pid.as_u32(), process.start_ticks),
                 (now, now + 1, now + 1),

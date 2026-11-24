@@ -230,6 +230,7 @@ pub(super) fn action_replay(
         // And the privileged worker's own audit must show the apply and the restoration the receipts claim.
         let worker = read_private(dir, super::worker_provenance::FILE, uid).ok()?;
         super::worker_provenance::verify(&worker, action, &receipts, &processes).ok()?;
+        super::worker_provenance::bind_controller_tokens(&journal, &receipts, &worker).ok()?;
         Some(true)
     })()
     .unwrap_or(false)
