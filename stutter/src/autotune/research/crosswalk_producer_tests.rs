@@ -148,3 +148,43 @@ fn the_report_reads_the_observation_record_from_the_campaign_directory_the_produ
     let rows = record["rows"].as_array().expect("the record is found");
     assert_eq!(rows.len(), 3);
 }
+
+/// A child whose window file is present but cannot be read whole is a gap in the coverage, never silently skipped; and
+/// the evidence names the raw window file of every child it read, so a changed window breaks the observation.
+#[test]
+fn an_unreadable_child_window_file_is_an_error_and_the_evidence_names_the_files_it_read() {
+    let c = campaign();
+    child(&c, "0123456789abcdef", vec![window(50, 50, 50)]);
+    // A second child whose window file is not a list of windows.
+    let broken = c.dir.path().join("studies").join("fedcba9876543210");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::set_permissions(&broken, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let file = broken.join(WINDOWS_FILE);
+    std::fs::write(&file, b"not windows").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(produce(&c.file, c.uid, CAMPAIGN).is_err());
+    assert_eq!(
+        observed(&c),
+        None,
+        "nothing is observed from a partial read"
+    );
+    // With the broken child gone the evidence is produced and names the one raw file it read.
+    std::fs::remove_dir_all(&broken).unwrap();
+    produce(&c.file, c.uid, CAMPAIGN).unwrap();
+    let record = match newest::<Value>(c.dir.path(), "crosswalk-observations", |_| 0) {
+        Newest::Found(record) => record,
+        other => panic!("{other:?}"),
+    };
+    let digest = record["rows"][0]["evidence_sha256"].as_str().unwrap();
+    let artifact: Value = serde_json::from_slice(
+        &std::fs::read(
+            c.dir
+                .path()
+                .join(format!("crosswalk-evidence-{digest}.json")),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(artifact["sources"][0]["child"], "0123456789abcdef");
+    assert_eq!(artifact["sources"].as_array().unwrap().len(), 1);
+}

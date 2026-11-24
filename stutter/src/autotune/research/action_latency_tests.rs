@@ -85,6 +85,8 @@ fn the_production_decision_over_the_recomputed_populations_decides_keep_revert_o
             pairs: 4,
             improved: 4,
             regressed: 0,
+            no_effect: 0,
+            unresolved: 0,
             decision: Decision::Keep
         })
     );
@@ -253,4 +255,34 @@ fn each_way_a_window_can_fail_to_be_a_measurement_has_its_own_refusal() {
         "ActionLatencyForAnotherProcess",
     );
     assert_eq!(check(b"{"), Err("ActionLatencyUnreadable"));
+}
+
+/// A valid null, a change the histogram's resolution cannot decide and a regression are three different things in the
+/// result: only a benefit the data can show counts, and the other two are not folded into "neither improved nor regressed".
+#[test]
+fn a_valid_null_a_change_the_resolution_cannot_decide_and_a_regression_are_reported_apart() {
+    let counts = |off: u64, on: u64| {
+        let result = check(&record(|v| v["pairs"] = pairs(off, on))).unwrap();
+        (
+            result.improved,
+            result.regressed,
+            result.no_effect,
+            result.unresolved,
+        )
+    };
+    // The same tail on both sides: a valid measurement of no effect.
+    assert_eq!(counts(20 * MS, 20 * MS), (0, 0, 4, 0));
+    // 10 ms against 5 ms is a bucket step the data cannot resolve into a benefit.
+    assert_eq!(counts(10 * MS, 5 * MS), (0, 0, 0, 4));
+    // A worse tail is a regression, and an improvement the data can show is an improvement.
+    assert_eq!(counts(3 * MS / 2, 20 * MS), (0, 4, 0, 0));
+    assert_eq!(counts(20 * MS, 3 * MS / 2), (4, 0, 0, 0));
+    // The report carries all four counts.
+    let json = check(&record(|v| v["pairs"] = pairs(20 * MS, 20 * MS)))
+        .unwrap()
+        .to_json();
+    assert_eq!(
+        (json["no_effect"].clone(), json["unresolved"].clone()),
+        (4.into(), 0.into())
+    );
 }

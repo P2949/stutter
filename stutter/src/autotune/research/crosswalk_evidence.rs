@@ -24,11 +24,28 @@ struct Artifact {
     source_quality: String,
     start_unix: u64,
     end_unix: u64,
+    /// The raw window files the observation stands on: each child and the digest of its file.
+    sources: Vec<Source>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Source {
+    child: String,
+    sha256: String,
 }
 
 /// The file name of the evidence artifact with this digest.
 pub fn file_name(digest: &str) -> String {
     format!("crosswalk-evidence-{digest}.json")
+}
+
+/// A study directory's name: the first 16 hex of its study digest.
+fn is_child_name(text: &str) -> bool {
+    text.len() == 16
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn is_digest(text: &str) -> bool {
@@ -71,8 +88,31 @@ pub fn verified(
             || artifact.provider.len() > 64
             || !matches!(artifact.source_quality.as_str(), "direct" | "derived")
             || artifact.start_unix >= artifact.end_unix
+            || artifact.sources.is_empty()
         {
             return Err(INVALID);
+        }
+        // Every raw window file the artifact names must reopen and hash to what it says: an observation stands on the
+        // children's own immutable records, not on a claim about them.
+        let studies =
+            crate::syscall::openat_dir_nofollow(std::os::fd::AsFd::as_fd(study), "studies")
+                .map(std::fs::File::from)
+                .map_err(|_| INVALID)?;
+        for source in &artifact.sources {
+            if !is_child_name(&source.child) || !is_digest(&source.sha256) {
+                return Err(INVALID);
+            }
+            let child = crate::syscall::openat_dir_nofollow(
+                std::os::fd::AsFd::as_fd(&studies),
+                &source.child,
+            )
+            .map(std::fs::File::from)
+            .map_err(|_| INVALID)?;
+            let windows = read_private(&child, super::resident_observer::WINDOWS_FILE, uid)
+                .map_err(|_| INVALID)?;
+            if stutter_core::hash::sha256_hex(&windows) != source.sha256 {
+                return Err(INVALID);
+            }
         }
         checked.push(json!({
             "id": id, "evidence_sha256": digest,

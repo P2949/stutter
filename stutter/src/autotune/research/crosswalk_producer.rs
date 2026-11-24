@@ -45,16 +45,26 @@ pub fn produce(campaign: &File, uid: u32, campaign_sha256: &str) -> anyhow::Resu
     .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
     .collect();
     let mut windows: Vec<Value> = Vec::new();
+    // The raw window files the observations stand on, by child and digest: the evidence names each, so it can be
+    // reopened and checked against exactly what was read.
+    let mut sources: Vec<Value> = Vec::new();
     for name in names {
         let Ok(child) = crate::syscall::openat_dir_nofollow(studies.as_fd(), &name).map(File::from)
         else {
             continue;
         };
-        if let Ok(bytes) = read_private(&child, WINDOWS_FILE, uid)
-            && let Ok(Value::Array(rows)) = serde_json::from_slice::<Value>(&bytes)
-        {
-            windows.extend(rows);
-        }
+        // A child with no window file kept none (it never observed a game). One whose file is there but cannot be read
+        // whole is a gap in the coverage, never a silent skip.
+        let bytes = match read_private(&child, WINDOWS_FILE, uid) {
+            Ok(bytes) => bytes,
+            Err(error) if is_absent(&error) => continue,
+            Err(_) => anyhow::bail!("CrosswalkChildWindowsUnreadable"),
+        };
+        let Ok(Value::Array(rows)) = serde_json::from_slice::<Value>(&bytes) else {
+            anyhow::bail!("CrosswalkChildWindowsUnreadable");
+        };
+        sources.push(json!({ "child": name, "sha256": stutter_core::hash::sha256_hex(&bytes) }));
+        windows.extend(rows);
     }
     if windows.is_empty() {
         return Ok(());
@@ -85,7 +95,7 @@ pub fn produce(campaign: &File, uid: u32, campaign_sha256: &str) -> anyhow::Resu
         }
         let artifact = serde_json::to_vec(&json!({
             "schema": 1, "dossier": id, "campaign_sha256": campaign_sha256, "provider": provider,
-            "source_quality": "direct", "start_unix": start, "end_unix": end,
+            "source_quality": "direct", "start_unix": start, "end_unix": end, "sources": sources,
         }))?;
         let digest = stutter_core::hash::sha256_hex(&artifact);
         write_once(campaign, &file_name(&digest), &artifact)?;
@@ -113,6 +123,13 @@ fn write_once(dir: &File, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
         }
         Err(error) => Err(error),
     }
+}
+
+/// Whether a read failed only because the file is not there.
+fn is_absent(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
 }
 
 #[cfg(test)]

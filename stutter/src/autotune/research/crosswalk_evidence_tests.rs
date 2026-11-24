@@ -10,9 +10,21 @@ struct Study {
     uid: u32,
 }
 
+/// The raw window file of the one child the fixtures' evidence stands on.
+const WINDOWS: &[u8] = b"[{\"attempt\":0}]";
+const CHILD: &str = "0123456789abcdef";
+
 fn study() -> Study {
     let dir = tempfile::tempdir().unwrap();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let child = dir.path().join("studies").join(CHILD);
+    std::fs::create_dir_all(&child).unwrap();
+    for path in [dir.path().join("studies"), child.clone()] {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let windows = child.join(crate::autotune::research::resident_observer::WINDOWS_FILE);
+    std::fs::write(&windows, WINDOWS).unwrap();
+    std::fs::set_permissions(&windows, std::fs::Permissions::from_mode(0o600)).unwrap();
     let file = std::fs::File::open(dir.path()).unwrap();
     Study {
         dir,
@@ -25,6 +37,7 @@ fn artifact(dossier: &str) -> Value {
     json!({
         "schema": 1, "dossier": dossier, "campaign_sha256": CAMPAIGN, "provider": "psi",
         "source_quality": "direct", "start_unix": 100, "end_unix": 200,
+        "sources": [{ "child": CHILD, "sha256": stutter_core::hash::sha256_hex(WINDOWS) }],
     })
 }
 
@@ -77,6 +90,11 @@ fn an_observation_stands_only_when_its_evidence_reopens_and_matches_the_campaign
         |v| v["source_quality"] = "guessed".into(),
         |v| v["schema"] = 2.into(),
         |v| v["extra"] = 1.into(),
+        // No source, a source that is not a study directory, a digest that is not the file's, or a child that is not there.
+        |v| v["sources"] = json!([]),
+        |v| v["sources"][0]["child"] = "../etc".into(),
+        |v| v["sources"][0]["sha256"] = "cd".repeat(32).into(),
+        |v| v["sources"][0]["child"] = "fedcba9876543210".into(),
     ] {
         let mut bad = artifact("5.1");
         edit(&mut bad);
@@ -87,6 +105,18 @@ fn an_observation_stands_only_when_its_evidence_reopens_and_matches_the_campaign
             "{bad}"
         );
     }
+    // A child's raw windows altered after the observation was written no longer hash to what the evidence names.
+    let digest = store(&study, &artifact("5.1"));
+    assert!(check(&study, &record("5.1", &digest)).is_ok());
+    let windows = study
+        .dir
+        .path()
+        .join("studies")
+        .join(CHILD)
+        .join(crate::autotune::research::resident_observer::WINDOWS_FILE);
+    std::fs::write(&windows, b"[{\"attempt\":0,\"gpu_samples\":9999}]").unwrap();
+    assert_eq!(check(&study, &record("5.1", &digest)), Err(INVALID));
+    std::fs::write(&windows, WINDOWS).unwrap();
     // An artifact altered after the digest was named no longer hashes to it.
     let digest = store(&study, &artifact("5.1"));
     let path = study.dir.path().join(file_name(&digest));

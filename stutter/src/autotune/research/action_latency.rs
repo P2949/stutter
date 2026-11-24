@@ -96,6 +96,10 @@ pub struct LatencyResult {
     pub pairs: usize,
     pub improved: usize,
     pub regressed: usize,
+    /// Pairs that are valid measurements showing no effect.
+    pub no_effect: usize,
+    /// Pairs whose histogram resolution cannot decide the claimed change: not a null, and not a benefit.
+    pub unresolved: usize,
     pub decision: Decision,
 }
 
@@ -105,6 +109,7 @@ impl LatencyResult {
         serde_json::json!({
             "objective": "game_runnable_latency",
             "pairs": self.pairs, "improved": self.improved, "regressed": self.regressed,
+            "no_effect": self.no_effect, "unresolved": self.unresolved,
             "decision": match self.decision {
                 Decision::Keep => "keep",
                 Decision::Revert => "revert",
@@ -177,7 +182,8 @@ pub fn verify(
     if named != planned {
         return Err("ActionLatencyPairNotInTheSchedule");
     }
-    let (mut improved, mut regressed) = (0usize, 0usize);
+    let (mut improved, mut regressed, mut no_effect, mut unresolved) =
+        (0usize, 0usize, 0usize, 0usize);
     for pair in &record.pairs {
         for (slot, identity, window) in [
             (pair.off_slot, &pair.off_process, &pair.off),
@@ -219,7 +225,11 @@ pub fn verify(
         match replay_pair(&baseline, &candidate) {
             ExperimentResult::Improved { .. } => improved += 1,
             ExperimentResult::Regressed { .. } => regressed += 1,
-            _ => {}
+            // The comparison ran on a valid population but its histogram cannot show the change claimed.
+            ExperimentResult::Inconclusive { reason } if reason.contains("resolution") => {
+                unresolved += 1;
+            }
+            _ => no_effect += 1,
         }
     }
     let pairs = record.pairs.len();
@@ -234,6 +244,8 @@ pub fn verify(
         pairs,
         improved,
         regressed,
+        no_effect,
+        unresolved,
         decision,
     })
 }
