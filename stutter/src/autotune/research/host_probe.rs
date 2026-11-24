@@ -10,6 +10,7 @@
 //! * `damon_samples` (5.8): the DAMON admin interface reports its kdamond count;
 //! * `resctrl_absent_samples` (5.24): the CPU flags are readable and show no RDT allocation;
 //! * `io_pressure_samples` (5.26): the IO and CPU pressure files are readable.
+//! * `boot_cmdline_samples` (extra.boot): the kernel command line (where nohz_full, isolcpus and rcu_nocbs would show) is readable;
 //!
 //! The root is a parameter so the files can be a fixture's; production reads `/`. A file that is absent, unreadable or not
 //! in the expected shape counts for nothing.
@@ -90,6 +91,7 @@ pub fn readings(root: &Path) -> HostReadings {
             "resctrl_absent_samples",
             flags.is_some_and(|line| !line.split_whitespace().any(|flag| flag == "rdt_a")),
         ),
+        ("boot_cmdline_samples", nonempty(root, "proc/cmdline")),
         (
             "io_pressure_samples",
             pressure(root, "proc/pressure/io") && pressure(root, "proc/pressure/cpu"),

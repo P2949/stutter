@@ -43,6 +43,7 @@ fn host(root: &Path) {
         "sys/kernel/mm/damon/admin/kdamonds/nr_kdamonds",
         "0\n",
     );
+    put(root, "proc/cmdline", "BOOT_IMAGE=/vmlinuz root=/dev/sda1\n");
     put(
         root,
         "proc/cpuinfo",
@@ -67,7 +68,7 @@ fn each_fact_is_read_from_its_own_files_and_a_missing_or_odd_one_counts_for_noth
         panic!("{name} was not counted on a complete host")
     }));
     // Each rule fails on its own odd shape, and only that counter goes.
-    let breaks: [(&str, &str, &str); 8] = [
+    let breaks: [(&str, &str, &str); 9] = [
         (
             "single_numa_samples",
             "sys/devices/system/node/online",
@@ -92,6 +93,7 @@ fn each_fact_is_read_from_its_own_files_and_a_missing_or_odd_one_counts_for_noth
             "flags\t: fpu rdt_a\n",
         ),
         ("io_pressure_samples", "proc/pressure/cpu", "garbage\n"),
+        ("boot_cmdline_samples", "proc/cmdline", "\n"),
     ];
     for (counter, file, text) in breaks {
         host(root);
