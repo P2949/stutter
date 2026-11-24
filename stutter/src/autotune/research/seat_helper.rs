@@ -7,11 +7,19 @@
 //! * it reads the stream record pair by record pair and injects only what `decode` accepts (a key press or release of a
 //!   key a route may use); anything else stops it;
 //! * it tracks every key it holds down, and on end of stream, a refused event or a failed injection it releases every one
-//!   of them, so the session never ends with a key stuck down, and it says whether every release was accepted.
+//!   of them, so the session never ends with a key stuck down, and it says whether every release was accepted;
+//! * it acknowledges each key transition it injected, so the sender knows a write was delivered and not merely read.
 
-use std::{collections::BTreeSet, io::Read};
+use std::{
+    collections::BTreeSet,
+    io::{Read, Write},
+};
 
-use super::{EVENT_BYTES, Key, isolated_seat::IsolatedSeat, seat_socket_sink::decode};
+use super::{
+    EVENT_BYTES, Key,
+    isolated_seat::IsolatedSeat,
+    seat_socket_sink::{ACK, decode},
+};
 
 /// Whatever turns a key transition into a real key event in the isolated session.
 pub trait Injector {
@@ -64,8 +72,8 @@ impl<I: Injector> SeatHelper<I> {
         clean
     }
 
-    /// Serve one connection until its end, injecting each decoded transition.
-    pub fn serve(&mut self, stream: &mut impl Read) -> Served {
+    /// Serve one connection until its end, injecting each decoded transition and acknowledging it on `acks`.
+    pub fn serve(&mut self, stream: &mut impl Read, acks: &mut impl Write) -> Served {
         let mut injected = 0usize;
         let mut stopped = None;
         let mut record = [0u8; 2 * EVENT_BYTES];
@@ -105,6 +113,11 @@ impl<I: Injector> SeatHelper<I> {
                     self.held.remove(&key.code());
                 }
                 injected += 1;
+                // Acknowledged only after the transition was injected.
+                if acks.write_all(&[ACK]).and_then(|()| acks.flush()).is_err() {
+                    stopped = Some("SinkAckFailed");
+                    break 'stream;
+                }
             }
         }
         let all_released = self.release_all();

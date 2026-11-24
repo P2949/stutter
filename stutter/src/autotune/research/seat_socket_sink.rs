@@ -18,8 +18,12 @@ use std::{
 
 use super::{EVENT_BYTES, EventSink, isolated_seat::BoundSink};
 
-/// A write that takes longer than this is a failed delivery.
+/// A write that takes longer than this is a failed delivery, and so is an acknowledgement that does not come in time.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// What the helper sends back for each key transition it injected. A write is delivered only when every transition in it
+/// was acknowledged: a helper that read the bytes and injected nothing, or went away, is a failed delivery.
+pub const ACK: u8 = 0x06;
 
 /// Events carried to the helper in the isolated session.
 pub struct SeatSocketSink {
@@ -51,6 +55,9 @@ impl SeatSocketSink {
         stream
             .set_write_timeout(Some(WRITE_TIMEOUT))
             .map_err(|_| "SinkSocketRefused")?;
+        stream
+            .set_read_timeout(Some(WRITE_TIMEOUT))
+            .map_err(|_| "SinkSocketRefused")?;
         Ok(Self {
             stream,
             display: display.to_owned(),
@@ -67,7 +74,15 @@ impl EventSink for SeatSocketSink {
         self.stream
             .write_all(events)
             .and_then(|()| self.stream.flush())
-            .map_err(|_| "SinkWriteFailed")
+            .map_err(|_| "SinkWriteFailed")?;
+        // One acknowledgement per key transition (a key event and its report): the helper says it injected each.
+        let mut acks = vec![0u8; events.len() / (2 * EVENT_BYTES)];
+        std::io::Read::read_exact(&mut self.stream, &mut acks)
+            .map_err(|_| "SinkDeliveryUnacknowledged")?;
+        if acks.iter().any(|byte| *byte != ACK) {
+            return Err("SinkDeliveryUnacknowledged");
+        }
+        Ok(())
     }
 }
 

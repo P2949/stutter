@@ -88,6 +88,18 @@ fn a_route_reaches_the_helper_only_through_an_attested_seat_whole_and_a_dead_hel
     // The first connection was the refused sink's; the helper of the real one is the second.
     let (_refused, _) = listener.accept().unwrap();
     let (mut helper, _) = listener.accept().unwrap();
+    // The helper reads each key transition and acknowledges it, as the real one does after injecting it.
+    let helper = std::thread::spawn(move || {
+        let mut received = Vec::new();
+        let mut record = [0u8; 2 * EVENT_BYTES];
+        while helper.read_exact(&mut record).is_ok() {
+            received.extend_from_slice(&record);
+            if helper.write_all(&[ACK]).is_err() {
+                break;
+            }
+        }
+        received
+    });
     let script = vec![PhaseScript {
         phase: "travel".into(),
         steps: vec![
@@ -110,8 +122,7 @@ fn a_route_reaches_the_helper_only_through_an_attested_seat_whole_and_a_dead_hel
     input.stop();
     assert!(input.released());
     drop(input);
-    let mut received = Vec::new();
-    helper.read_to_end(&mut received).unwrap();
+    let received = helper.join().unwrap();
     assert!(!received.is_empty() && received.len().is_multiple_of(EVENT_BYTES));
     // A helper that went away is a failed write, reported, never silently dropped.
     let dir2 = tempfile::tempdir().unwrap();
@@ -128,6 +139,23 @@ fn a_route_reaches_the_helper_only_through_an_attested_seat_whole_and_a_dead_hel
         }
     }
     assert!(failed, "writes to a closed helper fail");
+    // A helper that reads the events and goes away without acknowledging them did not deliver them: the write fails.
+    let dir4 = tempfile::tempdir().unwrap();
+    let (path4, listener4) = socket(&dir4, 0o600);
+    let mut sink = SeatSocketSink::connect(&path4, uid, "wayland-77").unwrap();
+    let (mut silent, _) = listener4.accept().unwrap();
+    let reader = std::thread::spawn(move || {
+        let mut record = [0u8; 2 * EVENT_BYTES];
+        let _ = silent.read_exact(&mut record);
+    });
+    assert_eq!(
+        sink.write(&crate::autotune::research::scripted_input::encode_key(
+            Key::W,
+            true
+        )),
+        Err("SinkDeliveryUnacknowledged")
+    );
+    reader.join().unwrap();
     // Torn or empty writes are refused before they are sent.
     let dir3 = tempfile::tempdir().unwrap();
     let (path3, _listener3) = socket(&dir3, 0o600);

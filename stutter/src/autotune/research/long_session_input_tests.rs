@@ -1,5 +1,5 @@
 use std::{
-    io::Read,
+    io::{Read, Write},
     os::unix::{fs::PermissionsExt, net::UnixListener},
     sync::{
         Arc,
@@ -11,7 +11,7 @@ use super::*;
 use crate::autotune::research::{
     long_receipt::{LongProgress, LongSessionDriver},
     long_session::LongWorkUnit,
-    scripted_input::EVENT_BYTES,
+    scripted_input::{EVENT_BYTES, seat_socket_sink::ACK},
 };
 
 fn uid() -> u32 {
@@ -68,7 +68,14 @@ impl Rig {
         std::thread::spawn(move || {
             let mut received = Vec::new();
             if let Ok((mut stream, _)) = listener.accept() {
-                let _ = stream.read_to_end(&mut received);
+                // Each key transition is acknowledged, as the real helper does after injecting it.
+                let mut record = [0u8; 2 * EVENT_BYTES];
+                while stream.read_exact(&mut record).is_ok() {
+                    received.extend_from_slice(&record);
+                    if stream.write_all(&[ACK]).is_err() {
+                        break;
+                    }
+                }
             }
             received
         })

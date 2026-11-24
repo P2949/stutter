@@ -143,7 +143,7 @@ fn a_device_on_the_isolated_seat_receives_whole_events_through_the_helper() {
     route.extend_from_slice(&encode_key(Key::W, true));
     route.extend_from_slice(&encode_key(Key::W, false));
     route.extend_from_slice(&encode_key(Key::E, true));
-    let served = helper.serve(&mut std::io::Cursor::new(route));
+    let served = helper.serve(&mut std::io::Cursor::new(route), &mut Vec::new());
     assert_eq!(
         (served.injected, served.stopped, served.all_released),
         (3, None, true)

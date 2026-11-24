@@ -59,7 +59,7 @@ fn a_route_is_injected_in_order_and_a_clean_end_leaves_nothing_down() {
         (Key::E, true),
         (Key::E, false),
     ]);
-    let served = helper.serve(&mut Cursor::new(bytes));
+    let served = helper.serve(&mut Cursor::new(bytes), &mut Vec::new());
     assert_eq!(
         served,
         Served {
@@ -76,7 +76,7 @@ fn a_connection_that_ends_while_keys_are_down_releases_every_one_of_them() {
     // The route pressed two keys and the connection ended (or was cut) before it released them.
     let mut helper = SeatHelper::new(Keyboard::default(), &seat());
     let bytes = stream(&[(Key::W, true), (Key::LeftShift, true)]);
-    let served = helper.serve(&mut Cursor::new(bytes));
+    let served = helper.serve(&mut Cursor::new(bytes), &mut Vec::new());
     assert_eq!(
         (served.injected, served.stopped, served.all_released),
         (2, None, true)
@@ -94,7 +94,7 @@ fn a_connection_that_ends_while_keys_are_down_releases_every_one_of_them() {
     let mut helper = SeatHelper::new(Keyboard::default(), &seat());
     let mut bytes = stream(&[(Key::W, true)]);
     bytes.extend_from_slice(&stream(&[(Key::A, true)])[..10]);
-    let served = helper.serve(&mut Cursor::new(bytes));
+    let served = helper.serve(&mut Cursor::new(bytes), &mut Vec::new());
     assert_eq!(
         (served.injected, served.stopped, served.all_released),
         (1, Some("SinkStreamTorn"), true)
@@ -111,7 +111,7 @@ fn an_event_a_route_could_not_send_or_a_failed_injection_stops_it_and_a_refused_
     let mut other = stream(&[(Key::A, true)]);
     other[18..20].copy_from_slice(&200u16.to_le_bytes());
     bytes.extend_from_slice(&other);
-    let served = helper.serve(&mut Cursor::new(bytes));
+    let served = helper.serve(&mut Cursor::new(bytes), &mut Vec::new());
     assert_eq!(
         (served.injected, served.stopped, served.all_released),
         (1, Some("SinkEventRefused"), true)
@@ -125,7 +125,10 @@ fn an_event_a_route_could_not_send_or_a_failed_injection_stops_it_and_a_refused_
         },
         &seat(),
     );
-    let served = helper.serve(&mut Cursor::new(stream(&[(Key::W, true), (Key::E, true)])));
+    let served = helper.serve(
+        &mut Cursor::new(stream(&[(Key::W, true), (Key::E, true)])),
+        &mut Vec::new(),
+    );
     assert_eq!(served.stopped, Some("InjectionFailed"));
     // A release the device will not accept is owed and reported, never claimed done.
     let mut helper = SeatHelper::new(
@@ -135,6 +138,36 @@ fn an_event_a_route_could_not_send_or_a_failed_injection_stops_it_and_a_refused_
         },
         &seat(),
     );
-    let served = helper.serve(&mut Cursor::new(stream(&[(Key::W, true)])));
+    let served = helper.serve(&mut Cursor::new(stream(&[(Key::W, true)])), &mut Vec::new());
     assert_eq!((served.stopped, served.all_released), (None, false));
+}
+
+/// The helper acknowledges each key transition it injected and none it did not: the sender can tell a delivered write from
+/// one that was only read.
+#[test]
+fn the_helper_acknowledges_exactly_the_transitions_it_injected() {
+    let mut helper = SeatHelper::new(Keyboard::default(), &seat());
+    let mut acks = Vec::new();
+    let served = helper.serve(
+        &mut Cursor::new(stream(&[(Key::W, true), (Key::W, false), (Key::E, true)])),
+        &mut acks,
+    );
+    assert_eq!((served.injected, served.stopped), (3, None));
+    assert_eq!(
+        acks,
+        [super::super::seat_socket_sink::ACK; 3],
+        "one acknowledgement per injected transition"
+    );
+    // A transition the device refuses is not acknowledged.
+    let mut refusing = SeatHelper::new(
+        Keyboard {
+            refuse_after: Some(0),
+            ..Default::default()
+        },
+        &seat(),
+    );
+    let mut none = Vec::new();
+    let served = refusing.serve(&mut Cursor::new(stream(&[(Key::W, true)])), &mut none);
+    assert_eq!(served.stopped, Some("InjectionFailed"));
+    assert!(none.is_empty());
 }
