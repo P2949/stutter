@@ -6,9 +6,9 @@
 //!   later. A read-only tap on its durable writes (`set_journal_tap`) keeps the last record seen for each transaction
 //!   as it is written; the tap cannot change or veto a write.
 //! * The worker's research export is an append-only, hash-chained JSON-lines file in the worker's runtime directory
-//! (`daemon::privilege::research_export`). Its lines are read whole: a line that cannot be parsed is an error, never
-//! skipped (only an unterminated last line, a write in progress, is set aside), and what is kept is the contiguous run
-//! of the chain that covers the study's attempts, so the replay can tell a complete history from a gap.
+//!   (`daemon::privilege::research_export`). Its lines are read whole: a line that cannot be parsed is an error, never
+//!   skipped (only an unterminated last line, a write in progress, is set aside), and what is kept is the contiguous run
+//!   of the chain that covers the study's attempts, so the replay can tell a complete history from a gap.
 
 use std::{
     path::Path,

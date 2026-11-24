@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use super::*;
 use crate::autotune::controller_journal::{
     ControllerJournalRecord, ControllerJournalState, write_controller_journal_record,
