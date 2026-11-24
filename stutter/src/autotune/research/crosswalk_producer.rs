@@ -26,7 +26,7 @@ use super::{
 };
 
 /// The dossiers produced, with the provider that fed each and the raw counter that shows it.
-const PRODUCED: [(&str, &str, &str); 15] = [
+const PRODUCED: [(&str, &str, &str); 19] = [
     ("5.22", "psi-interval-records", "psi_samples"),
     ("5.13", "gpu-sample-events", "gpu_samples"),
     ("5.17", "cpu-frequency-events", "cpu_freq_samples"),
@@ -46,6 +46,14 @@ const PRODUCED: [(&str, &str, &str); 15] = [
         "scx-loader-dbus-owner-state",
         "owner_scx_loader_samples",
     ),
+    ("5.2", "process-probe-ananicy", "owner_ananicy_samples"),
+    (
+        "5.3",
+        "process-probe-system76-scheduler",
+        "owner_system76_samples",
+    ),
+    ("5.4", "process-probe-tuned", "owner_tuned_samples"),
+    ("5.5", "process-probe-bpftune", "owner_bpftune_samples"),
 ];
 
 /// Whether the resident runtime produces observation evidence for this dossier at all.

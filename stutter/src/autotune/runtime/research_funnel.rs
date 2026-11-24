@@ -307,8 +307,13 @@ fn spawn_owner_sampler(resident: &crate::autotune::research::resident_observer::
                     .is_ok_and(|observer| observer.is_observing());
                 if observing {
                     let states = crate::integrations::exact::ExactOwnerStates::read();
+                    let report = crate::integrations::probe(
+                        std::path::Path::new("/proc"),
+                        std::path::Path::new("/sys"),
+                    );
                     if let Ok(mut observer) = resident.lock() {
                         observer.observe_owner_states(&states);
+                        observer.observe_owner_report(&report);
                     }
                 }
                 drop(resident);

@@ -299,6 +299,24 @@ impl ResidentObserver {
         }
     }
 
+    /// One look at which known tuning daemons run (the process probe the controller already uses): counted for a tool when
+    /// `/proc` was readable, so the answer 'running' or 'not running' is definite, never when the state is unknown.
+    pub fn observe_owner_report(&mut self, report: &crate::integrations::OwnerReport) {
+        use crate::integrations::{Daemon, KnownOwner};
+        let Some(running) = self.running.as_mut() else {
+            return;
+        };
+        for (name, owner) in [
+            ("owner_ananicy_samples", KnownOwner::AnanicyCpp),
+            ("owner_system76_samples", KnownOwner::System76Scheduler),
+            ("owner_tuned_samples", KnownOwner::Tuned),
+            ("owner_bpftune_samples", KnownOwner::Bpftune),
+        ] {
+            let slot = running.host.entry(name.to_owned()).or_insert(0);
+            *slot = slot.saturating_add(u64::from(report.daemon(owner) != Daemon::Unknown));
+        }
+    }
+
     /// A planning decision the runtime just emitted about `target_root_pid`: one evaluation of the process, and which
     /// authorized actions it offered (eligible, or the one it selected).
     pub fn observe_decision(

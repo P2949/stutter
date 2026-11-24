@@ -412,3 +412,27 @@ fn an_owner_state_counts_only_when_the_bus_gave_a_definite_answer() {
     assert_eq!(count("owner_scx_loader_samples"), Some(3));
     assert_eq!(count("owner_power_profile_samples"), None);
 }
+
+/// A tuning daemon's state counts once per look when `/proc` could be read, whether the daemon runs or not.
+#[test]
+fn a_daemon_probe_counts_only_when_the_process_table_was_readable() {
+    use crate::integrations::{Daemon, KnownOwner, OwnerReport, SchedExt};
+    let mut observer = ResidentObserver::default();
+    observer.arm(target(), Some(0), 1_010);
+    let report = |state: Daemon| OwnerReport {
+        sched_ext: SchedExt::Disabled,
+        daemons: [
+            (KnownOwner::AnanicyCpp, state),
+            (KnownOwner::Tuned, Daemon::Running),
+        ]
+        .into(),
+    };
+    observer.observe_owner_report(&report(Daemon::NotRunning));
+    observer.observe_owner_report(&report(Daemon::Unknown));
+    let window = observer.freeze(1_090).remove(0);
+    let count = |name: &str| window.host_samples.get(name).copied();
+    assert_eq!(count("owner_ananicy_samples"), Some(1));
+    assert_eq!(count("owner_tuned_samples"), Some(2));
+    // A daemon the report never names is unknown, so it never counts.
+    assert_eq!(count("owner_bpftune_samples"), Some(0));
+}
