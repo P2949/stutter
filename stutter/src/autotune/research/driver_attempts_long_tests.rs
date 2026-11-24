@@ -491,6 +491,21 @@ fn a_study_in_which_the_action_was_never_applied_is_a_replayable_justified_abste
     )
     .unwrap();
     std::fs::set_permissions(&planner, std::fs::Permissions::from_mode(0o600)).unwrap();
+    // The raw windows the observation is checked against.
+    let raw: Vec<_> = (0..8u32)
+        .map(|slot| {
+            let process = attempt_process(slot);
+            super::latency_fixtures::raw_planner_window(
+                (process.pid, process.start_ticks, process.uid),
+                slot,
+                5_010,
+                6_190,
+            )
+        })
+        .collect();
+    let windows = study_path.join(crate::autotune::research::resident_observer::WINDOWS_FILE);
+    std::fs::write(&windows, serde_json::to_vec(&raw).unwrap()).unwrap();
+    std::fs::set_permissions(&windows, std::fs::Permissions::from_mode(0o600)).unwrap();
     // No `act`: the controller saw nothing to do for the whole study.
     let outcome = run_to_end(&mut runner, &study);
     assert_eq!(outcome.stage_evidence, Some(false));

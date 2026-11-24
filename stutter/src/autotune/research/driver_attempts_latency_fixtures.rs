@@ -91,3 +91,21 @@ pub(super) fn fixture_window(
     observer.end_attempt(ended - 10);
     observer.freeze(ended - 10).remove(0)
 }
+
+/// One attempt's raw window as the resident runtime keeps it, for a study in which the planner evaluated the game 600 times
+/// and never offered the action: the counters the sealed planner observation is checked against.
+pub(super) fn raw_planner_window(
+    process: (stutter_core::ids::Pid, u64, u32),
+    attempt: u32,
+    started: u64,
+    ended: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "attempt": attempt, "cgroup": "", "pid": process.0, "start_ticks": process.1, "uid": process.2,
+        "started_unix": started, "ended_unix": ended, "histogram": [], "max_ns": 0,
+        "lost_events": 0, "invalid_intervals": 0, "target_changed": false, "epochs": [],
+        "epochs_truncated": false, "cpu_samples": 600, "gpu_samples": 600, "cpu_freq_samples": 600,
+        "psi_samples": 600, "unattributed_intervals": 0, "evaluations": 600, "denied_evaluations": 0,
+        "affinity_candidates": 0, "cgroup_candidates": 0,
+    })
+}

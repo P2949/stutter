@@ -6,6 +6,7 @@
 //! nothing here fabricates one.
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use super::{ResearchAction, action_latency::IdentityRef, child_verify::AttemptProcess};
 
@@ -85,6 +86,57 @@ pub fn verify(
         }
         if entry.denied != 0 {
             return Err("PlannerDeniedTheAction");
+        }
+    }
+    Ok(())
+}
+
+/// Whether every entry of the sealed `record` is exactly what its attempt's raw window (`resident-windows.json`) counted:
+/// the evaluations, the candidates offered of the authorized action, the passes that denied it, the lost events and the
+/// source quality, over the part of the window inside the attempt. A summary that differs from its raw source, or an
+/// attempt with no raw window, is refused.
+pub fn matches_windows(
+    bytes: &[u8],
+    action: ResearchAction,
+    windows: &Value,
+    processes: &[AttemptProcess],
+) -> Result<(), &'static str> {
+    const WHY: &str = "PlannerObservationNotFromTheWindows";
+    let record: Value = serde_json::from_slice(bytes).map_err(|_| WHY)?;
+    let windows = windows.as_array().ok_or(WHY)?;
+    for entry in record["attempts"].as_array().ok_or(WHY)? {
+        let process = processes
+            .iter()
+            .find(|p| p.slot as u64 == entry["slot"].as_u64().unwrap_or(u64::MAX))
+            .ok_or(WHY)?;
+        let window = windows
+            .iter()
+            .find(|w| {
+                w["attempt"].as_u64() == Some(u64::from(process.slot))
+                    && w["pid"].as_u64() == Some(u64::from(process.pid.as_u32()))
+                    && w["start_ticks"].as_u64() == Some(process.start_ticks)
+            })
+            .ok_or(WHY)?;
+        let counted = |name: &str| window[name].as_u64().ok_or(WHY);
+        let candidates = match action {
+            ResearchAction::CpuAffinityProfile => counted("affinity_candidates")?,
+            ResearchAction::CgroupPlacement => counted("cgroup_candidates")?,
+        };
+        let lost = counted("lost_events")?.saturating_add(counted("invalid_intervals")?);
+        let direct = counted("cpu_samples")? > 0 && lost == 0;
+        let (start, end) = (
+            counted("started_unix")?.max(process.started_unix),
+            counted("ended_unix")?.min(process.completed_unix),
+        );
+        let same = entry["evaluations"].as_u64() == Some(counted("evaluations")?)
+            && entry["candidates"].as_u64() == Some(candidates)
+            && entry["denied"].as_u64().unwrap_or(0) == counted("denied_evaluations")?
+            && entry["lost"].as_u64() == Some(lost)
+            && entry["source_quality"].as_str() == Some(if direct { "direct" } else { "derived" })
+            && entry["start_unix"].as_u64() == Some(start)
+            && entry["end_unix"].as_u64() == Some(end);
+        if !same {
+            return Err(WHY);
         }
     }
     Ok(())

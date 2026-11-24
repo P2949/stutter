@@ -94,6 +94,62 @@ pub fn verify(bytes: &[u8], processes: &[AttemptProcess]) -> Result<(), &'static
     Ok(())
 }
 
+/// Whether every observation of the sealed `bytes` is exactly what its attempt's raw window (`resident-windows.json`)
+/// counted: the scheduler, GPU and PSI samples, the lost samples, the runnable events and losses, whether the owners were
+/// identified, the cgroup and the interval inside the attempt. What the raw window cannot show (the renderer binding, which
+/// the attempt's telemetry receipt gives, and the runnable claim) is checked elsewhere. A summary that differs from its raw
+/// source, or an attempt with no raw window, is refused.
+pub fn matches_windows(
+    bytes: &[u8],
+    windows: &serde_json::Value,
+    processes: &[AttemptProcess],
+) -> Result<(), &'static str> {
+    const WHY: &str = "ResidentObservationNotFromTheWindows";
+    let record: Record = serde_json::from_slice(bytes).map_err(|_| WHY)?;
+    let windows = windows.as_array().ok_or(WHY)?;
+    for entry in &record.attempts {
+        let process = processes
+            .iter()
+            .find(|process| process.slot == entry.slot)
+            .ok_or(WHY)?;
+        let window = windows
+            .iter()
+            .find(|w| {
+                w["attempt"].as_u64() == Some(u64::from(entry.slot))
+                    && w["pid"].as_u64() == Some(u64::from(process.pid.as_u32()))
+                    && w["start_ticks"].as_u64() == Some(process.start_ticks)
+            })
+            .ok_or(WHY)?;
+        let counted = |name: &str| window[name].as_u64().ok_or(WHY);
+        let lost = counted("lost_events")?
+            .saturating_add(counted("invalid_intervals")?)
+            .saturating_add(u64::from(window["target_changed"] == true));
+        let events = window["histogram"]
+            .as_array()
+            .ok_or(WHY)?
+            .iter()
+            .try_fold(0u64, |total, bucket| {
+                total.checked_add(bucket["count"].as_u64()?)
+            })
+            .ok_or(WHY)?;
+        let same = entry.cpu_samples == counted("cpu_samples")?
+            && entry.gpu_samples == counted("gpu_samples")?
+            && entry.psi_samples == counted("psi_samples")?
+            && entry.lost_samples == lost
+            && entry.runnable_events == events
+            && entry.runnable_lost == lost
+            && entry.owners_identified
+                == (counted("cpu_samples")? > 0 && counted("unattributed_intervals")? == 0)
+            && window["cgroup"].as_str() == Some(entry.cgroup.as_str())
+            && entry.window_start_unix == counted("started_unix")?.max(process.started_unix)
+            && entry.window_end_unix == counted("ended_unix")?.min(process.completed_unix);
+        if !same {
+            return Err(WHY);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "resident_observation_tests.rs"]
 mod tests;

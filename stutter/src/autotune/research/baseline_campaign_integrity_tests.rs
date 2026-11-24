@@ -194,7 +194,42 @@ fn the_resident_observation_is_read_from_each_measuring_childs_own_sealed_record
         )
         .unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        // The raw windows the observation is checked against: what the runtime counted of each attempt.
+        let raw: Vec<_> = crate::autotune::research::child_verify_rules::processes_of(&items)
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "attempt": p.slot, "cgroup": "0::/app.slice", "pid": p.pid.as_u32(),
+                    "start_ticks": p.start_ticks, "uid": p.uid,
+                    "started_unix": p.started_unix, "ended_unix": p.completed_unix,
+                    "histogram": [{ "upper_bound_ns": null, "count": 5 }], "max_ns": 1,
+                    "lost_events": 0, "invalid_intervals": 0, "target_changed": false,
+                    "cpu_samples": 60, "gpu_samples": 60, "psi_samples": 60, "unattributed_intervals": 0,
+                })
+            })
+            .collect();
+        let windows = path.join(crate::autotune::research::resident_observer::WINDOWS_FILE);
+        std::fs::write(&windows, serde_json::to_vec(&raw).unwrap()).unwrap();
+        std::fs::set_permissions(&windows, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
+    assert_eq!(verify(&run).resident_summary(), Ok(()));
+    // An observation that is not what its raw windows counted is refused: one more GPU sample than the runtime saw.
+    let one = std::fs::read_dir(studies_dir(&run))
+        .unwrap()
+        .flatten()
+        .next()
+        .unwrap()
+        .path();
+    let windows_path = one.join(crate::autotune::research::resident_observer::WINDOWS_FILE);
+    let original = std::fs::read(&windows_path).unwrap();
+    let mut windows: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    windows[0]["gpu_samples"] = 59.into();
+    std::fs::write(&windows_path, serde_json::to_vec(&windows).unwrap()).unwrap();
+    assert_eq!(
+        verify(&run).resident_summary(),
+        Err("ResidentObservationNotFromTheWindows")
+    );
+    std::fs::write(&windows_path, original).unwrap();
     assert_eq!(verify(&run).resident_summary(), Ok(()));
     // One corrupt record is named, never read as absent.
     let first = std::fs::read_dir(studies_dir(&run))

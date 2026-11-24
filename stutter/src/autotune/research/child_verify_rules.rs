@@ -299,10 +299,19 @@ pub(super) fn resident_status(
     match study_file_state(studies, name, uid, super::resident_observation::FILE) {
         FileState::Absent => Err("ResidentObservationNotCollected"),
         FileState::Invalid => Err("ResidentObservationInvalid"),
-        FileState::Present(value) => super::resident_observation::verify(
-            &serde_json::to_vec(&value).map_err(|_| "ResidentObservationInvalid")?,
-            processes,
-        ),
+        FileState::Present(value) => {
+            let bytes = serde_json::to_vec(&value).map_err(|_| "ResidentObservationInvalid")?;
+            super::resident_observation::verify(&bytes, processes)?;
+            // And it is exactly what the attempts' own raw windows counted.
+            match study_file_state(studies, name, uid, super::resident_observer::WINDOWS_FILE) {
+                FileState::Present(windows) => {
+                    super::resident_observation::matches_windows(&bytes, &windows, processes)
+                }
+                FileState::Absent | FileState::Invalid => {
+                    Err("ResidentObservationNotFromTheWindows")
+                }
+            }
+        }
     }
 }
 

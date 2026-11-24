@@ -85,7 +85,8 @@ pub fn record_matches_epochs(
     let receipts = receipts.as_array().ok_or(WHY)?;
     let epochs_of = |process: &super::child_verify::AttemptProcess| -> Option<Vec<Epoch>> {
         let window = windows.iter().find(|w| {
-            w["pid"].as_u64() == Some(u64::from(process.pid.as_u32()))
+            w["attempt"].as_u64() == Some(u64::from(process.slot))
+                && w["pid"].as_u64() == Some(u64::from(process.pid.as_u32()))
                 && w["start_ticks"].as_u64() == Some(process.start_ticks)
         })?;
         if window["epochs_truncated"] == true {

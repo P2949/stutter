@@ -262,13 +262,17 @@ pub(super) fn planner_observation_valid(
     action: super::ResearchAction,
     evidence: &BTreeMap<u32, AttemptEvidenceV1>,
 ) -> bool {
+    let processes = super::child_verify_rules::processes_of(evidence);
+    // The observation must stand, and be exactly what the attempts' own raw windows counted.
+    let windows = read_private(dir, super::resident_observer::WINDOWS_FILE, uid)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
     read_private(dir, super::planner_observation::FILE, uid).is_ok_and(|bytes| {
-        super::planner_observation::verify(
-            &bytes,
-            action,
-            &super::child_verify_rules::processes_of(evidence),
-        )
-        .is_ok()
+        super::planner_observation::verify(&bytes, action, &processes).is_ok()
+            && windows.as_ref().is_some_and(|windows| {
+                super::planner_observation::matches_windows(&bytes, action, windows, &processes)
+                    .is_ok()
+            })
     })
 }
 

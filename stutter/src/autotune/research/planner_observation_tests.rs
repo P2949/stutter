@@ -111,3 +111,49 @@ fn an_attempt_in_which_the_planner_denied_the_action_is_not_a_justified_abstenti
     // A record without the field (written before it existed) reads as none denied.
     assert_eq!(check(&record(|_| {})), Ok(()));
 }
+
+/// The sealed observation is only what the attempts' own raw windows counted: an entry that differs from its window in
+/// any counter, the quality, the interval or that has no window for its attempt is refused.
+#[test]
+fn a_planner_observation_that_is_not_what_its_raw_windows_counted_is_refused() {
+    let window = |slot: u32| {
+        json!({
+            "attempt": slot, "pid": 100 + slot, "start_ticks": 50 + slot, "uid": 1000,
+            "started_unix": 1_010, "ended_unix": 2_190, "lost_events": 0, "invalid_intervals": 0,
+            "cpu_samples": 600, "evaluations": 600, "denied_evaluations": 0,
+            "affinity_candidates": 0, "cgroup_candidates": 0,
+        })
+    };
+    let windows = || Value::Array((0..8).map(window).collect());
+    let matches = |windows: &Value| {
+        matches_windows(
+            &record(|_| {}),
+            ResearchAction::CpuAffinityProfile,
+            windows,
+            &processes(),
+        )
+    };
+    assert_eq!(matches(&windows()), Ok(()));
+    let altered = |edit: &dyn Fn(&mut Value)| {
+        let mut all = windows();
+        edit(&mut all[3]);
+        matches(&all)
+    };
+    let why = Err("PlannerObservationNotFromTheWindows");
+    // One pass fewer, a candidate the record says never came, a denial, a lost event, no scheduler samples, or another
+    // interval each contradict the sealed entry.
+    assert_eq!(altered(&|w| w["evaluations"] = 599.into()), why);
+    assert_eq!(altered(&|w| w["affinity_candidates"] = 1.into()), why);
+    assert_eq!(altered(&|w| w["denied_evaluations"] = 1.into()), why);
+    assert_eq!(altered(&|w| w["lost_events"] = 1.into()), why);
+    assert_eq!(altered(&|w| w["cpu_samples"] = 0.into()), why);
+    assert_eq!(altered(&|w| w["started_unix"] = 1_100.into()), why);
+    // An attempt with no window of its own.
+    let mut fewer = windows();
+    fewer.as_array_mut().unwrap().pop();
+    assert_eq!(matches(&fewer), why);
+    // Another attempt's window does not stand in for it, even for the very same process.
+    let mut moved = windows();
+    moved[3]["attempt"] = 9.into();
+    assert_eq!(matches(&moved), why);
+}

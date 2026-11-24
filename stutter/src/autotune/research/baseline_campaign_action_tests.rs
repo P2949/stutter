@@ -160,6 +160,25 @@ impl Acting {
         )
         .unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        // The raw windows the observation is checked against: what the runtime counted of each session.
+        let raw: Vec<_> = self
+            .history
+            .iter()
+            .enumerate()
+            .map(|(slot, (process, started, ended))| {
+                super::latency_fixtures::raw_planner_window(
+                    (process.pid, process.start_ticks, process.uid),
+                    slot as u32,
+                    started + 10,
+                    ended - 10,
+                )
+            })
+            .collect();
+        let windows = self
+            .running_study()
+            .join(crate::autotune::research::resident_observer::WINDOWS_FILE);
+        std::fs::write(&windows, serde_json::to_vec(&raw).unwrap()).unwrap();
+        std::fs::set_permissions(&windows, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
 
     /// The latency record the collectors counted over the study's eight sessions, sealed beside the running study: each
